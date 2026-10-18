@@ -1,0 +1,42 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSAppleEventsUsageDescription" : {
+      "comment" : "Invite d'autorisation des AppleEvents (Finder).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oust! asks the Finder to move items to the Trash, so that “Put Back” keeps working."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oust! demande au Finder de mettre les éléments dans la corbeille du Mac, pour que « Remettre » fonctionne."
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryUsageDescription" : {
+      "comment" : "Invite d'autorisation d'accès à Photos (section Photos).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oust! reads your Photos library to find large videos, old screenshots and duplicates. Nothing leaves your Mac, and nothing is deleted without your confirmation."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oust! lit votre photothèque pour y trouver les grosses vidéos, les vieilles captures et les doublons. Rien ne quitte votre Mac, et rien n’est supprimé sans votre confirmation."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

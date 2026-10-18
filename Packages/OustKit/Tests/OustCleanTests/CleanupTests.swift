@@ -1,0 +1,328 @@
+import Darwin
+import Foundation
+import SQLite3
+import Testing
+@testable import OustClean
+import OustCore
+import OustSafety
+
+/// Un dossier temporaire à soi, avec sa propre « corbeille » et son propre
+/// historique (RULES.md, règle 8).
+final class Bench {
+    let root: URL
+    var trash: URL { root.appendingPathComponent("_corbeille") }
+    var historyFolder: URL { root.appendingPathComponent("_historique") }
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oust-clean-\(UUID().uuidString)", isDirectory: true)
+            .resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+    deinit { try? FileManager.default.removeItem(at: root) }
+
+    @discardableResult
+    func file(_ relative: String, bytes: Int = 10_000, byte: UInt8 = 1) throws -> URL {
+        let url = root.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: byte, count: bytes).write(to: url)
+        return url
+    }
+
+    func engine(processes: [ActiveProcess] = []) -> CleanupEngine {
+        let snapshot = ProcessSnapshot(processes: processes)
+        return CleanupEngine(
+            trasher: FolderTrasher(folder: trash),
+            history: HistoryStore(directory: historyFolder),
+            pathGuard: PathGuard(home: root.appendingPathComponent("maison")),
+            processes: { snapshot },
+            capacity: { _ in nil },
+            deleteSnapshots: { _ in false }
+        )
+    }
+
+    func item(_ url: URL, method: CleanupMethod = .removeNow, safety: SafetyClass = .rebuilds,
+              scope: URL? = nil) -> CleanupItem {
+        var info = stat()
+        lstat(url.path, &info)
+        let modified = Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec))
+        return CleanupItem(title: url.lastPathComponent, paths: [url], category: .projectArtifacts, owner: "test",
+                           ruleID: "artifact.node_modules", safety: safety, method: method,
+                           sizes: Sizes(private: 10_000), rebuild: .automatic,
+                           fingerprint: Fingerprint(modificationDate: modified, fileID: UInt64(info.st_ino)),
+                           activityScope: scope)
+    }
+
+    func run(_ items: [CleanupItem], processes: [ActiveProcess] = []) async -> (events: [CleanupEvent], report: CleanupReport?) {
+        var events: [CleanupEvent] = []
+        var report: CleanupReport?
+        for await event in engine(processes: processes).run(items) {
+            events.append(event)
+            if case .finished(let final) = event { report = final }
+        }
+        return (events, report)
+    }
+}
+
+@Suite("Le nettoyage fait ce qu'il dit, et rien d'autre")
+struct CleanupTests {
+
+    @Test("Le régénérable est supprimé, et l'historique le retient")
+    func removeNow() async throws {
+        let bench = try Bench()
+        let folder = bench.root.appendingPathComponent("app/node_modules")
+        try bench.file("app/node_modules/react/index.js")
+        try bench.file("app/src/main.js")
+
+        let (events, report) = await bench.run([bench.item(folder)])
+
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+        #expect(FileManager.default.fileExists(atPath: bench.root.appendingPathComponent("app/src/main.js").path))
+        #expect(report?.outcomes.map(\.result) == [.removed])
+        #expect(report?.expectedNow == 10_000)
+        let history = await HistoryStore(directory: bench.historyFolder).load()
+        #expect(history.count == 1 && history[0].result == .removed)
+        // Le récit au fil de l'eau : début, élément commencé, élément fini, bilan.
+        guard case .began(let total, _) = events.first else { Issue.record("pas de début"); return }
+        #expect(total == 1)
+        #expect(events.count == 4)
+    }
+
+    @Test("Le personnel va à la corbeille, et se restaure")
+    func trashAndRestore() async throws {
+        let bench = try Bench()
+        let film = try bench.file("Telechargements/film.mkv", bytes: 50_000)
+
+        let (_, report) = await bench.run([bench.item(film, method: .trash, safety: .review)])
+        let outcome = try #require(report?.outcomes.first)
+
+        #expect(outcome.result == .trashed)
+        #expect(!FileManager.default.fileExists(atPath: film.path))
+        #expect(report?.pendingInTrash == 10_000)
+        #expect(report?.expectedNow == 0)
+
+        let store = HistoryStore(directory: bench.historyFolder)
+        try await store.restore(outcome)
+        #expect(FileManager.default.fileExists(atPath: film.path))
+        #expect(await store.restoredIDs().contains(outcome.id))
+    }
+
+    @Test("La restauration n'écrase jamais un fichier revenu à sa place")
+    func restoreNeverOverwrites() async throws {
+        let bench = try Bench()
+        let file = try bench.file("doc.txt")
+        let (_, report) = await bench.run([bench.item(file, method: .trash, safety: .review)])
+        let outcome = try #require(report?.outcomes.first)
+        try bench.file("doc.txt", byte: 9)
+
+        await #expect(throws: HistoryStore.RestoreError.self) {
+            try await HistoryStore(directory: bench.historyFolder).restore(outcome)
+        }
+    }
+
+    @Test("Disparu, remplacé ou modifié depuis l'analyse : laissé en place")
+    func revalidation() async throws {
+        let bench = try Bench()
+        let gone = try bench.file("disparu/a.bin")
+        let goneItem = bench.item(gone)
+        try FileManager.default.removeItem(at: gone)
+
+        let replaced = try bench.file("remplace/a.bin")
+        let replacedItem = bench.item(replaced)
+        try FileManager.default.removeItem(at: replaced)
+        try bench.file("remplace/a.bin", byte: 7)
+
+        let edited = try bench.file("perso/lettre.txt")
+        var editedItem = bench.item(edited, method: .trash, safety: .review)
+        editedItem.fingerprint?.modificationDate = Date(timeIntervalSince1970: 1_000)
+
+        let (_, report) = await bench.run([goneItem, replacedItem, editedItem])
+
+        #expect(report?.outcomes.map(\.result) == [
+            .skipped(.vanished), .skipped(.changedSinceScan), .skipped(.changedSinceScan),
+        ])
+        #expect(FileManager.default.fileExists(atPath: replaced.path))
+        #expect(FileManager.default.fileExists(atPath: edited.path))
+    }
+
+    @Test("Un processus apparu depuis l'analyse protège le projet entier")
+    func newlyBusy() async throws {
+        let bench = try Bench()
+        let project = bench.root.appendingPathComponent("projet")
+        let folder = project.appendingPathComponent("apps/web/node_modules")
+        try bench.file("projet/apps/web/node_modules/x.js")
+        let agent = ActiveProcess(pid: 9, name: "codex", workingDirectory: project.path)
+
+        let (_, report) = await bench.run([bench.item(folder, scope: project)], processes: [agent])
+
+        #expect(report?.outcomes.first?.result == .skipped(.nowProtected(.activeProcess(name: "codex"))))
+        #expect(FileManager.default.fileExists(atPath: folder.path))
+    }
+
+    @Test("La garde de chemins a le dernier mot")
+    func guardRefuses() async throws {
+        let bench = try Bench()
+        let home = bench.root.appendingPathComponent("maison")
+        try bench.file("maison/Library/fichier")
+        let item = bench.item(home.appendingPathComponent("Library"))
+
+        let (_, report) = await bench.run([item])
+
+        #expect(report?.outcomes.first?.result == .skipped(.refusedByGuard))
+        #expect(FileManager.default.fileExists(atPath: home.appendingPathComponent("Library").path))
+    }
+
+    @Test("Un élément protégé n'est même pas tenté")
+    func protectedNeverAttempted() async throws {
+        let bench = try Bench()
+        let file = try bench.file("garde.bin")
+        var item = bench.item(file)
+        item.protect(.inUse)
+
+        let (_, report) = await bench.run([item])
+
+        #expect(report?.outcomes.isEmpty == true)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test("Un worktree propre part par git, sa branche reste")
+    func worktreeRemoval() async throws {
+        let bench = try Bench()
+        let repo = bench.root.appendingPathComponent("depot")
+        try bench.file("depot/README.md")
+        let env = ["GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": "/dev/null"]
+        func git(_ args: String...) async -> CommandResult {
+            await Command.run("/usr/bin/git", ["-C", repo.path] + args, environment: env)
+        }
+        _ = await git("init", "-q", "-b", "main")
+        _ = await git("add", ".")
+        _ = await git("commit", "-q", "-m", "init")
+        let worktree = repo.appendingPathComponent(".claude/worktrees/agent-x")
+        _ = await git("worktree", "add", "-q", "-b", "worktree-agent-x", worktree.path)
+
+        let item = bench.item(worktree, method: .gitWorktreeRemove(repository: repo.path), safety: .safe)
+        let (_, report) = await bench.run([item])
+
+        #expect(report?.outcomes.first?.result == .delegated)
+        #expect(!FileManager.default.fileExists(atPath: worktree.path))
+        let branches = await git("branch", "--list", "worktree-agent-x")
+        #expect(branches.output.contains("worktree-agent-x"))
+    }
+
+    @Test("Une copie remplacée par un clone garde son contenu")
+    func cloneReplacement() async throws {
+        let bench = try Bench()
+        let original = try bench.file("photos/original.jpg", bytes: 2_000_000, byte: 3)
+        let copy = try bench.file("telechargements/copie.jpg", bytes: 2_000_000, byte: 3)
+
+        let item = bench.item(copy, method: .cloneOf(original: original.path), safety: .review)
+        let (_, report) = await bench.run([item])
+
+        #expect(report?.outcomes.first?.result == .cloned)
+        #expect(FileManager.default.contentsEqual(atPath: original.path, andPath: copy.path))
+    }
+
+    @Test("L'historique Firefox part, les favoris restent")
+    func firefoxHistory() throws {
+        let bench = try Bench()
+        let path = bench.root.appendingPathComponent("places.sqlite").path
+        var db: OpaquePointer?
+        #expect(sqlite3_open(path, &db) == SQLITE_OK)
+        for statement in [
+            "CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT, visit_count INTEGER, last_visit_date INTEGER)",
+            "CREATE TABLE moz_historyvisits (id INTEGER PRIMARY KEY, place_id INTEGER)",
+            "CREATE TABLE moz_inputhistory (place_id INTEGER, input TEXT)",
+            "CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, fk INTEGER)",
+            "INSERT INTO moz_places VALUES (1, 'https://favori.fr', 3, 1), (2, 'https://visite.fr', 5, 2)",
+            "INSERT INTO moz_historyvisits VALUES (1, 1), (2, 2)",
+            "INSERT INTO moz_bookmarks VALUES (1, 1)",
+        ] { sqlite3_exec(db, statement, nil, nil, nil) }
+        sqlite3_close(db)
+
+        #expect(ToolActions.clearFirefoxHistory(database: path) == nil)
+
+        sqlite3_open(path, &db)
+        var statement: OpaquePointer?
+        sqlite3_prepare_v2(db, "SELECT url FROM moz_places", -1, &statement, nil)
+        var urls: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW { urls.append(String(cString: sqlite3_column_text(statement, 0))) }
+        sqlite3_finalize(statement)
+        sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM moz_historyvisits", -1, &statement, nil)
+        sqlite3_step(statement)
+        let visits = sqlite3_column_int(statement, 0)
+        sqlite3_finalize(statement)
+        sqlite3_close(db)
+
+        #expect(urls == ["https://favori.fr"])
+        #expect(visits == 0)
+    }
+}
+
+/// Un faux disque externe : la corbeille du disque se vide, ce qui reste
+/// protégé ne part pas (RULES.md, règle 8 : tout dans le dossier du test).
+@Suite("Nettoyer un autre disque")
+struct VolumeCleanupTests {
+
+    private func engine(_ bench: Bench, volume: URL) -> CleanupEngine {
+        CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: HistoryStore(directory: bench.historyFolder),
+                      pathGuard: PathGuard(home: bench.root.appendingPathComponent("maison"), otherVolumeRoots: [volume]),
+                      processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil }, deleteSnapshots: { _ in false })
+    }
+
+    @Test("Vider la corbeille du disque efface son contenu, jamais le dossier .Trashes/<uid>")
+    func emptiesVolumeTrash() async throws {
+        let bench = try Bench()
+        let volume = bench.root.appendingPathComponent("Disque")
+        let trash = volume.appendingPathComponent(".Trashes/\(getuid())")
+        let film = try bench.file("Disque/.Trashes/\(getuid())/vieux film.mov")
+        try bench.file("Disque/.Trashes/\(getuid())/dossier/a.txt")
+        let item = CleanupItem(id: "trash|\(trash.path)", title: "Disque", paths: [film, trash.appendingPathComponent("dossier")],
+                               category: .trash, owner: "Finder", ruleID: "trash.volume", safety: .review,
+                               method: .removeNow, rebuild: .irreversible)
+
+        var outcomes: [CleanupOutcome] = []
+        for await event in engine(bench, volume: volume).run([item]) {
+            if case .itemFinished(let outcome) = event { outcomes.append(outcome) }
+        }
+
+        #expect(outcomes.first?.result == .removed)
+        #expect(FileManager.default.fileExists(atPath: trash.path))
+        #expect((try? FileManager.default.contentsOfDirectory(atPath: trash.path))?.isEmpty == true)
+    }
+
+    @Test("La garde arrête ce qui viserait une sauvegarde, une photothèque ou une machine virtuelle")
+    func guardStopsProtected() async throws {
+        let bench = try Bench()
+        let volume = bench.root.appendingPathComponent("Disque")
+        let targets = [
+            try bench.file("Disque/Backups.backupdb/Mac/2026-10-01-101500/x.dmg"),
+            try bench.file("Disque/Famille.photoslibrary/originals/IMG.heic"),
+            try bench.file("Disque/VM/Windows.utm/Data/disk.qcow2"),
+        ]
+        let items = targets.map { bench.item($0) }
+
+        var outcomes: [CleanupOutcome] = []
+        for await event in engine(bench, volume: volume).run(items) {
+            if case .itemFinished(let outcome) = event { outcomes.append(outcome) }
+        }
+
+        #expect(outcomes.count == 3)
+        #expect(outcomes.allSatisfy { $0.result == .skipped(.refusedByGuard) })
+        #expect(targets.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
+    @Test("Le disque de démarrage n'est compté qu'une fois, sous ses deux noms")
+    func volumesCountedOnce() throws {
+        let bench = try Bench()
+        let file = try bench.file("cache/a.bin")
+        let cache = bench.item(file)
+        let snapshot = CleanupItem(title: "snapshot", paths: [], category: .snapshots, owner: "Time Machine",
+                                   ruleID: "snapshot.time_machine", safety: .review,
+                                   method: .localSnapshot(date: "2026-10-18-101500"), rebuild: .irreversible)
+        let volumes = CleanupEngine.volumes(of: [cache, snapshot])
+        #expect(volumes.count == 1)
+        #expect(CleanupEngine.available(on: volumes + volumes, capacity: { _ in
+            Capacity(total: 100, available: 10, availableForImportantUsage: 10) }) == 20)
+    }
+}

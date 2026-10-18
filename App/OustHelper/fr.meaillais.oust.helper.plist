@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Le démon privilégié d'Oust! (docs/adr/0001), enregistré par SMAppService
+  depuis les Réglages, à la demande de l'utilisateur.
+
+  Ni RunAtLoad ni KeepAlive : launchd ne le lance qu'au premier message
+  d'Oust! sur son service Mach, et il quitte de lui-même après une minute
+  sans demande.
+-->
+<dict>
+	<key>Label</key>
+	<string>fr.meaillais.oust.helper</string>
+
+	<!-- Relatif au paquet de l'application : c'est ce que SMAppService.daemon
+	     attend d'un démon livré dans l'app. -->
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/oust-helper</string>
+
+	<key>MachServices</key>
+	<dict>
+		<key>fr.meaillais.oust.helper</key>
+		<true/>
+	</dict>
+
+	<!-- Fait apparaître « Oust! » plutôt qu'un identifiant nu dans
+	     Réglages Système › Ouverture. -->
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>fr.meaillais.oust</string>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Hors bac à sable, et c'est voulu (SPEC §2) : une application confinée ne peut
+  ni parcourir le disque entier, ni supprimer un snapshot, ni vider le cache
+  d'un navigateur.
+
+  Exceptions explicites au runtime durci :
+  - envoyer des AppleEvents, pour demander au Finder de mettre à la corbeille.
+    C'est lui seul qui sait enregistrer l'emplacement d'origine dont
+    « Remettre » a besoin ; FileManager.trashItem ne le fait pas de façon fiable ;
+  - lire la photothèque par PhotoKit (section Photos). Sans cette clé, le
+    runtime durci refuse l'accès sans même montrer l'invite de macOS. Le paquet
+    .photoslibrary, lui, n'est jamais lu : tout passe par Photos.
+-->
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.personal-information.photos-library</key>
+	<true/>
+</dict>
+</plist>

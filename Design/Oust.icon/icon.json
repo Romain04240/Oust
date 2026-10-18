@@ -1,0 +1,92 @@
+{
+  "fill" : {
+    "solid" : "srgb:0.03922,0.02353,0.13333,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "couche-segment.svg",
+          "name" : "segment"
+        },
+        {
+          "glass" : false,
+          "image-name" : "couche-trainees.svg",
+          "name" : "trainees"
+        }
+      ],
+      "name" : "Segment",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.8
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : true,
+          "image-name" : "couche-anneau.svg",
+          "name" : "anneau",
+          "opacity-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : 0.7
+            }
+          ]
+        }
+      ],
+      "name" : "Anneau",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.7
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "glass" : false,
+          "hidden-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : true
+            }
+          ],
+          "image-name" : "couche-fond.svg",
+          "name" : "fond",
+          "opacity-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : 0.35
+            }
+          ]
+        }
+      ],
+      "name" : "Fond",
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0.5
+      },
+      "specular" : false,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<!-- Oust.icon, couche « traînées » : formes à plat, le verre est posé par Icon Composer -->
+<defs><linearGradient id="trainee" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#FFE45C" stop-opacity=".95"/><stop offset=".4" stop-color="#FFA51A" stop-opacity=".6"/><stop offset="1" stop-color="#FF5A1F" stop-opacity="0"/></linearGradient></defs>
+<g transform="scale(1.242718) translate(-100 -100)">
+<rect x="647.81" y="320.3" width="104" height="13" rx="6.5" fill="url(#trainee)" opacity="0.55" transform="rotate(135 647.81 326.8)"/><rect x="678.92" y="349.41" width="150" height="17" rx="8.5" fill="url(#trainee)" opacity="0.85" transform="rotate(135 678.92 357.91)"/><rect x="710.03" y="383.52" width="80" height="11" rx="5.5" fill="url(#trainee)" opacity="0.45" transform="rotate(135 710.03 389.02)"/>
+</g>
+</svg>

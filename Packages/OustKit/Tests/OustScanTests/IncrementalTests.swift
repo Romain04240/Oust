@@ -1,0 +1,240 @@
+import Darwin
+import Foundation
+import Testing
+@testable import OustScan
+
+/// La réanalyse incrémentale doit rendre exactement ce qu'un parcours complet
+/// rendrait : sinon, mieux vaut tout relire.
+@Suite("La réanalyse incrémentale")
+struct IncrementalTests {
+    let options = ScanOptions(threads: 4, leafThreshold: 100_000)
+
+    /// Ce qu'on compare d'un arbre à l'autre : chaque dossier, ses totaux et ses
+    /// feuilles, à son chemin relatif.
+    static func outline(_ root: TreeNode) -> [String] {
+        var lines: [String] = []
+        var stack: [(TreeNode, String)] = [(root, "")]
+        while let (node, path) = stack.popLast() {
+            let leaves = node.files.map { "\($0.name):\($0.sizes.allocated):\($0.logicalSize)" }.sorted()
+            lines.append("\(path)/ \(node.total.allocated) \(node.total.freeable) \(node.fileCount) "
+                         + "own=\(node.ownFileCount) small=\(node.smallFileCount) [\(leaves.joined(separator: ","))]")
+            for child in node.children { stack.append((child, path + "/" + child.name)) }
+        }
+        return lines.sorted()
+    }
+
+    /// FSEvents enregistre les événements en différé : on réessaie jusqu'à ce
+    /// que l'index rafraîchi rejoigne un parcours complet, ou qu'on abandonne.
+    ///
+    /// `byFolder` : comparer dossier par dossier. Pas pour les liens physiques,
+    /// qu'un parcours complet attribue au premier dossier rencontré, dans un
+    /// ordre qui dépend des threads : on compare alors les totaux de la racine.
+    func refreshUntilSettled(_ previous: ScanIndex, root: URL, byFolder: Bool = true,
+                             expect: (ScanIndex) -> Bool = { _ in true }) async throws -> (ScanIndex, IndexRefresh) {
+        let reference = await Scanner.scan([root], options: options).roots[0]
+        let summary = { (node: TreeNode) in
+            byFolder ? Self.outline(node) : ["\(node.total.allocated) \(node.total.freeable) \(node.fileCount)"]
+        }
+        let expected = summary(reference)
+        var last: (ScanIndex, IndexRefresh)?
+        for _ in 0..<40 {
+            let refreshed = await ScanIndex.refresh(previous, root: root, options: options)
+            last = refreshed
+            if summary(refreshed.index.root) == expected, expect(refreshed.index) { return refreshed }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        let (index, how) = try #require(last)
+        #expect(summary(index.root) == expected, "rafraîchi par \(how)")
+        return (index, how)
+    }
+
+    @Test("Un fichier ajouté entre deux analyses est vu sans tout relire")
+    func addedFile() async throws {
+        let fixture = try Fixture()
+        try fixture.file("a/un.bin", bytes: 400_000)
+        try fixture.file("b/deux.txt", bytes: 2_000)
+        let first = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        #expect(first.how == .full(.noIndex))
+
+        try fixture.file("a/trois.bin", bytes: 300_000)
+
+        let (index, how) = try await refreshUntilSettled(first.index, root: fixture.root)
+        guard case .incremental = how else {
+            Issue.record("attendu une relecture partielle, obtenu \(how)")
+            return
+        }
+        #expect(index.root.descendant(atPath: fixture.root.appendingPathComponent("a").path)?
+            .files.contains { $0.name == "trois.bin" } == true)
+        // L'index d'origine n'a pas bougé : l'Explorateur le lit peut-être encore.
+        #expect(first.index.root.descendant(atPath: fixture.root.appendingPathComponent("a").path)?
+            .files.contains { $0.name == "trois.bin" } == false)
+    }
+
+    @Test("Un fichier supprimé entre deux analyses disparaît des totaux")
+    func removedFile() async throws {
+        let fixture = try Fixture()
+        let doomed = try fixture.file("a/b/c/gros.bin", bytes: 900_000)
+        try fixture.file("a/b/petit.txt", bytes: 500)
+        let first = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        let before = first.index.root.total.allocated
+
+        try FileManager.default.removeItem(at: doomed)
+
+        let (index, how) = try await refreshUntilSettled(first.index, root: fixture.root)
+        #expect(how != .full(.historyLost))
+        #expect(index.root.total.allocated == before - Fixture.allocated(doomed) || Fixture.allocated(doomed) == 0)
+    }
+
+    @Test("Un fichier renommé ou déplacé entre deux analyses est retrouvé sous son nouveau nom")
+    func renamedFile() async throws {
+        let fixture = try Fixture()
+        let original = try fixture.file("source/rapport.bin", bytes: 600_000)
+        try fixture.directory("destination")
+        let first = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+
+        let renamed = fixture.root.appendingPathComponent("source/rapport-final.bin")
+        try FileManager.default.moveItem(at: original, to: renamed)
+        let moved = fixture.root.appendingPathComponent("destination/rapport-final.bin")
+        try FileManager.default.moveItem(at: renamed, to: moved)
+        // Et un dossier entier renommé.
+        try fixture.file("ancien/dedans.bin", bytes: 200_000)
+        let (second, _) = try await refreshUntilSettled(first.index, root: fixture.root)
+        try FileManager.default.moveItem(at: fixture.root.appendingPathComponent("ancien"),
+                                         to: fixture.root.appendingPathComponent("nouveau"))
+
+        let (index, how) = try await refreshUntilSettled(second, root: fixture.root)
+        guard case .incremental = how else {
+            Issue.record("attendu une relecture partielle, obtenu \(how)")
+            return
+        }
+        #expect(index.root.descendant(atPath: moved.deletingLastPathComponent().path)?
+            .files.map(\.name) == ["rapport-final.bin"])
+        #expect(index.root.descendant(atPath: fixture.root.appendingPathComponent("source").path)?.files.isEmpty == true)
+        #expect(index.root.descendant(atPath: fixture.root.appendingPathComponent("nouveau").path) != nil)
+        #expect(index.root.descendant(atPath: fixture.root.appendingPathComponent("ancien").path) == nil)
+    }
+
+    @Test("Un lien physique reste compté une fois quand on ne relit que son dossier")
+    func hardLinkSurvivesPartialRescan() async throws {
+        let fixture = try Fixture()
+        let original = try fixture.file("a/original.bin", bytes: 700_000)
+        try fixture.directory("b")
+        #expect(Darwin.link(original.path, fixture.root.appendingPathComponent("b/lien.bin").path) == 0)
+        let first = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        let total = first.index.root.total.allocated
+        #expect(total == Fixture.allocated(original))
+
+        // Un changement dans chacun des deux dossiers : les deux sont relus.
+        try fixture.file("a/voisin.txt", bytes: 10)
+        try fixture.file("b/voisin.txt", bytes: 10)
+
+        let (index, _) = try await refreshUntilSettled(first.index, root: fixture.root, byFolder: false) { index in
+            index.root.fileCount == 4
+        }
+        let added = Fixture.allocated(fixture.root.appendingPathComponent("a/voisin.txt"))
+            + Fixture.allocated(fixture.root.appendingPathComponent("b/voisin.txt"))
+        #expect(index.root.total.allocated == total + added)
+    }
+
+    @Test("Sans historique d'événements, on repart d'un parcours complet")
+    func lostHistoryFallsBackToFullScan() async throws {
+        let fixture = try Fixture()
+        try fixture.file("a/un.bin", bytes: 200_000)
+        let first = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        let previous = first.index
+        let forged = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
+                               eventID: previous.eventID, eventDatabase: "base-effacée",
+                               scannedAt: previous.scannedAt, fullScanAt: previous.fullScanAt,
+                               skippedVolumes: [])
+        let refreshed = await ScanIndex.refresh(forged, root: fixture.root, options: options)
+        #expect(refreshed.how == .full(.historyLost))
+
+        let old = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
+                            eventID: previous.eventID, eventDatabase: previous.eventDatabase,
+                            scannedAt: previous.scannedAt, fullScanAt: Date(timeIntervalSinceNow: -30 * 86_400),
+                            skippedVolumes: [])
+        #expect(await ScanIndex.refresh(old, root: fixture.root, options: options).how == .full(.tooOld))
+    }
+
+    @Test("Rien n'a bougé : l'arbre est rendu tel quel")
+    func unchangedTree() async throws {
+        let fixture = try Fixture()
+        try fixture.file("a/un.bin", bytes: 200_000)
+        let first = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        // Les événements de la création, antérieurs à l'analyse, peuvent encore
+        // arriver une fois ; ensuite plus rien.
+        var how = IndexRefresh.full(.noIndex)
+        var index = first.index
+        for _ in 0..<20 {
+            (index, how) = await ScanIndex.refresh(index, root: fixture.root, options: options)
+            if how == .unchanged { break }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        #expect(how == .unchanged)
+    }
+
+    @Test("L'index se relit à l'identique, et un index abîmé est ignoré")
+    func storeRoundTrip() async throws {
+        let fixture = try Fixture()
+        try fixture.file("a/un.bin", bytes: 400_000)
+        try fixture.file("a/b/deux.bin", bytes: 150_000)
+        try fixture.file("c/petit.txt", bytes: 100)
+        try fixture.file("c/package.json", bytes: 50)
+        let original = try fixture.file("d/original.bin", bytes: 300_000)
+        #expect(Darwin.link(original.path, fixture.root.appendingPathComponent("a/lien.bin").path) == 0)
+        let data = try Fixture()
+        let store = TreeStore(directory: data.root.appendingPathComponent("Index"))
+        var options = options
+        options.notableNames = ["package.json"]
+        let index = await ScanIndex.fullScan(fixture.root.path, options: options, progress: ScanProgress(), now: Date())
+
+        try store.save(index)
+        let loaded = try #require(store.load(rootPath: fixture.root.path))
+
+        #expect(Self.outline(loaded.root) == Self.outline(index.root))
+        #expect(loaded.eventID == index.eventID)
+        #expect(loaded.eventDatabase == index.eventDatabase)
+        #expect(loaded.options.describesSameTree(as: index.options))
+        #expect(loaded.ownership.links.count == index.ownership.links.count)
+        #expect(loaded.root.descendant(atPath: fixture.root.appendingPathComponent("c").path)?.notableFiles == ["package.json"])
+        #expect(store.load(rootPath: "/ailleurs") == nil)
+
+        // Tronqué : refusé plutôt que relu de travers.
+        let url = store.url(for: fixture.root.path)
+        let bytes = try Data(contentsOf: url)
+        try bytes.prefix(bytes.count / 2).write(to: url)
+        #expect(store.load(rootPath: fixture.root.path) == nil)
+    }
+
+    @Test("Une règle retrouve son dossier sous ses autres noms")
+    func aliasesResolve() async throws {
+        let root = TreeNode(name: "Data", parent: nil, fileID: 1, rootPath: "/System/Volumes/Data")
+        let users = TreeNode(name: "Users", parent: root, fileID: 2)
+        let private_ = TreeNode(name: "private", parent: root, fileID: 3)
+        let variable = TreeNode(name: "var", parent: private_, fileID: 4)
+        root.children = [users, private_]
+        private_.children = [variable]
+        #expect(root.descendant(atPath: "/Users") === users)
+        #expect(root.descendant(atPath: "/System/Volumes/Data/Users") === users)
+        #expect(root.descendant(atPath: "/var") === variable)
+        #expect(root.descendant(atPath: "/private/var") === variable)
+        #expect(root.descendant(atPath: "/Applications") == nil)
+    }
+}
+
+@Suite("Spotlight, lu par lstat")
+struct SpotlightParseTests {
+    @Test("Les dossiers, les petits fichiers et les doublons de chemin sont écartés")
+    func parse() throws {
+        let fixture = try Fixture()
+        let big = try fixture.file("gros.bin", bytes: 3_000_000)
+        let small = try fixture.file("petit.bin", bytes: 10_000)
+        let bundle = try fixture.directory("Outil.app")
+        let output = [big.path, small.path, bundle.path, big.path, "/nulle/part"].joined(separator: "\0")
+
+        let files = Spotlight.parse(Data(output.utf8), minimumBytes: 1_000_000)
+
+        #expect(files.map(\.path) == [big.path])
+        #expect(files.first?.sizes.allocated == Fixture.allocated(big))
+    }
+}

@@ -1,0 +1,139 @@
+name: Oust
+options:
+  bundleIdPrefix: fr.meaillais.oust
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "26.0"
+  # Le projet engendré est un artefact de construction : jamais modifié à la
+  # main, jamais versionné. Ce fichier est la seule source de vérité, il n'y a
+  # donc rien à fusionner.
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: true
+    ENABLE_USER_SCRIPT_SANDBOXING: true
+    # Oust! vit hors de l'App Store, et c'est voulu : une application en bac à
+    # sable ne peut ni parcourir le disque entier, ni supprimer un snapshot
+    # Time Machine, ni vider le cache d'un navigateur. Tout ce qui fait son
+    # intérêt lui serait interdit. Voir SPEC §2.
+    ENABLE_APP_SANDBOX: NO
+    # Sur tout ce qui est construit : la notarisation l'exige sur chaque
+    # exécutable du paquet (leçon de Markio, le 3 septembre).
+    ENABLE_HARDENED_RUNTIME: YES
+    # Ici, et pas dans Xcode : le projet est régénéré à chaque fichier ajouté,
+    # une équipe choisie dans l'interface disparaîtrait sans prévenir.
+    DEVELOPMENT_TEAM: "H3W3XYM2NZ"
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+  configs:
+    Release:
+      # Sans quoi Xcode injecte `get-task-allow`, que la notarisation refuse
+      # (précédent : Tacho).
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+
+packages:
+  OustKit:
+    path: Packages/OustKit
+
+targets:
+  Oust:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Oust
+      # L'icône d'Icon Composer (macOS 26) : un seul fichier en couches, d'où le
+      # système tire les variantes claire, sombre, teintée et verre. Elle vit
+      # dans Design/, sa source de vérité, et non recopiée dans l'app : une
+      # retouche de l'icône n'a pas à être reportée à la main.
+      - path: Design/Oust.icon
+        buildPhase: resources
+      # Le plist du démon privilégié, là où SMAppService le cherche
+      # (docs/adr/0001). Une phase de copie, pas un script : elle passe avant la
+      # signature de l'app, qui le scelle avec le reste du paquet.
+      - path: App/OustHelper/fr.meaillais.oust.helper.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
+      # Le monogramme, image modèle de la barre de menus (IDENTITE, « Fichiers ») :
+      # pris en place lui aussi, pour qu'une retouche n'ait rien à recopier.
+      - path: Design/oust-monogramme.svg
+        buildPhase: resources
+      # Sa version aux couleurs de l'icône, au choix dans les Réglages.
+      - path: Design/oust-monogramme-couleur.svg
+        buildPhase: resources
+    dependencies:
+      - package: OustKit
+        product: OustKit
+      # Copié dans Contents/MacOS, à côté de l'exécutable de l'app : c'est le
+      # chemin que déclare `BundleProgram` dans son plist. Re-signé à la copie
+      # par l'identité de l'app, Apple Development comme Developer ID.
+      - target: OustHelper
+        copy:
+          destination: executables
+        codeSign: true
+      # `oust`, la CLI et le serveur MCP des agents, voyage avec l'app : un lien
+      # symbolique dans ~/.local/bin suffit à l'installer (README).
+      - target: OustCLI
+        embed: true
+        copy:
+          destination: executables
+    settings:
+      base:
+        PRODUCT_NAME: Oust
+        PRODUCT_BUNDLE_IDENTIFIER: fr.meaillais.oust
+        INFOPLIST_FILE: App/Oust/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: false
+        CODE_SIGN_ENTITLEMENTS: App/Oust/Resources/Oust.entitlements
+        # Le nom du fichier .icon, sans extension. L'appiconset reste dans
+        # Assets.xcassets comme repli, mais n'est plus celui qui sert.
+        ASSETCATALOG_COMPILER_APPICON_NAME: Oust
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_EMIT_LOC_STRINGS: true
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+
+  # Le démon privilégié (docs/adr/0001) : un exécutable sans paquet, que
+  # SMAppService enregistre quand l'utilisateur le demande dans les Réglages.
+  # Il ne lie que son contrat et son service, rien d'autre d'OustKit.
+  OustHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: App/OustHelper
+        excludes: ["*.plist"]
+    dependencies:
+      - package: OustKit
+        product: OustHelperDaemon
+    settings:
+      base:
+        PRODUCT_NAME: oust-helper
+        PRODUCT_BUNDLE_IDENTIFIER: fr.meaillais.oust.helper
+        # Sans paquet, l'Info.plist est intégré au binaire : codesign en tire
+        # l'identifiant que l'application exige du démon.
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+
+  # L'exécutable des agents. Dans l'app, il s'appelle `oust-cli` : `oust`
+  # entrerait en collision avec `Oust` dans Contents/MacOS, sur un volume
+  # insensible à la casse. Il est rangé là, et non dans Contents/Helpers, pour
+  # que Foundation le voie comme faisant partie d'Oust.app et y trouve le
+  # catalogue des phrases. Ses sources sont celles de la cible `OustCLI` du
+  # paquet : un seul `main.swift`.
+  OustCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Packages/OustKit/Sources/OustCLI
+    dependencies:
+      - package: OustKit
+        product: OustAgentKit
+    settings:
+      base:
+        PRODUCT_NAME: oust-cli
+        PRODUCT_BUNDLE_IDENTIFIER: fr.meaillais.oust.cli
+        SKIP_INSTALL: YES

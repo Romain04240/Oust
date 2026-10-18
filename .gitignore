@@ -1,0 +1,32 @@
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.dSYM
+*.dSYM.zip
+*.profraw
+
+# Projet engendré par XcodeGen : project.yml est la source de vérité.
+Oust.xcodeproj/
+Oust.xcworkspace/
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Publication
+release/
+dist/
+
+# Signature : jamais dans le dépôt.
+*.p12
+*.cer
+*.mobileprovision
+secrets/
+
+# Divers
+.DS_Store
+.env
+*.xcconfig.local
