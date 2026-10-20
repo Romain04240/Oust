@@ -40,7 +40,7 @@ struct VolumeTests {
             LocalSnapshot(name: "com.apple.TimeMachine.2026-10-17-024519.local"),
         ]
         let script = try #require(VolumeService.deletionScript(for: snapshots))
-        #expect(script == "do shell script \"/usr/bin/tmutil deletelocalsnapshots 2026-10-17-014534; /usr/bin/tmutil deletelocalsnapshots 2026-10-17-024519\" with administrator privileges")
+        #expect(script == "do shell script \"/usr/bin/tmutil deletelocalsnapshots 2026-10-17-014534 && /usr/bin/tmutil deletelocalsnapshots 2026-10-17-024519\" with administrator privileges")
     }
 
     @Test("Un mélange avec un snapshot système est refusé en bloc")

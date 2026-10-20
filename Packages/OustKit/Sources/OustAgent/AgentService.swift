@@ -270,7 +270,7 @@ public struct AgentService: Sendable {
                 switch event {
                 case .itemFinished(let outcome): progress?(OutcomeReport(outcome))
                 case .finished(let final): report = final
-                case .began, .itemBegan: break
+                case .began, .itemBegan, .phaseChanged: break
                 }
             }
             return report

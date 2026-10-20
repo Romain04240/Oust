@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  macOS 26 · Apple Silicon & Intel · 100% offline · no telemetry
+  macOS 26 · Apple Silicon & Intel · offline analysis · no telemetry
 </p>
 
 ![Overview](docs/screenshots/overview.png)
@@ -36,7 +36,7 @@ Oust! is built the other way round.
   package caches, AI models, Claude Code and Codex histories and worktrees — with the
   rebuild cost of each item and automatic protection of anything with unique state
   (uncommitted changes, unpushed commits, a running process).
-- **Nothing leaves your Mac.** No network, no analytics, no third-party dependency.
+- **Local analysis.** No analytics, no file inventory sent, no third-party dependency. Manual update checks and installer downloads contact GitHub only when requested.
 
 ## Features
 
@@ -49,7 +49,10 @@ Oust! is built the other way round.
 | **Duplicates** | Byte-for-byte duplicates that are aware of APFS clones (and can be turned into clones instead of deleted), plus similar images outside the Photos library. |
 | **Photos** | Videos, screenshots, exact duplicates, similar shots and "useful" photos (receipts, labels, documents) through PhotoKit — never by opening the library package. |
 | **Cloud** | The largest, oldest and duplicate files of iCloud Drive and File Provider services, read from the placeholders on your Mac, without downloading anything. |
-| **System** | Local snapshots, the Trash, downloads, iOS backups, old Time Machine backups on a backup disk. |
+| **System** | The Mac's Trash, downloads, application caches, iOS backups and virtual machines. |
+| **Time Machine** | Local snapshots, APFS sizes, chronological review and a limited administrator component you can authorize once in macOS. |
+| **Storage advice** | A plan with suggestions below it; expand each suggestion to inspect its files and choose an action. |
+| **Move to a drive** | Copy files or folders to an external drive, verify their contents, then send originals to the Mac's Trash. An error keeps the originals. |
 | **Applications** | Uninstall with leftovers, and leftovers offered as soon as you drag an app to the Trash. |
 | **Browsers** | Cache, history and cookies per profile, kept separate; never passwords. |
 | **Disks** | One pill per mounted disk in the toolbar: free space, breakdown, rename, eject, format and partition external disks. |
@@ -114,6 +117,17 @@ Scripts/verify.sh      # lint, release build, tests, signed app build
 Scripts/run-app.sh     # build and launch a signed development copy
 ```
 
+`run-app.sh` verifies the Developer ID signature, keeps the previous app under
+`build/PreviousInstalledApp.*`, and replaces `/Applications/Oust.app` on the same
+volume before launching it. The administrator component is authorized through
+macOS; after its executable changes, Settings › Advanced offers an explicit repair.
+The app never stores an administrator password.
+
+The administrator component requires a notarized app. `run-app.sh` signs its build
+but does not notarize it; a changed build needs a new notarization ticket. To test
+the component, notarize and staple that exact build before installing or repairing
+the component.
+
 Release build, signed with Developer ID, then the disk image:
 
 ```bash
@@ -173,9 +187,11 @@ never anything needing an administrator password, and "review" items only with
 
 ## Privacy
 
-Oust! makes no network connection, collects nothing and sends nothing. The only exception is
-opt-in and per item: in the Photos preview, downloading an original from iCloud after you
-confirm it — and that download is done by Photos, not by Oust!.
+Oust! analyzes files and generates recommendations locally, with no analytics or file inventory sent.
+Update checks and installer downloads contact GitHub only when you request them. Downloads are
+verified against the publisher's Developer ID signature before opening; quit Oust! and replace
+it in Applications through Finder. In the Photos preview, downloading an original from iCloud
+also requires your confirmation and is performed by Photos.
 
 ## License
 

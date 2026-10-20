@@ -57,6 +57,11 @@ public enum CleanupMethod: Sendable, Hashable, Codable {
     /// vidée.
     case trashFromCloud
 
+    public var isSnapshot: Bool {
+        if case .localSnapshot = self { return true }
+        return false
+    }
+
     public var localizationKey: String {
         switch self {
         case .removeNow: "method.removeNow"
@@ -116,6 +121,8 @@ public struct CleanupItem: Identifiable, Sendable, Hashable {
     /// Stable d'une analyse à l'autre : la règle et le premier chemin.
     public let id: String
     /// Nom d'un dossier, d'un projet, d'un modèle : jamais traduit.
+    /// nil distingue une mesure APFS indisponible d'une taille privée réellement nulle.
+    public var measuredSnapshotBytes: Int64?
     public var title: String
     /// Ligne secondaire non traduite (chemin raccourci, version).
     public var detail: String?

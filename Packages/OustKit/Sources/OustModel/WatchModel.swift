@@ -149,7 +149,7 @@ public final class WatchModel {
     /// Le disque de démarrage est sous le seuil (la barre de menus le montre).
     public var isLow: Bool {
         guard settings.alertsLowDisk, let boot else { return false }
-        return LowDiskAlarm.isLow(available: boot.capacity.available, total: boot.capacity.total,
+        return LowDiskAlarm.isLow(available: boot.capacity.availableForImportantUsage, total: boot.capacity.total,
                                   threshold: settings.threshold)
     }
 
@@ -162,6 +162,11 @@ public final class WatchModel {
             .reduce(0) { $0 + $1.sizes.freeable }
     }
 
+    /// Le même échantillon alimente la fenêtre et la barre des menus.
+    func updateBoot(_ fresh: VolumeDescriptor?) {
+        if fresh != boot { boot = fresh }
+    }
+
     /// Relit le disque tout de suite (le panneau de la barre de menus s'ouvre).
     public func refreshDisk() async { await checkDisk() }
 
@@ -169,7 +174,7 @@ public final class WatchModel {
     /// avec son alerte : une fois par passage sous le seuil, pour chacun.
     func checkDisk() async {
         let fresh = VolumeService.bootVolume()
-        if fresh != boot { boot = fresh }
+        updateBoot(fresh)
         guard settings.alertsLowDisk else { return }
         let mounts = await timeMachineMounts()
         // Hors du fil principal : un disque qui tarde à répondre ne fige rien.
@@ -178,7 +183,7 @@ public final class WatchModel {
         for volume in (fresh.map { [$0] } ?? []) + external {
             let id = Self.identifier(of: volume)
             var alarm = state.alarms[id] ?? LowDiskAlarm()
-            let decision = alarm.observe(available: volume.capacity.available, total: volume.capacity.total,
+            let decision = alarm.observe(available: volume.capacity.availableForImportantUsage, total: volume.capacity.total,
                                          threshold: settings.threshold)
             if state.alarms[id] != alarm { state.alarms[id] = alarm }
             if decision == .alert {
@@ -187,7 +192,7 @@ public final class WatchModel {
             }
         }
         // Une pastille à la fois : celle du disque le plus plein.
-        guard let pressing = alerts.max(by: { $0.capacity.usedFraction < $1.capacity.usedFraction }) else { return }
+        guard let pressing = alerts.max(by: { $0.capacity.occupiedFraction < $1.capacity.occupiedFraction }) else { return }
         onLowDisk?(pressing)
         guard settings.alsoNotifies else { return }
         notifications = await Notifier.ensurePermission()
@@ -235,7 +240,7 @@ public final class WatchModel {
     /// l'état de l'alerte : un essai ne compte pas comme « déjà prévenu ».
     public func showAlertPreview() {
         guard let fresh = VolumeService.bootVolume() else { return }
-        if fresh != boot { boot = fresh }
+        updateBoot(fresh)
         onLowDisk?(LowDiskAlert(volumeName: fresh.name, capacity: fresh.capacity, safeTotal: safeTotal))
     }
 
@@ -395,7 +400,7 @@ public struct LowDiskAlert: Sendable, Equatable {
         self.safeTotal = isBoot ? safeTotal : nil
     }
 
-    public var free: String { Formatters.bytes(capacity.available) }
+    public var free: String { Formatters.bytes(capacity.availableForImportantUsage) }
 
     public var title: String {
         isBoot ? L10n.string("watch.alert.title") : L10n.string("watch.alert.title_volume", volumeName)

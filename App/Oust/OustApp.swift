@@ -33,6 +33,14 @@ struct OustApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button { AboutPanel.show() } label: { Text("menu.about", bundle: .oust) }
             }
+            CommandGroup(after: .appInfo) {
+                Button {
+                    model.settingsTab = .general
+                    SettingsWindow.show(.general, model: model)
+                    Task { await model.updates.check() }
+                } label: { Text("updates.check", bundle: .oust) }
+                    .disabled(model.updates.busy)
+            }
             // Les réglages ont leur fenêtre, à onglets : la scène `Settings`
             // met elle-même « Réglages… » (⌘,) dans le menu de l'app. Le
             // remplacer en ajoutait un second (vu à l'écran, 18/10/2026).

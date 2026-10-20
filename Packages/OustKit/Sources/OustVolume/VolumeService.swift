@@ -85,8 +85,13 @@ public enum VolumeService {
     /// ne montre que le volume système scellé et son snapshot de mise à jour,
     /// qu'il ne faut jamais toucher.
     public static func localSnapshots() async -> [LocalSnapshot] {
+        await readLocalSnapshots() ?? []
+    }
+
+    /// nil distingue un refus d'accès d'une liste réellement vide.
+    public static func readLocalSnapshots() async -> [LocalSnapshot]? {
         let result = await Command.run("/usr/bin/tmutil", ["listlocalsnapshots", bootDataRoot.path], timeout: 20)
-        guard result.succeeded else { return [] }
+        guard result.succeeded else { return nil }
         return parseSnapshots(result.output)
     }
 
@@ -104,28 +109,14 @@ public enum VolumeService {
     public static func deletionScript(for snapshots: [LocalSnapshot]) -> String? {
         let dates = snapshots.compactMap(\.date).filter(LocalSnapshot.isValidDate)
         guard !dates.isEmpty, dates.count == snapshots.count else { return nil }
-        let commands = dates.map { "/usr/bin/tmutil deletelocalsnapshots \($0)" }.joined(separator: "; ")
+        let commands = dates.map { "/usr/bin/tmutil deletelocalsnapshots \($0)" }.joined(separator: " && ")
         return "do shell script \"\(commands)\" with administrator privileges"
     }
 
-    /// Supprime des snapshots Time Machine : par le démon privilégié s'il est
-    /// installé et approuvé, sinon après une invite administrateur.
-    ///
-    /// Rend `true` si macOS a confirmé. L'espace ne revient pas tout de suite :
-    /// APFS le libère en arrière-plan (voir `watchReclaim`).
+    /// Compatibilité pour les clients qui ne demandent qu'un bilan global.
     public static func deleteSnapshots(_ snapshots: [LocalSnapshot]) async -> Bool {
-        guard let script = deletionScript(for: snapshots) else { return false }
-        // Les mêmes dates, déjà validées, revalidées par le démon. S'il est
-        // injoignable ou refuse la demande entière, il n'a rien fait : l'invite
-        // d'avant prend le relais, inchangée (docs/adr/0001).
-        let dates = snapshots.compactMap(\.date)
-        switch await PrivilegedHelper.deleteSnapshots(dates: dates) {
-        case .answered(let response): return response.deletedAll(dates)
-        case .timedOut: return false
-        case .unreachable: break
-        }
-        let result = await Command.run("/usr/bin/osascript", ["-e", script], timeout: 300)
-        return result.succeeded
+        let result = await deleteSnapshotResults(snapshots)
+        return !snapshots.isEmpty && snapshots.allSatisfy { result.deleted.contains($0.date ?? "") }
     }
 
     // MARK: Reprise d'espace

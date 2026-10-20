@@ -85,7 +85,7 @@ struct CleanupTests {
         // Le récit au fil de l'eau : début, élément commencé, élément fini, bilan.
         guard case .began(let total, _) = events.first else { Issue.record("pas de début"); return }
         #expect(total == 1)
-        #expect(events.count == 4)
+        #expect(events.filter { if case .itemFinished = $0 { true } else { false } }.count == 1)
     }
 
     @Test("Le personnel va à la corbeille, et se restaure")

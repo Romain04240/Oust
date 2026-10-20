@@ -63,10 +63,10 @@ extension CapsuleMessage {
         CapsuleMessage(
             symbol: alert.isBoot ? "internaldrive.fill" : "externaldrive.fill",
             label: L10n.string("watch.capsule.label", alert.volumeName),
-            figure: Formatters.compactBytes(alert.capacity.available),
+            figure: Formatters.compactBytes(alert.capacity.availableForImportantUsage),
             word: L10n.string("watch.capsule.word"),
             safeNote: alert.safeTotal.flatMap { $0 > 0 ? L10n.string("watch.capsule.safe", Formatters.compactBytes($0)) : nil },
-            gauge: CapsuleGauge(filled: alert.capacity.usedFraction),
+            gauge: CapsuleGauge(filled: alert.capacity.occupiedFraction),
             announcement: alert.title + ". " + alert.message,
             hint: L10n.string("watch.capsule.hint")
         )

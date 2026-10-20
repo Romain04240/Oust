@@ -22,14 +22,15 @@ public struct ArchiveView: View {
         SectionScaffold(.archive, subtitle: "archive.subtitle") {
             HStack(spacing: Spacing.small) {
                 Picker(selection: Binding(get: { archive.inactiveMonths }, set: { archive.inactiveMonths = $0 })) {
-                    ForEach([3, 6, 12, 24], id: \.self) { months in
-                        Text(verbatim: L10n.string("archive.months", Formatters.count(months))).tag(months)
+                    ForEach([0, 1, 3, 6, 12, 24], id: \.self) { months in
+                        Text(verbatim: months == 0 ? L10n.string("archive.all_projects")
+                             : L10n.string("archive.months", Formatters.count(months))).tag(months)
                     }
                 } label: {
                     Text("archive.inactive_for", bundle: .oust)
                 }
                 .fixedSize()
-                .disabled(archive.running == .running)
+                .disabled(archive.running == .running || archive.search.isRunning)
                 // Le libellé ne change pas pendant la recherche : la carte en
                 // dessous le dit déjà, et « Recherche des projets endormis… »
                 // passait sur deux lignes, coupé, à 1080 pt de fenêtre.
@@ -47,10 +48,59 @@ public struct ArchiveView: View {
             case .finished:
                 Report(model: model)
             case .idle:
+                if archive.focusedProjectID != nil {
+                    HStack {
+                        Text("advice.archive_focus", bundle: .oust).font(Typography.headline)
+                        Spacer()
+                        Button { archive.focusedProjectID = nil } label: { Text("advice.show_all_projects", bundle: .oust) }
+                            .buttonStyle(OnGradientButtonStyle())
+                    }
+                    .foregroundStyle(Palette.onGradient)
+                    Candidates(archive: archive)
+                    Destination(archive: archive)
+                }
                 StepsCard()
-                Destination(archive: archive)
-                Candidates(archive: archive)
+                rootsCard
+                if archive.focusedProjectID == nil {
+                    Destination(archive: archive)
+                    Candidates(archive: archive)
+                }
             }
+        }
+        .task { if !archive.search.hasRun { await archive.find() } }
+        .onChange(of: archive.inactiveMonths) { _, _ in Task { await archive.find() } }
+    }
+
+    private var rootsCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: Spacing.small) {
+                HStack {
+                    Text("archive.roots_title", bundle: .oust).font(Typography.headline)
+                    Spacer()
+                    Button { addRoot() } label: { Text("archive.add_root", bundle: .oust) }
+                        .buttonStyle(OnGradientButtonStyle())
+                        .disabled(archive.search.isRunning || archive.running == .running)
+                }
+                Text("archive.activity_hint", bundle: .oust).font(Typography.caption)
+                if archive.projectRoots.isEmpty {
+                    Text("archive.no_roots", bundle: .oust)
+                }
+                ForEach(archive.projectRoots, id: \.path) { root in
+                    Text(verbatim: root.path).font(Typography.caption).textSelection(.enabled)
+                }
+            }
+            .foregroundStyle(Palette.onGradient)
+        }
+    }
+
+    private func addRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        if panel.runModal() == .OK {
+            archive.addRoots(panel.urls)
+            Task { await archive.find() }
         }
     }
 }
@@ -183,7 +233,7 @@ private struct Candidates: View {
                 }
             }
         case .done:
-            if archive.candidates.isEmpty {
+            if archive.displayedCandidates.isEmpty {
                 EmptyState(symbol: "checkmark.seal", title: "archive.none_title", message: "archive.none_detail")
             } else {
                 HStack(alignment: .bottom) {
@@ -220,7 +270,7 @@ private struct ItemGroupSurface: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(archive.candidates) { candidate in
+            ForEach(archive.displayedCandidates) { candidate in
                 CandidateRow(candidate: candidate, chosen: archive.chosen.contains(candidate.id)) { archive.toggle(candidate) }
                 Divider().opacity(0.25)
             }

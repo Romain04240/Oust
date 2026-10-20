@@ -18,7 +18,8 @@ cd "$root"
 
 bundle_id="fr.meaillais.oust"
 derived="$root/build/DerivedData"
-app="$derived/Build/Products/Debug/Oust.app"
+built_app="$derived/Build/Products/Debug/Oust.app"
+app="/Applications/Oust.app"
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 launch_args=()
@@ -36,29 +37,57 @@ if ! build=$(xcodebuild build -project Oust.xcodeproj -scheme Oust -configuratio
     exit 1
 fi
 
-# Une copie signée par un certificat garde son exigence d'une compilation à
-# l'autre (identifiant + certificat) ; une copie ad hoc, non.
-if ! codesign -d -r- "$app" 2>&1 | grep -q "certificate leaf"; then
-    echo "** Copie signée ad hoc : l'Accès complet au disque ne tiendrait pas. **"
+# Un certificat seul ne suffit pas : Apple Development et Developer ID ont
+# des exigences désignées différentes. Ne plus lancer une copie qui invalide
+# l'identité déjà autorisée sous le même bundle ID.
+Scripts/check-signing.sh "$built_app" "$app"
+
+# Un service SMAppService doit retrouver son programme dans le même paquet,
+# même quand Xcode recrée DerivedData. La copie lancée reste donc Applications.
+# L'ancienne installation est déplacée dans build/ : elle reste récupérable.
+if [[ ! -w /Applications || -L "$app" ]]; then
+    echo "Impossible de remplacer la copie stable /Applications/Oust.app sans changer ses permissions." >&2
+    exit 1
+fi
+staging=$(mktemp -d "$root/build/LocalInstall.XXXXXX")
+if [[ "$(stat -f '%d' "$staging")" != "$(stat -f '%d' /Applications)" ]] \
+        || [[ -e "$app" && "$(stat -f '%d' "$app")" != "$(stat -f '%d' /Applications)" ]]; then
+    echo "Le dossier de construction et Applications doivent être sur le même volume pour un remplacement atomique." >&2
+    exit 1
+fi
+ditto "$built_app" "$staging/Oust.app"
+Scripts/check-signing.sh "$staging/Oust.app" "$app"
+
+# Rien n'a encore été remplacé tant que la nouvelle copie n'est pas vérifiée.
+if pgrep -f "/Oust.app/Contents/MacOS/Oust" > /dev/null; then
+    pkill -f "/Oust.app/Contents/MacOS/Oust" || true
+    sleep 1
+fi
+previous=""
+if [[ -e "$app" ]]; then
+    previous=$(mktemp -d "$root/build/PreviousInstalledApp.XXXXXX")
+    mv "$app" "$previous/Oust.app"
+fi
+if ! mv "$staging/Oust.app" "$app"; then
+    if [[ -n "$previous" ]]; then mv "$previous/Oust.app" "$app"; fi
+    echo "Installation interrompue ; la copie précédente a été conservée." >&2
     exit 1
 fi
 
-# Les autres copies sont désinscrites, sans être effacées : le Dock, Spotlight
-# et `open -b` ne retombent plus sur l'une d'elles.
+# Les anciennes copies d'identité incompatible sont désinscrites, sans être
+# effacées. Les installations Developer ID gardent leur enregistrement.
 "$lsregister" -dump 2>/dev/null \
     | awk -v id="$bundle_id" '
         /^path:/ { sub(/^path: +/, ""); sub(/ \(0x[0-9a-f]+\)$/, ""); path = $0 }
         /^identifier:/ && $2 == id && path != "" { print path; path = "" }' \
     | sort -u \
     | while IFS= read -r copy; do
-        [[ "$copy" == "$app" ]] || "$lsregister" -u "$copy" 2>/dev/null || true
+        if [[ "$copy" != "$app" ]] && ! codesign --verify -R '=anchor apple generic and certificate leaf[subject.OU] = "H3W3XYM2NZ" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists' "$copy" >/dev/null 2>&1; then
+            "$lsregister" -u "$copy" 2>/dev/null || true
+        fi
     done
 "$lsregister" -f "$app"
+"$lsregister" -u "$built_app" 2>/dev/null || true
 
-# Une seule instance à la fois : l'ancienne compilation est quittée.
-if pgrep -f "/Oust.app/Contents/MacOS/Oust" > /dev/null; then
-    pkill -f "/Oust.app/Contents/MacOS/Oust" || true
-    sleep 1
-fi
 open -n "$app" ${launch_args[@]+"${launch_args[@]}"}
 echo "Oust! lancé : $app"

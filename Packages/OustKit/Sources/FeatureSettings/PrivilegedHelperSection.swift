@@ -13,18 +13,57 @@ import OustModel
 /// Oust! fait tout comme avant, mot de passe compris.
 struct PrivilegedHelperSection: View {
     @State private var helper = PrivilegedHelperModel()
+    @State private var showsDetails = false
 
     var body: some View {
         Section {
-            HStack(alignment: .firstTextBaseline) {
-                Image(systemName: symbol).foregroundStyle(tint)
-                Text(stateKey, bundle: .oust)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-                actions
+            DisclosureGroup(isExpanded: $showsDetails) {
+                details.padding(.top, Spacing.small)
+            } label: {
+                HStack {
+                    Text("helper.title", bundle: .oust)
+                    Spacer()
+                    HStack(spacing: Spacing.tight) {
+                        if helper.isBusy {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: symbol)
+                        }
+                        Text(badgeKey, bundle: .oust)
+                    }
+                    .font(Typography.caption.weight(.semibold))
+                    .foregroundStyle(badgeTint)
+                    .padding(.horizontal, Spacing.small)
+                    .padding(.vertical, Spacing.tight)
+                    .background(badgeTint.opacity(0.12), in: Capsule())
+                }
             }
+        }
+        .disabled(helper.isBusy)
+        .task { await helper.refresh() }
+        // L'approbation se donne dans Réglages Système : on relit l'état au retour.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await helper.refresh() }
+        }
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: Spacing.medium) {
+            Text(stateKey, bundle: .oust)
+                .fixedSize(horizontal: false, vertical: true)
             Label { Text("helper.can", bundle: .oust) } icon: { Image(systemName: "checkmark.circle") }
             Label { Text("helper.cannot", bundle: .oust) } icon: { Image(systemName: "nosign") }
+            if let notice = helper.updateNotice {
+                Text(LocalizedStringKey(notice), bundle: .oust).foregroundStyle(.secondary)
+            }
+            if let issue = helper.installationIssue {
+                Label { Text(LocalizedStringKey(issue), bundle: .oust) } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+            }
+            if helper.needsStableLocation {
+                Text("helper.stable_location", bundle: .oust).foregroundStyle(.secondary)
+            }
             if helper.isDevelopmentBuild, !helper.isInstalled {
                 Label { Text("helper.development_build", bundle: .oust) } icon: {
                     Image(systemName: "exclamationmark.triangle")
@@ -39,16 +78,8 @@ struct PrivilegedHelperSection: View {
                 }
                 .foregroundStyle(.secondary)
             }
-        } header: {
-            Text("helper.title", bundle: .oust)
-        } footer: {
-            Text("helper.footer", bundle: .oust)
-        }
-        .disabled(helper.isWorking)
-        .task { await helper.refresh() }
-        // L'approbation se donne dans Réglages Système : on relit l'état au retour.
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await helper.refresh() }
+            HStack(spacing: Spacing.small) { actions }
+            Text("helper.footer", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -56,17 +87,26 @@ struct PrivilegedHelperSection: View {
         switch helper.state {
         case .notInstalled:
             Button { Task { await helper.install() } } label: { Text("helper.install", bundle: .oust) }
+                .disabled(helper.installationIssue != nil)
+            if helper.failure != nil {
+                Button { helper.openSystemSettings() } label: { Text("access.open", bundle: .oust) }
+            }
         case .awaitingApproval:
             Button { helper.openSystemSettings() } label: { Text("access.open", bundle: .oust) }
             Button(role: .destructive) { Task { await helper.uninstall() } } label: {
                 Text("helper.uninstall", bundle: .oust)
             }
         case .active:
+            if helper.updateNotice != nil {
+                Button { Task { await helper.reinstall() } } label: { Text("helper.reinstall", bundle: .oust) }
+                    .disabled(helper.installationIssue != nil)
+            }
             Button(role: .destructive) { Task { await helper.uninstall() } } label: {
                 Text("helper.uninstall", bundle: .oust)
             }
         case .unresponsive:
             Button { Task { await helper.reinstall() } } label: { Text("helper.reinstall", bundle: .oust) }
+                .disabled(helper.installationIssue != nil)
             Button(role: .destructive) { Task { await helper.uninstall() } } label: {
                 Text("helper.uninstall", bundle: .oust)
             }
@@ -76,6 +116,23 @@ struct PrivilegedHelperSection: View {
     private var isActive: Bool {
         if case .active = helper.state { return true }
         return false
+    }
+
+    private var badgeKey: LocalizedStringKey {
+        if helper.isBusy { return "helper.badge.checking" }
+        if isActive, helper.updateNotice != nil || helper.installationIssue != nil { return "helper.badge.repair" }
+        return switch helper.state {
+        case .notInstalled: "helper.badge.not_installed"
+        case .awaitingApproval: "helper.badge.awaiting_approval"
+        case .active: "helper.badge.active"
+        case .unresponsive: "helper.badge.repair"
+        }
+    }
+
+    private var badgeTint: Color {
+        if helper.isBusy { return .secondary }
+        if isActive, helper.updateNotice != nil || helper.installationIssue != nil { return Palette.color(for: .review) }
+        return tint
     }
 
     private var stateKey: LocalizedStringKey {

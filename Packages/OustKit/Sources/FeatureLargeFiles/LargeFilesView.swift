@@ -286,6 +286,14 @@ private struct FileRow: View {
             Button { NSWorkspace.shared.activateFileViewerSelecting([file.url]) } label: {
                 Label { Text("row.reveal", bundle: .oust) } icon: { Image(systemName: "folder") }
             }
+            Button {
+                model.transfer.present(sources: [file.url])
+                model.searchText = ""
+                model.section = .transfer
+            } label: {
+                Label { Text("advice.prepare_transfer", bundle: .oust) } icon: { Image(systemName: "externaldrive") }
+            }
+            .disabled(!item.isSelectable || model.transfer.isRunning)
             Button { model.toggle(item) } label: {
                 Label { Text(inCart ? "row.remove_from_cart" : "row.add_to_cart", bundle: .oust) } icon: { Image(systemName: "trash") }
             }

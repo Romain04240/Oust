@@ -40,7 +40,12 @@ vitesse et l'élégance. Le code cite ces règles par leur numéro
 
 ### Confidentialité
 
-11. **Aucun réseau, aucune télémétrie, aucun analytics.** Rien ne sort du Mac.
+11. **Analyse et conseils hors ligne, aucune télémétrie, aucun analytics.**
+    Exception demandée par Romain le 20/10/2026 : recherche manuelle des versions
+    et téléchargement de l'installation depuis `Romain04240/Oust` sur GitHub.
+    Aucun appel automatique au lancement ; aucun inventaire de fichiers envoyé.
+    Les installations téléchargées sont vérifiées (Developer ID de l'équipe)
+    avant ouverture, puis remplacées par l'utilisateur dans le Finder.
 12. **Aucune dépendance tierce** sans validation explicite préalable.
 
 ### Interface
@@ -66,3 +71,7 @@ vitesse et l'élégance. Le code cite ces règles par leur numéro
   jamais une copie construite avec `CODE_SIGNING_ALLOWED=NO`. L'Accès complet au
   disque tient à la signature : chaque copie « ad hoc » de `fr.meaillais.oust`
   lancée le fait perdre, et Romain doit le réactiver (18/10/2026).
+  Depuis le 20/10/2026, Debug et Release lancés utilisent tous deux Developer ID :
+  Apple Development possède une autre exigence désignée et ne doit plus être
+  alterné avec la distribution sous le même bundle ID. `Scripts/check-signing.sh`
+  vérifie l'identité et la compatibilité avec l'app installée avant lancement.

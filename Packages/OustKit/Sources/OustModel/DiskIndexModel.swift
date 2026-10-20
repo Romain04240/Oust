@@ -17,7 +17,9 @@ import OustVolume
 public final class DiskIndexModel {
     weak var app: AppModel?
     @ObservationIgnored let store: TreeStore
-    @ObservationIgnored private var index: ScanIndex?
+    // La jauge s'abonne via currentTree/currentScanDate : ignorer l'index
+    // la laissait sur un premier résultat vide après le chargement du cache.
+    private var index: ScanIndex?
     /// L'arbre partagé tel qu'il est, sans attendre de rafraîchissement (panneau des disques).
     var currentTree: TreeNode? { index?.root }
     var currentScanDate: Date? { index?.scannedAt }

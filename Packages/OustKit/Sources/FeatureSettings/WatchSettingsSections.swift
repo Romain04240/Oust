@@ -40,7 +40,7 @@ struct WatchSettingsSections: View {
                     Text(verbatim: thresholdLabel).monospacedDigit()
                     if let boot = watch.boot, let threshold = watch.thresholdBytes {
                         Text(verbatim: L10n.string("settings.watch.threshold_now", boot.name, Formatters.bytes(threshold),
-                                                   Formatters.bytes(boot.capacity.available)))
+                                                   Formatters.bytes(boot.capacity.availableForImportantUsage)))
                             .font(Typography.caption)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()

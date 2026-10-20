@@ -13,12 +13,15 @@ public struct Capacity: Sendable, Hashable, Codable {
     public var availableForImportantUsage: Int64
 
     public init(total: Int64, available: Int64, availableForImportantUsage: Int64) {
-        self.total = total
-        self.available = available
-        self.availableForImportantUsage = max(available, availableForImportantUsage)
+        self.total = max(0, total)
+        self.available = min(self.total, max(0, available))
+        self.availableForImportantUsage = min(self.total, max(self.available, availableForImportantUsage))
     }
 
     public var used: Int64 { max(0, total - available) }
+    /// Occupé hors purgeable, pour que les parts affichées s'additionnent au total.
+    public var occupied: Int64 { max(0, total - availableForImportantUsage) }
+    public var occupiedFraction: Double { total > 0 ? Double(occupied) / Double(total) : 0 }
     public var purgeable: Int64 { max(0, availableForImportantUsage - available) }
 
     /// Part utilisée, de 0 à 1.
@@ -64,6 +67,9 @@ public struct LocalSnapshot: Sendable, Hashable, Codable, Identifiable {
     public var name: String
     /// `AAAA-MM-JJ-HHMMSS` pour un snapshot Time Machine, sinon `nil`.
     public var date: String?
+    public var transactionID: UInt64?
+    /// Blocs propres à ce seul snapshot, lus auprès d'APFS.
+    public var privateBytes: Int64?
 
     public init(name: String) {
         self.name = name

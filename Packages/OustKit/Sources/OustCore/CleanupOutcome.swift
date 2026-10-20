@@ -174,6 +174,71 @@ public struct CleanupReport: Sendable, Hashable, Codable {
 public enum CleanupEvent: Sendable {
     case began(total: Int, expectedBytes: Int64)
     case itemBegan(id: String)
+    /// Une phase sans identifiants concerne la session entière. Un lot est
+    /// annoncé ensemble : aucun avancement par date n'est inventé pendant tmutil.
+    case phaseChanged(CleanupPhase, itemIDs: [String])
     case itemFinished(CleanupOutcome)
     case finished(CleanupReport)
+}
+
+public enum CleanupPhase: Sendable, Equatable {
+    case preparing, revalidating, checkingSnapshotComponent
+    case deletingSnapshots(count: Int), authorizingSnapshots(count: Int), verifyingSnapshots
+    case deleting, journaling, measuring
+
+    /// Une journalisation brève ne doit pas masquer une suppression parallèle
+    /// qui dure encore. Les phases snapshots sont séquentielles dans leur lot.
+    var priority: Int {
+        switch self {
+        case .preparing: 0
+        case .journaling: 1
+        case .revalidating: 2
+        case .deleting: 3
+        case .checkingSnapshotComponent, .deletingSnapshots, .authorizingSnapshots, .verifyingSnapshots: 4
+        case .measuring: 5
+        }
+    }
+}
+
+/// Compteurs d'éléments terminés, sans rapport avec un pourcentage d'octets.
+/// Les durées utilisent l'horloge monotone : une correction de l'heure système
+/// ne fait jamais reculer le temps affiché.
+public struct CleanupProgress: Sendable {
+    public private(set) var total = 0
+    public private(set) var completed = 0
+    public private(set) var phase: CleanupPhase = .preparing
+    public private(set) var startedAt: ContinuousClock.Instant
+    public private(set) var phaseStartedAt: ContinuousClock.Instant
+    private var sessionPhase: CleanupPhase = .preparing
+    private var activePhases: [String: CleanupPhase] = [:]
+    private var completedIDs: Set<String> = []
+
+    public init(total: Int = 0, now: ContinuousClock.Instant = .now) {
+        self.total = total
+        self.startedAt = now
+        self.phaseStartedAt = now
+    }
+
+    public mutating func receive(_ event: CleanupEvent, now: ContinuousClock.Instant = .now) {
+        switch event {
+        case .began(let total, _): self.total = total
+        case .phaseChanged(let phase, let ids):
+            if ids.isEmpty { sessionPhase = phase }
+            else { for id in ids where !completedIDs.contains(id) { activePhases[id] = phase } }
+        case .itemBegan(let id): activePhases[id] = .revalidating
+        case .itemFinished(let outcome):
+            activePhases.removeValue(forKey: outcome.itemID)
+            completedIDs.insert(outcome.itemID)
+            completed = completedIDs.count
+        case .finished: break
+        }
+        let next = activePhases.values.max(by: { $0.priority < $1.priority }) ?? sessionPhase
+        if next != phase {
+            phase = next
+            phaseStartedAt = now
+        }
+    }
+
+    public func elapsed(at now: ContinuousClock.Instant = .now) -> Duration { max(.zero, startedAt.duration(to: now)) }
+    public func phaseElapsed(at now: ContinuousClock.Instant = .now) -> Duration { max(.zero, phaseStartedAt.duration(to: now)) }
 }

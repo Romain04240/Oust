@@ -19,6 +19,12 @@ public final class ArchiveModel {
 
     public private(set) var search: AppModel.Phase = .idle
     public private(set) var candidates: [ProjectCandidate] = []
+    /// Le conseil ouvre ce projet précis, sans le cocher automatiquement.
+    public var focusedProjectID: String?
+    public var displayedCandidates: [ProjectCandidate] {
+        guard let focusedProjectID else { return candidates }
+        return candidates.filter { $0.id == focusedProjectID }
+    }
     /// Les projets cochés. Jamais d'office : un projet n'est pas régénérable
     /// (RULES.md, règle 4).
     public var chosen: Set<String> = [] {
@@ -48,10 +54,18 @@ public final class ArchiveModel {
         set { app?.preferences.archiveInactiveMonths = newValue }
     }
 
+    public var projectRoots: [URL] { app?.preferences.projectRoots ?? [] }
+
+    public func addRoots(_ urls: [URL]) {
+        guard let app, running != .running, !search.isRunning else { return }
+        for url in urls where !app.preferences.projectRoots.contains(url) { app.preferences.projectRoots.append(url) }
+    }
+
     public func find() async {
         guard !search.isRunning, let app else { return }
         search = .running
-        let cutoff = Calendar.current.date(byAdding: .month, value: -inactiveMonths, to: Date()) ?? Date()
+        let cutoff = inactiveMonths == 0 ? Date.distantFuture
+            : Calendar.current.date(byAdding: .month, value: -inactiveMonths, to: Date()) ?? Date()
         let found = await ProjectCandidates.find(in: app.preferences.projectRoots, inactiveSince: cutoff, home: app.home)
         candidates = found
         chosen = chosen.filter { id in found.contains { $0.id == id && $0.isArchivable } }

@@ -3322,13 +3322,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Snapshots aren't in this total: macOS doesn't say how much each one holds. The report will measure what comes back."
+            "value": "APFS measures each snapshot’s private blocks. Selecting all Time Machine snapshots also includes blocks shared between them. For a partial selection, the sum of private sizes is a minimum. The report tracks the actual change in immediately free space."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Les snapshots ne sont pas dans ce total : macOS ne dit pas combien chacun retient. Le bilan mesurera ce qui revient."
+            "value": "APFS mesure les blocs privés de chaque snapshot. La sélection de tous les snapshots Time Machine inclut aussi les blocs partagés entre eux. Pour une sélection partielle, la somme des tailles privées est un minimum. Le bilan suit la variation réelle du libre immédiat."
           }
         }
       }
@@ -5889,13 +5889,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ free"
+            "value": "%@ available"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ libres"
+            "value": "%@ disponibles"
           }
         }
       }
@@ -6059,13 +6059,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ free of %2$@"
+            "value": "%1$@ available of %2$@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ libres sur %2$@"
+            "value": "%1$@ disponibles sur %2$@"
           }
         }
       }
@@ -6076,13 +6076,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ — %2$@ available. Click for details."
+            "value": "%1$@ — %2$@. Click for details."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ — %2$@ disponibles. Cliquer pour le détail."
+            "value": "%1$@ — %2$@. Cliquer pour le détail."
           }
         }
       }
@@ -9051,13 +9051,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ free of %2$@, %3$@ in the bin"
+            "value": "%1$@ available of %2$@, %3$@ in the bin"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ libres sur %2$@, %3$@ dans la corbeille"
+            "value": "%1$@ disponibles sur %2$@, %3$@ dans la corbeille"
           }
         }
       }
@@ -9068,13 +9068,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "free of %@"
+            "value": "available of %@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "libres sur %@"
+            "value": "disponibles sur %@"
           }
         }
       }
@@ -9198,19 +9198,104 @@
         }
       }
     },
+    "helper.badge.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actif"
+          }
+        }
+      }
+    },
+    "helper.badge.awaiting_approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awaiting approval"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À autoriser"
+          }
+        }
+      }
+    },
+    "helper.badge.not_installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not installed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non installé"
+          }
+        }
+      }
+    },
+    "helper.badge.repair": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs repair"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À réparer"
+          }
+        }
+      }
+    },
+    "helper.badge.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification…"
+          }
+        }
+      }
+    },
     "helper.can": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "What it can do: delete the local Time Machine snapshots you throw in Oust!’s bin, named by their date. Nothing else."
+            "value": "Limited actions: delete local Time Machine snapshots by validated date, or older backups from a verified Time Machine destination, only after your cleanup confirmation in Oust!."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce qu’il peut faire : supprimer les snapshots Time Machine locaux que vous mettez à la corbeille d’Oust!, désignés par leur date. Rien d’autre."
+            "value": "Actions limitées : supprimer des snapshots Time Machine locaux par date validée, ou d’anciennes sauvegardes d’une destination Time Machine vérifiée, uniquement après votre confirmation de nettoyage dans Oust!."
           }
         }
       }
@@ -9221,13 +9306,30 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "What it cannot do: answer any app other than Oust!, run any other command, touch a file, macOS update snapshots or your Time Machine backups. It only runs while Oust! needs it."
+            "value": "It only accepts Oust! signed by its developer. It cannot run arbitrary commands, delete arbitrary files or touch macOS update snapshots. It stops when idle."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce qu’il ne peut pas faire : répondre à une autre app qu’Oust!, lancer une autre commande, toucher à un fichier, aux snapshots de mise à jour de macOS ou à vos sauvegardes Time Machine. Il ne tourne que le temps d’une demande."
+            "value": "Il accepte uniquement Oust! signé par son développeur. Il ne peut pas lancer une commande libre, supprimer des fichiers quelconques ou toucher aux snapshots de mise à jour de macOS. Il s’arrête lorsqu’il est inactif."
+          }
+        }
+      }
+    },
+    "helper.details": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What the helper can do"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que permet le composant"
           }
         }
       }
@@ -9306,13 +9408,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reinstall"
+            "value": "Repair"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Réinstaller"
+            "value": "Réparer"
           }
         }
       }
@@ -9323,13 +9425,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Active: local Time Machine snapshots are deleted without a password prompt."
+            "value": "The approved helper responds. Oust! can use it for supported administrator actions without asking for your password again."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Actif : les snapshots Time Machine locaux se suppriment sans demander de mot de passe."
+            "value": "Le composant autorisé répond. Oust! peut l’utiliser pour les actions administrateur prévues sans redemander votre mot de passe."
           }
         }
       }
@@ -9374,13 +9476,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Installed but not responding, so Oust! asks for your password again. Reinstalling it fixes this after an update."
+            "value": "Registered, but not responding. Oust! keeps the administrator prompt available. Repair re-registers the component from this app; if the problem persists, reinstall a complete signed copy in Applications."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Installé mais muet : Oust! redemande donc votre mot de passe. Le réinstaller règle le cas après une mise à jour."
+            "value": "Enregistré, mais sans réponse. Oust! conserve l’invite administrateur comme solution de repli. Réparer réenregistre le composant depuis cette app ; si le problème persiste, réinstallez une copie signée complète dans Applications."
           }
         }
       }
@@ -10037,13 +10139,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Free"
+            "value": "Immediately free"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Libre"
+            "value": "Libre immédiat"
           }
         }
       }
@@ -10921,13 +11023,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ free of %2$@"
+            "value": "%1$@ available of %2$@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ libres sur %2$@"
+            "value": "%1$@ disponibles sur %2$@"
           }
         }
       }
@@ -11958,13 +12060,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Local Time Machine snapshots: %@. They keep a copy of everything deleted in the last 24 hours: deleting frees nothing while they exist."
+            "value": "Local snapshots: %@. This total is measured from APFS transaction ranges, including blocks shared between snapshots. It is separate from the volume’s purgeable space."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Snapshots Time Machine locaux : %@. Ils gardent une copie de tout ce qui a été supprimé depuis 24 heures : supprimer ne libère rien tant qu’ils existent."
+            "value": "Snapshots locaux : %@. Ce total est mesuré à partir des plages de transactions APFS, blocs partagés entre snapshots compris. Il est distinct de l’espace purgeable du volume."
           }
         }
       }
@@ -11975,13 +12077,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ held back by the system"
+            "value": "%@ retained by Time Machine snapshots"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ retenus par le système"
+            "value": "%@ retenus par les snapshots Time Machine"
           }
         }
       }
@@ -12111,13 +12213,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Oust! looks everywhere — down to what developer tools and AI agents leave behind — and only offers what is safe to remove. Nothing leaves your Mac."
+            "value": "Oust! shows what takes up space, explains what can be removed and helps you decide. File analysis stays on your Mac."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Oust! regarde partout — jusque dans ce que laissent les outils de développement et les agents IA — et ne propose que ce qui peut partir sans risque. Rien ne quitte votre Mac."
+            "value": "Oust! montre ce qui prend de la place, explique ce qui peut partir et vous aide à choisir. L’analyse des fichiers reste sur votre Mac."
           }
         }
       }
@@ -24470,13 +24572,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No network, no telemetry: nothing leaves this Mac."
+            "value": "Local analysis; update checks only on request"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aucun réseau, aucune télémétrie : rien ne quitte ce Mac."
+            "value": "Analyse locale ; mises à jour uniquement à votre demande"
           }
         }
       }
@@ -26425,13 +26527,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOS doesn't say how much space each one holds: they share it. Oust! measures what comes back once they are deleted."
+            "value": "APFS measures each snapshot’s private blocks. The total also includes blocks shared between Time Machine snapshots. If a measurement is unavailable, it stays explicitly marked as unmeasured."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOS ne dit pas combien d’espace retient chacun : ils se le partagent. Oust! mesure ce qui revient une fois qu’ils sont supprimés."
+            "value": "APFS mesure les blocs privés de chaque snapshot. Le total inclut aussi les blocs partagés entre snapshots Time Machine. Si une mesure n’est pas disponible, elle reste explicitement indiquée comme non mesurée."
           }
         }
       }
@@ -26459,13 +26561,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Snapshots, the Mac’s Trash, downloads, app, creative and game caches, attachments, cloud files, backups and virtual machines."
+            "value": "The Mac’s Trash, downloads, app, creative and game caches, attachments, cloud files, backups and virtual machines."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Snapshots, corbeille du Mac, téléchargements, caches d’applications, de création et de jeux, pièces jointes, fichiers du nuage, sauvegardes et machines virtuelles."
+            "value": "Corbeille du Mac, téléchargements, caches d’applications, de création et de jeux, pièces jointes, fichiers du nuage, sauvegardes et machines virtuelles."
           }
         }
       }
@@ -27571,6 +27673,2862 @@
           "stringUnit": {
             "state": "translated",
             "value": "Oust! n’a rien enlevé"
+          }
+        }
+      }
+    },
+    "storage.breakdown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Immediately free: %@ · Purgeable: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Libre immédiatement : %@ · Purgeable : %@"
+          }
+        }
+      }
+    },
+    "storage.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available space includes immediately free space and space macOS can purge. Purgeable space also includes caches and local cloud copies; it is not a measurement of snapshots."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’espace disponible comprend le libre immédiat et ce que macOS peut purger. Le purgeable inclut aussi des caches et des copies locales du nuage ; ce n’est pas une mesure des snapshots."
+          }
+        }
+      }
+    },
+    "snapshot.error.invalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The snapshot identifier is invalid. Nothing was deleted."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’identifiant du snapshot est invalide. Rien n’a été supprimé."
+          }
+        }
+      }
+    },
+    "snapshot.error.listing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cannot verify the snapshot list. Check Full Disk Access for Oust! and its helper in Settings."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de vérifier la liste des snapshots. Vérifiez l’Accès complet au disque d’Oust! et de son démon dans les Réglages."
+          }
+        }
+      }
+    },
+    "snapshot.error.timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time Machine did not reply in time. It may still be working. Refresh the list before trying again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time Machine n’a pas répondu dans le délai prévu. Il travaille peut-être encore. Actualisez la liste avant de réessayer."
+          }
+        }
+      }
+    },
+    "snapshot.error.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Administrator authorization was cancelled."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’autorisation administrateur a été annulée."
+          }
+        }
+      }
+    },
+    "snapshot.error.unverified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The snapshot is still listed or its removal could not be verified. Check Full Disk Access, then refresh the list."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le snapshot est toujours présent ou sa suppression n’a pas pu être vérifiée. Vérifiez l’Accès complet au disque, puis actualisez la liste."
+          }
+        }
+      }
+    },
+    "archive.all_projects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All projects"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tous les projets"
+          }
+        }
+      }
+    },
+    "archive.roots_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project folders searched"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dossiers de projets explorés"
+          }
+        }
+      }
+    },
+    "archive.add_root": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a folder…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajouter un dossier…"
+          }
+        }
+      }
+    },
+    "archive.no_roots": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No project folder configured. Add your projects folder or a project directly."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun dossier de projets configuré. Ajoutez votre dossier de projets ou directement un projet."
+          }
+        }
+      }
+    },
+    "archive.activity_hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projects are found in nested folders too. Activity is estimated from source changes, excluding Git metadata and common dependency and build folders. Choose “All projects” to review recent projects as well."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les projets sont aussi recherchés dans les sous-dossiers. L’activité est estimée à partir des modifications des sources, hors métadonnées Git et dossiers courants de dépendances et de compilation. Choisissez « Tous les projets » pour examiner aussi les projets récents."
+          }
+        }
+      }
+    },
+    "advice.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your storage recommendations"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vos conseils de stockage"
+          }
+        }
+      }
+    },
+    "advice.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find recommendations"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chercher des conseils"
+          }
+        }
+      }
+    },
+    "advice.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local recommendations based on your project folders and the latest disk analysis. Sizes show what occupies the disk, not guaranteed savings. Nothing is selected or moved automatically."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conseils locaux fondés sur vos dossiers de projets et la dernière analyse du disque. Les tailles indiquent l’espace occupé, pas un gain garanti. Rien n’est sélectionné ni déplacé automatiquement."
+          }
+        }
+      }
+    },
+    "advice.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No recommendation with the current criteria. Analyze the disk or add project folders in Archive to look further."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun conseil avec les critères actuels. Analysez le disque ou ajoutez des dossiers dans Archivage pour chercher davantage."
+          }
+        }
+      }
+    },
+    "advice.archive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consider archiving to an external disk. Last source change: %@. The copy is verified before the original goes to the Mac’s Trash."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À envisager : archiver sur un disque externe. Dernière modification des sources : %@. La copie est vérifiée avant l’envoi de l’original à la corbeille du Mac."
+          }
+        }
+      }
+    },
+    "advice.project_blocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review this project in Archive to see what prevents a safe move."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez ce projet dans Archivage pour voir ce qui empêche son déplacement en sécurité."
+          }
+        }
+      }
+    },
+    "advice.move": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consider moving this large file to an external disk. Last known use: %@. Reveal it in Finder and check the copy before removing the original."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À envisager : déplacer ce gros fichier sur un disque externe. Dernière utilisation connue : %@. Révélez-le dans le Finder et vérifiez la copie avant de retirer l’original."
+          }
+        }
+      }
+    },
+    "advice.builds.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebuildable developer files"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichiers de développement régénérables"
+          }
+        }
+      }
+    },
+    "advice.builds.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review dependencies, build outputs and caches. Their rebuild cost and safety checks are shown before cleaning."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les dépendances, compilations et caches. Leur coût de reconstruction et leurs protections sont indiqués avant le nettoyage."
+          }
+        }
+      }
+    },
+    "advice.cloud.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep cloud files online"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Garder les fichiers du nuage en ligne"
+          }
+        }
+      }
+    },
+    "advice.cloud.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review local cloud copies that can be removed while the originals stay with the provider."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les copies locales qui peuvent être retirées tout en conservant les originaux chez leur fournisseur."
+          }
+        }
+      }
+    },
+    "advice.review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examiner"
+          }
+        }
+      }
+    },
+    "updates.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updates"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mises à jour"
+          }
+        }
+      }
+    },
+    "updates.check": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for Updates…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechercher des mises à jour…"
+          }
+        }
+      }
+    },
+    "updates.privacy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only when you click: contact GitHub to check releases or download the installer. No file inventory or analytics is sent."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uniquement à votre demande : connexion à GitHub pour vérifier les versions ou télécharger l’installation. Aucun inventaire de fichiers ni statistique n’est envoyé."
+          }
+        }
+      }
+    },
+    "updates.installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed version: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version installée : %@"
+          }
+        }
+      }
+    },
+    "updates.available": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %@ is available."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La version %@ est disponible."
+          }
+        }
+      }
+    },
+    "updates.current": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %@ is up to date."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La version %@ est à jour."
+          }
+        }
+      }
+    },
+    "updates.download": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download and open installer…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Télécharger et ouvrir l’installation…"
+          }
+        }
+      }
+    },
+    "updates.open_installer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open installer"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir l’installation"
+          }
+        }
+      }
+    },
+    "updates.downloading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading and checking the installer’s signature…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement et vérification de la signature de l’installation…"
+          }
+        }
+      }
+    },
+    "updates.install_instructions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installer verified and opened. Quit Oust!, drag Oust! to Applications and choose Replace, then reopen it. Your preferences and history are kept."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installation vérifiée et ouverte. Quittez Oust!, glissez Oust! vers Applications et choisissez Remplacer, puis rouvrez l’application. Vos préférences et votre historique sont conservés."
+          }
+        }
+      }
+    },
+    "updates.error.not_published": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No stable release has been published on GitHub yet."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune version stable n’a encore été publiée sur GitHub."
+          }
+        }
+      }
+    },
+    "updates.error.rate_limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub’s request limit was reached. Try again later."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La limite de requêtes GitHub est atteinte. Réessayez plus tard."
+          }
+        }
+      }
+    },
+    "updates.error.release": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This release has no supported stable version or Oust installer."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette publication ne contient pas de version stable reconnue ou d’installation Oust compatible."
+          }
+        }
+      }
+    },
+    "updates.error.download": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The installer download could not be verified or opened. Try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le téléchargement de l’installation n’a pas pu être vérifié ou ouvert. Réessayez."
+          }
+        }
+      }
+    },
+    "updates.error.signature": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The installer does not have a valid Developer ID signature from Oust!’s publisher. It was not opened."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’installation n’a pas de signature Developer ID valide de l’éditeur d’Oust!. Elle n’a pas été ouverte."
+          }
+        }
+      }
+    },
+    "updates.error.network": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to contact GitHub. Check your connection and try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de contacter GitHub. Vérifiez votre connexion et réessayez."
+          }
+        }
+      }
+    },
+    "system.snapshots_refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh snapshots"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actualiser les snapshots"
+          }
+        }
+      }
+    },
+    "snapshot.size_unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Size not measured"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Taille non mesurée"
+          }
+        }
+      }
+    },
+    "snapshot.irreversible": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This local restore point cannot be recovered after deletion."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce point de restauration local ne peut pas être récupéré après suppression."
+          }
+        }
+      }
+    },
+    "cart.snapshot_count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ snapshots selected"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ snapshots sélectionnés"
+          }
+        }
+      }
+    },
+    "storage.based_on_scan": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File categories from the scan on %@. Live capacity; approximate breakdown."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Catégories de fichiers d’après l’analyse du %@. Capacité actualisée ; répartition indicative."
+          }
+        }
+      }
+    },
+    "storage.needs_scan": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analyze this disk to see its file categories. Available, purgeable and immediately free space are already shown."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analysez ce disque pour voir les catégories de fichiers. Le disponible, le purgeable et le libre immédiat sont déjà affichés."
+          }
+        }
+      }
+    },
+    "storage.category.applications": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apps & binaries"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apps et binaires"
+          }
+        }
+      }
+    },
+    "storage.category.documents": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Documents"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Documents"
+          }
+        }
+      }
+    },
+    "storage.category.images": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Images"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Images"
+          }
+        }
+      }
+    },
+    "storage.category.videos": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Videos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vidéos"
+          }
+        }
+      }
+    },
+    "storage.category.audio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio"
+          }
+        }
+      }
+    },
+    "storage.category.development": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code & AI models"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Code et modèles IA"
+          }
+        }
+      }
+    },
+    "storage.category.archives": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archives & disk images"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archives et images disque"
+          }
+        }
+      }
+    },
+    "storage.category.other": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other files"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autres fichiers"
+          }
+        }
+      }
+    },
+    "storage.category.system": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System & unattributed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Système et non attribué"
+          }
+        }
+      }
+    },
+    "storage.category.purgeable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Purgeable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Purgeable"
+          }
+        }
+      }
+    },
+    "storage.category.free": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Immediately free"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Libre immédiat"
+          }
+        }
+      }
+    },
+    "report.snapshots_deleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ snapshots removed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ snapshots supprimés"
+          }
+        }
+      }
+    },
+    "report.snapshots_waiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for APFS space recovery…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En attente de la reprise d’espace APFS…"
+          }
+        }
+      }
+    },
+    "report.snapshots_measurement": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The change in immediately free disk space is tracked for three minutes. This is a volume measurement, not the individual size of each snapshot."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La variation du libre immédiat est suivie pendant trois minutes. C’est une mesure du volume, pas la taille individuelle de chaque snapshot."
+          }
+        }
+      }
+    },
+    "snapshot.private_size": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Private: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Privé : %@"
+          }
+        }
+      }
+    },
+    "snapshot.private_total": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minimum from the selected snapshots’ private blocks"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minimum dans les blocs privés des snapshots sélectionnés"
+          }
+        }
+      }
+    },
+    "snapshot.retained_total": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ retained by Time Machine snapshots, including blocks shared between them"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ retenus par les snapshots Time Machine, blocs partagés entre eux compris"
+          }
+        }
+      }
+    },
+    "snapshot.measuring": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measuring APFS snapshot space…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mesure de l’espace des snapshots APFS…"
+          }
+        }
+      }
+    },
+    "snapshot.selected_total": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "retained by the selected snapshots, including shared blocks"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "retenus par les snapshots sélectionnés, blocs partagés compris"
+          }
+        }
+      }
+    },
+    "advice.prepare_archive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepare archiving"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparer l’archivage"
+          }
+        }
+      }
+    },
+    "advice.stale": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These items are no longer available. Run the analysis again to refresh this advice."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ces éléments ne sont plus disponibles. Relancez l’analyse pour actualiser ce conseil."
+          }
+        }
+      }
+    },
+    "advice.choose_items": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review the items below and select those you want to send to Oust’s bin."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les éléments ci-dessous et cochez ceux à préparer dans la corbeille d’Oust."
+          }
+        }
+      }
+    },
+    "advice.open_cart": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review the selected items in the bin"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examiner les éléments cochés dans la corbeille"
+          }
+        }
+      }
+    },
+    "advice.archive_focus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Project from your storage advice"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Projet conseillé pour l’archivage"
+          }
+        }
+      }
+    },
+    "advice.show_all_projects": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show all projects"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher tous les projets"
+          }
+        }
+      }
+    },
+    "section.advice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage advice"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conseils"
+          }
+        }
+      }
+    },
+    "advice.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Concrete actions to make room on your Mac."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Des actions concrètes pour faire de la place sur votre Mac."
+          }
+        }
+      }
+    },
+    "advice.searching": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Looking for inactive projects and large files…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherche des projets inactifs et des gros fichiers…"
+          }
+        }
+      }
+    },
+    "section.timeMachine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time Machine"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time Machine"
+          }
+        }
+      }
+    },
+    "section.transfer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to a drive"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacer"
+          }
+        }
+      }
+    },
+    "advice.plan_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your plan to make room"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Votre plan pour faire de la place"
+          }
+        }
+      }
+    },
+    "advice.plan_detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a suggestion below. Its files and available actions appear underneath, so you can review everything before deciding."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez une piste ci-dessous. Les fichiers et les actions possibles se déplient juste en dessous, pour tout examiner avant de décider."
+          }
+        }
+      }
+    },
+    "advice.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ suggestions to review"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ conseils à examiner"
+          }
+        }
+      }
+    },
+    "advice.updated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updated %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actualisé %@"
+          }
+        }
+      }
+    },
+    "advice.collapse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réduire"
+          }
+        }
+      }
+    },
+    "advice.action_details": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "See files and actions"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voir les fichiers et les actions"
+          }
+        }
+      }
+    },
+    "advice.prepare_transfer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepare a verified move…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparer un déplacement vérifié…"
+          }
+        }
+      }
+    },
+    "advice.show_all_items": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show all items"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher tous les éléments"
+          }
+        }
+      }
+    },
+    "advice.show_less_items": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show fewer items"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher moins d’éléments"
+          }
+        }
+      }
+    },
+    "storage.details.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Understand system and unattributed storage"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comprendre Système et non attribué"
+          }
+        }
+      }
+    },
+    "storage.details.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System and unattributed storage"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Système et non attribué"
+          }
+        }
+      }
+    },
+    "storage.details.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This is the gap between occupied space and the file categories in the last scan. It can include macOS volumes, filesystem overhead and data the scan could not read. It is not a list of files to delete."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "C’est l’écart entre l’espace occupé et les catégories de fichiers de la dernière analyse. Il peut comprendre les volumes de macOS, la gestion du système de fichiers et des données que l’analyse n’a pas pu lire. Ce n’est pas une liste de fichiers à supprimer."
+          }
+        }
+      }
+    },
+    "storage.details.occupied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Occupied, excluding purgeable space"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Occupé, hors espace purgeable"
+          }
+        }
+      }
+    },
+    "storage.details.classified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attributed to file categories in the chart"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attribué aux catégories de la jauge"
+          }
+        }
+      }
+    },
+    "storage.details.remainder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System and unattributed remainder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reste Système et non attribué"
+          }
+        }
+      }
+    },
+    "storage.details.volumes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other volumes sharing this disk"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les autres volumes sur ce disque"
+          }
+        }
+      }
+    },
+    "storage.details.volumes_note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live APFS measurements. These volumes help explain disk usage, but do not form a breakdown of the remainder above. They must not be added to it."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mesures APFS actuelles. Ces volumes aident à comprendre l’occupation du disque, mais ne constituent pas une décomposition du reste ci-dessus. Il ne faut pas les y additionner."
+          }
+        }
+      }
+    },
+    "storage.details.metadata": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Container overhead and metadata"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gestion et métadonnées du conteneur"
+          }
+        }
+      }
+    },
+    "storage.details.apfs_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The APFS volume detail is not available for this disk. No size has been estimated in its place."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le détail des volumes APFS n’est pas disponible pour ce disque. Aucune taille n’a été estimée à sa place."
+          }
+        }
+      }
+    },
+    "storage.details.snapshots": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retained by local Time Machine snapshots"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retenu par les snapshots Time Machine locaux"
+          }
+        }
+      }
+    },
+    "storage.details.snapshots_note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A separate APFS measurement. Snapshot space can already be included in purgeable space or volume usage; it is not added to the remainder."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une mesure APFS séparée. Cet espace peut déjà figurer dans le purgeable ou dans l’occupation du volume ; il n’est pas ajouté au reste."
+          }
+        }
+      }
+    },
+    "storage.details.unreadable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What the scan could not read"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce que l’analyse n’a pas pu lire"
+          }
+        }
+      }
+    },
+    "storage.details.no_unreadable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No unreadable folders were reported in the last scan. Filesystem metadata and other APFS volumes are still outside file categorization."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun dossier illisible n’a été signalé dans la dernière analyse. Les métadonnées et les autres volumes APFS restent hors du classement des fichiers."
+          }
+        }
+      }
+    },
+    "storage.details.unreadable_count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ unreadable locations. Their contents could not be measured."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ emplacements illisibles. Leur contenu n’a pas pu être mesuré."
+          }
+        }
+      }
+    },
+    "storage.details.unreadable_limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First %@ locations shown."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les %@ premiers emplacements sont affichés."
+          }
+        }
+      }
+    },
+    "storage.details.unknown_note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unreadable data has no known size. A new scan or Full Disk Access can improve attribution; macOS may still reserve space that cannot be classified as files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les données illisibles n’ont pas de taille connue. Une nouvelle analyse ou l’Accès complet au disque peut améliorer le détail ; macOS peut encore réserver de l’espace qui ne correspond pas à des fichiers classables."
+          }
+        }
+      }
+    },
+    "storage.apfs.system": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS system"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Système macOS"
+          }
+        }
+      }
+    },
+    "storage.apfs.data": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files and application data"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichiers et données des applications"
+          }
+        }
+      }
+    },
+    "storage.apfs.memory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Virtual memory"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mémoire virtuelle"
+          }
+        }
+      }
+    },
+    "storage.apfs.startup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startup support"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Données de démarrage"
+          }
+        }
+      }
+    },
+    "storage.apfs.recovery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Récupération"
+          }
+        }
+      }
+    },
+    "storage.apfs.updates": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS updates"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mises à jour macOS"
+          }
+        }
+      }
+    },
+    "storage.apfs.other": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another APFS volume"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autre volume APFS"
+          }
+        }
+      }
+    },
+    "transfer.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to an external disk"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacer vers un disque externe"
+          }
+        }
+      }
+    },
+    "transfer.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose files or folders, review the plan, then confirm. Every copy is checked with SHA-256 before any original goes to the Mac’s Trash."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez des fichiers ou dossiers, vérifiez le plan, puis confirmez. Chaque copie est vérifiée par SHA-256 avant d’envoyer un original à la corbeille du Mac."
+          }
+        }
+      }
+    },
+    "transfer.chooseSources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose files or folders…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir des fichiers ou dossiers…"
+          }
+        }
+      }
+    },
+    "transfer.chooseDestination": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an external folder…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir un dossier externe…"
+          }
+        }
+      }
+    },
+    "transfer.destination": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destination folder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dossier de destination"
+          }
+        }
+      }
+    },
+    "transfer.plan": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ items · %@ to copy"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ éléments · %@ à copier"
+          }
+        }
+      }
+    },
+    "transfer.planNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All copies must finish and pass verification before originals can go to the Mac’s Trash. If a copy fails, all originals stay in place."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toutes les copies doivent être terminées et vérifiées avant la mise à la corbeille du Mac des originaux. Si une copie échoue, tous les originaux restent en place."
+          }
+        }
+      }
+    },
+    "transfer.namesNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Existing items are kept. A numbered name is used when needed. Incomplete copies are kept for inspection; Oust! does not remove them automatically. On exFAT/FAT, single files are kept inside a folder of the same name to preserve their metadata companions."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les éléments existants sont conservés. Un nom numéroté est utilisé au besoin. Les copies inachevées restent inspectables ; Oust! ne les efface pas automatiquement. Sur exFAT/FAT, un fichier isolé est rangé dans un dossier du même nom pour conserver ses fichiers de métadonnées."
+          }
+        }
+      }
+    },
+    "transfer.planning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading sources and checking the destination…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lecture des sources et contrôle de la destination…"
+          }
+        }
+      }
+    },
+    "transfer.copiedBytes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ copied"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ copiés"
+          }
+        }
+      }
+    },
+    "transfer.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler"
+          }
+        }
+      }
+    },
+    "transfer.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fermer"
+          }
+        }
+      }
+    },
+    "transfer.confirmPlan": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review and confirm…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifier et confirmer…"
+          }
+        }
+      }
+    },
+    "transfer.prepare": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prepare the plan"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparer le plan"
+          }
+        }
+      }
+    },
+    "transfer.confirmTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move these originals after verification?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacer ces originaux après vérification ?"
+          }
+        }
+      }
+    },
+    "transfer.start": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy, verify, then move originals to the Mac’s Trash"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copier, vérifier, puis mettre les originaux à la corbeille du Mac"
+          }
+        }
+      }
+    },
+    "transfer.confirmMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This authorizes copying the listed items to the chosen folder and moving their originals to the Mac’s Trash only after every copy has passed SHA-256 verification and a final recheck. Space is not freed until the Mac’s Trash is emptied. Cancellation stops before the next original; items already in the Mac’s Trash remain restorable there."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette confirmation autorise la copie des éléments listés dans le dossier choisi, puis la mise à la corbeille du Mac des originaux après vérification SHA-256 de toutes les copies et un dernier contrôle. L’espace ne sera libéré qu’après vidage de la corbeille du Mac. L’annulation arrête avant l’original suivant ; ceux déjà à la corbeille du Mac y restent restaurables."
+          }
+        }
+      }
+    },
+    "transfer.trashing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moving verified originals to the Mac’s Trash…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mise à la corbeille du Mac des originaux vérifiés…"
+          }
+        }
+      }
+    },
+    "transfer.verifying": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifying contents and rechecking originals…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification du contenu et nouveau contrôle des originaux…"
+          }
+        }
+      }
+    },
+    "transfer.copying": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copying to the external disk…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copie vers le disque externe…"
+          }
+        }
+      }
+    },
+    "transfer.report": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transfer report"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilan du déplacement"
+          }
+        }
+      }
+    },
+    "transfer.spaceNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copies use logical sizes. No immediate space saving is promised: originals in the Mac’s Trash and APFS snapshots may still occupy space."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les copies sont mesurées en taille logique. Aucun gain immédiat n’est promis : les originaux à la corbeille du Mac et les snapshots APFS peuvent encore occuper de l’espace."
+          }
+        }
+      }
+    },
+    "transfer.completed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy verified; original in the Mac’s Trash."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copie vérifiée ; original dans la corbeille du Mac."
+          }
+        }
+      }
+    },
+    "transfer.kept": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original kept in place."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original conservé en place."
+          }
+        }
+      }
+    },
+    "transfer.revealCopy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the copy in Finder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voir la copie dans le Finder"
+          }
+        }
+      }
+    },
+    "transfer.revealPartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspect the incomplete copy in Finder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspecter la copie inachevée dans le Finder"
+          }
+        }
+      }
+    },
+    "transfer.error.noSources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose at least one file or folder."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez au moins un fichier ou dossier."
+          }
+        }
+      }
+    },
+    "transfer.error.invalidSource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A source cannot be safely read: unsupported item, unavailable cloud content, another mounted volume, or read error. Nothing was moved."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une source ne peut pas être lue en sécurité : type non pris en charge, contenu du nuage indisponible, autre volume monté ou erreur de lecture. Rien n’a été déplacé."
+          }
+        }
+      }
+    },
+    "transfer.error.overlappingSources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a folder or its contents, without overlapping sources."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez un dossier ou son contenu, sans sources imbriquées."
+          }
+        }
+      }
+    },
+    "transfer.error.invalidDestination": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose an existing writable folder on an external disk."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez un dossier existant et inscriptible sur un disque externe."
+          }
+        }
+      }
+    },
+    "transfer.error.externalRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The destination must be on a local external disk. Internal and network volumes are refused."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La destination doit être sur un disque externe local. Les volumes internes et réseau sont refusés."
+          }
+        }
+      }
+    },
+    "transfer.error.destinationChanged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The destination changed or became unavailable. Originals were kept. Prepare a new plan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La destination a changé ou n’est plus disponible. Les originaux ont été conservés. Préparez un nouveau plan."
+          }
+        }
+      }
+    },
+    "transfer.error.protectedSource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A source is protected or in use. Close the application using it and choose an allowed item."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une source est protégée ou en cours d’utilisation. Fermez l’application qui l’utilise et choisissez un élément autorisé."
+          }
+        }
+      }
+    },
+    "rule.archive.transfer.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verified external transfer"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacement externe vérifié"
+          }
+        }
+      }
+    },
+    "rule.archive.transfer.what": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An explicitly chosen file or folder, copied to a different external volume and verified with SHA-256 before the original goes to the Mac’s Trash."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un fichier ou dossier choisi explicitement, copié sur un autre volume externe et vérifié par SHA-256 avant la mise à la corbeille du Mac de l’original."
+          }
+        }
+      }
+    },
+    "rule.archive.transfer.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore the original from the Mac’s Trash, or copy the verified external copy back. Space stays occupied until the Mac’s Trash is emptied; snapshots can retain blocks longer."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurez l’original depuis la corbeille du Mac, ou recopiez la copie externe vérifiée. L’espace reste occupé jusqu’au vidage de la corbeille du Mac ; les snapshots peuvent retenir les blocs plus longtemps."
+          }
+        }
+      }
+    },
+    "time_machine.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local snapshots on your startup disk, newest first."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les snapshots locaux du disque de démarrage, du plus récent au plus ancien."
+          }
+        }
+      }
+    },
+    "time_machine.local_snapshots": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local snapshots"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Snapshots locaux"
+          }
+        }
+      }
+    },
+    "helper.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the administrator helper…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification du composant administrateur…"
+          }
+        }
+      }
+    },
+    "helper.persistence": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Approve the helper once in macOS to let Oust! use its limited administrator actions during later cleanups, including after restarting your Mac. Oust! never stores your password. Full Disk Access is a separate macOS permission; if the helper cannot act, Oust! may still show the administrator prompt."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisez une fois le composant dans macOS pour qu’Oust! utilise ses actions administrateur limitées lors des prochains vidages, y compris après un redémarrage du Mac. Oust! ne conserve jamais votre mot de passe. L’Accès complet au disque reste une autorisation macOS distincte ; si le composant ne peut pas agir, Oust! peut encore afficher l’invite administrateur."
+          }
+        }
+      }
+    },
+    "helper.stable_location": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For a stable installation, keep Oust! in Applications and install or repair its helper from that copy. After replacing the app, repair may be needed; macOS keeps control of approval."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pour une installation stable, conservez Oust! dans Applications et installez ou réparez son composant depuis cette copie. Après remplacement de l’app, une réparation peut être nécessaire ; macOS reste maître de l’autorisation."
+          }
+        }
+      }
+    },
+    "helper.diagnostic.incomplete_bundle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This copy is missing the helper executable or its launch configuration. Install a complete signed copy of Oust! before trying again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il manque le composant ou sa configuration de lancement dans cette copie. Installez une copie signée complète d’Oust! avant de réessayer."
+          }
+        }
+      }
+    },
+    "helper.diagnostic.invalid_configuration": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The embedded helper configuration does not match Oust!’s fixed service. Replace this copy with a complete signed app."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La configuration du composant embarqué ne correspond pas au service fixe d’Oust!. Remplacez cette copie par une app signée complète."
+          }
+        }
+      }
+    },
+    "helper.diagnostic.invalid_signature": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The helper signature does not match Oust!’s expected developer and identifier. Replace this copy with a complete signed app."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La signature du composant ne correspond pas au développeur et à l’identifiant attendus par Oust!. Remplacez cette copie par une app signée complète."
+          }
+        }
+      }
+    },
+    "helper.update_deferred": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This app’s helper has changed. Repair its installation after all cleanups have finished, including in other copies of Oust! or its command-line tool. Oust! never replaces an approved helper automatically."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le composant de cette copie a changé. Réparez son installation une fois tous les nettoyages terminés, y compris dans les autres copies d’Oust! ou son outil en ligne de commande. Oust! ne remplace jamais automatiquement un composant autorisé."
+          }
+        }
+      }
+    },
+    "helper.operation_busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A cleanup or helper update is in progress. Try again when it has finished."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un nettoyage ou une mise à jour du composant est en cours. Réessayez après sa fin."
+          }
+        }
+      }
+    },
+    "cleaning.completed_count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ of %@ items processed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ éléments traités sur %@"
+          }
+        }
+      }
+    },
+    "cleaning.elapsed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elapsed: %@ · Current step: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temps écoulé : %@ · Étape en cours : %@"
+          }
+        }
+      }
+    },
+    "cleaning.stop_requested": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop requested. Operations already started by macOS must finish; remaining items will be left in place."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêt demandé. Les opérations déjà lancées par macOS doivent se terminer ; les éléments restants seront laissés en place."
+          }
+        }
+      }
+    },
+    "cleaning.phase.preparing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing cleanup"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparation du nettoyage"
+          }
+        }
+      }
+    },
+    "cleaning.phase.revalidating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revalidating items"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revérification des éléments"
+          }
+        }
+      }
+    },
+    "cleaning.phase.checking_component": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the Time Machine component"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification du composant Time Machine"
+          }
+        }
+      }
+    },
+    "cleaning.phase.snapshot_batch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleting a batch of %@ snapshots · Waiting for macOS"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suppression d’un lot de %@ snapshots · Attente de macOS"
+          }
+        }
+      }
+    },
+    "cleaning.phase.snapshot_authorization": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Administrator authorization and deletion · %@ snapshots"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisation administrateur et suppression · %@ snapshots"
+          }
+        }
+      }
+    },
+    "cleaning.phase.verifying_snapshots": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verifying snapshot deletion"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification de la suppression des snapshots"
+          }
+        }
+      }
+    },
+    "cleaning.phase.deleting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Processing items"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Traitement des éléments"
+          }
+        }
+      }
+    },
+    "cleaning.phase.journaling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording results"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrement des résultats"
+          }
+        }
+      }
+    },
+    "cleaning.phase.measuring": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measuring reclaimed space"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mesure de l’espace récupéré"
+          }
+        }
+      }
+    },
+    "transfer.elapsed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elapsed: %@ · Current step: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Écoulé : %@ · Étape actuelle : %@"
           }
         }
       }

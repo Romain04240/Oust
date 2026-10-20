@@ -305,6 +305,53 @@ struct ArchiveTests {
         #expect(byName["worktree"]?.blocker == .isWorktree)
     }
 
+    @Test("Des projets imbriqués et une racine projet sont reconnus sans doublons")
+    func nestedProjects() async throws {
+        let desk = try Desk()
+        let old = try desk.sampleProject("client/ancien")
+        try desk.file("client/ancien/package.json", bytes: 20)
+        desk.age(old, days: 400)
+        let found = await ProjectCandidates.find(in: [desk.projects, old], inactiveSince: Date().addingTimeInterval(-180 * 86_400),
+            home: desk.home, processes: ProcessSnapshot(processes: []))
+        #expect(found.map { $0.url.resolvingSymlinksInPath().path } == [old.resolvingSymlinksInPath().path])
+    }
+
+    @Test("Un cache récent ne réveille pas un projet dont les sources sont anciennes")
+    func generatedActivity() async throws {
+        let desk = try Desk()
+        let old = try desk.sampleProject("ancien")
+        try desk.file("ancien/package.json", bytes: 20)
+        desk.age(old, days: 400)
+        try desk.file("ancien/node_modules/dependance/index.js", bytes: 100)
+        let found = await ProjectCandidates.find(in: [desk.projects], inactiveSince: Date().addingTimeInterval(-180 * 86_400),
+            home: desk.home, processes: ProcessSnapshot(processes: []))
+        #expect(found.count == 1)
+        #expect(found.first?.lastModified ?? .distantFuture < Date().addingTimeInterval(-180 * 86_400))
+        #expect(found.first?.fileCount == 6)
+    }
+
+    @Test("Un point dans le nom du dossier ne transforme pas le projet en paquet")
+    func dottedFolder() async throws {
+        let desk = try Desk()
+        let project = try desk.sampleProject("site.fr")
+        try desk.file("site.fr/package.json", bytes: 20)
+        desk.age(project, days: 400)
+        let found = await ProjectCandidates.find(in: [desk.projects], inactiveSince: Date().addingTimeInterval(-180 * 86_400),
+            home: desk.home, processes: ProcessSnapshot(processes: []))
+        #expect(found.map(\.name) == ["site.fr"])
+    }
+
+    @Test("Une source modifiée récemment reste active même si les caches sont anciens")
+    func sourceActivity() async throws {
+        let desk = try Desk()
+        let project = try desk.sampleProject("actif")
+        desk.age(project, days: 400)
+        try desk.file("actif/nouveau.swift", bytes: 100)
+        let found = await ProjectCandidates.find(in: [desk.projects], inactiveSince: Date().addingTimeInterval(-180 * 86_400),
+            home: desk.home, processes: ProcessSnapshot(processes: []))
+        #expect(found.isEmpty)
+    }
+
     @Test("Le volume d'arrivée : APFS conseillé, exFAT signalé, et les refus")
     func destinationChecks() throws {
         let desk = try Desk()

@@ -48,9 +48,9 @@ public enum Palette {
     /// dégradé chaud de Photos et le violet du Développement, ses voisins.
     public static func colors(for section: AppSection) -> SectionColors {
         switch section {
-        case .overview, .cart:
+        case .overview, .advice, .cart:
             SectionColors(start: Color(hex: 0xE0157F), end: Color(hex: 0x6E3BF5), glow: Color(hex: 0xFF6FB8), deep: Color(hex: 0x1B0E52))
-        case .developer, .archive:
+        case .developer, .archive, .transfer:
             SectionColors(start: Color(hex: 0x8E3CF7), end: Color(hex: 0x2F5BF5), glow: Color(hex: 0x9E8CFF), deep: Color(hex: 0x0A1652))
         case .explorer, .largeFiles, .clouds:
             SectionColors(start: Color(hex: 0x0A6BE0), end: Color(hex: 0x007D8F), glow: Color(hex: 0x4FC3FF), deep: Color(hex: 0x002142))
@@ -58,7 +58,7 @@ public enum Palette {
             SectionColors(start: Color(hex: 0x00806C), end: Color(hex: 0x14853A), glow: Color(hex: 0x3EE0A8), deep: Color(hex: 0x002917))
         case .browsers, .photos:
             SectionColors(start: Color(hex: 0xCC4A06), end: Color(hex: 0xD3145E), glow: Color(hex: 0xFF8A4C), deep: Color(hex: 0x420018))
-        case .system, .applications:
+        case .system, .applications, .timeMachine:
             SectionColors(start: Color(hex: 0x5148D6), end: Color(hex: 0x334D73), glow: Color(hex: 0x8FA2FF), deep: Color(hex: 0x121E39))
         case .history:
             SectionColors(start: Color(hex: 0xA35F00), end: Color(hex: 0xB03F0B), glow: Color(hex: 0xFFB547), deep: Color(hex: 0x391100))

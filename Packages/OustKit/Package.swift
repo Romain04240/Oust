@@ -112,7 +112,9 @@ let package = Package(
         // MARK: Moteurs
 
         .target(name: "OustScan", dependencies: ["OustCore"], swiftSettings: .strict),
-        .target(name: "OustVolume", dependencies: ["OustCore", "OustHelperContract"], swiftSettings: .strict),
+        .target(name: "OustAPFS"),
+        .target(name: "OustVolume", dependencies: ["OustCore", "OustHelperContract", "OustAPFS"], swiftSettings: .strict),
+        .target(name: "OustUpdates", dependencies: ["OustCore", "OustHelperContract"], swiftSettings: .strict),
         .target(name: "OustSafety", dependencies: ["OustCore"], swiftSettings: .strict),
         .target(
             name: "OustRules",
@@ -175,7 +177,7 @@ let package = Package(
         .target(
             name: "OustModel",
             dependencies: [
-                "OustCore", "OustScan", "OustVolume", "OustSafety", "OustRules",
+                "OustCore", "OustScan", "OustVolume", "OustSafety", "OustRules", "OustUpdates",
                 "OustClean", "OustDuplicates", "OustBrowsers", "OustLocalization",
                 "OustUninstall", "OustArchive", "OustLargeFiles", "OustWatch", "OustPhotos", "OustClouds",
             ],
@@ -196,7 +198,7 @@ let package = Package(
 
         // MARK: Sections de l'interface
 
-        .target(name: "FeatureOverview", dependencies: .feature, swiftSettings: .strict),
+        .target(name: "FeatureOverview", dependencies: .feature + ["OustVolume"], swiftSettings: .strict),
         .target(name: "FeatureDevAI", dependencies: .feature, swiftSettings: .strict),
         .target(
             name: "FeatureExplorer",
@@ -237,6 +239,8 @@ let package = Package(
             dependencies: ["OustLocalization", "OustCore", "OustUninstall", "OustArchive", "OustModel"]
         ),
         .testTarget(name: "OustUninstallTests", dependencies: ["OustUninstall", "OustClean", "OustCore", "OustSafety"]),
+        .testTarget(name: "OustModelTests", dependencies: ["OustModel", "OustCore", "OustVolume"]),
+        .testTarget(name: "OustUpdatesTests", dependencies: ["OustUpdates", "OustCore"]),
         .testTarget(name: "OustArchiveTests", dependencies: ["OustArchive", "OustClean", "OustCore", "OustSafety"]),
         .testTarget(name: "OustLargeFilesTests", dependencies: ["OustLargeFiles", "OustScan", "OustCore", "OustSafety"]),
         .testTarget(name: "OustSunburstTests", dependencies: ["OustSunburst", "OustScan"]),

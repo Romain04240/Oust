@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import OustHelperContract
 import Security
 import ServiceManagement
@@ -38,12 +39,143 @@ public enum PrivilegedHelper {
     /// Système › Ouverture, avec le mot de passe d'un administrateur : c'est
     /// incontournable, et les Réglages d'Oust! le disent avant.
     public static func install() throws {
+        guard beginMaintenance() else { throw LifecycleError.busy }
+        defer { endMaintenance() }
         try service.register()
+        rememberFingerprint()
+    }
+
+    /// Diagnostic de la copie courante, sans enregistrer ni lancer le démon.
+    /// Un enregistrement réussi n'atteste pas que launchd sait encore retrouver
+    /// le programme après un déplacement ou un remplacement de l'app.
+    public enum InstallationIssue: String, Sendable, Equatable {
+        case incompleteBundle = "helper.diagnostic.incomplete_bundle"
+        case invalidConfiguration = "helper.diagnostic.invalid_configuration"
+        case invalidSignature = "helper.diagnostic.invalid_signature"
+    }
+
+    public static var installationIssue: InstallationIssue? {
+        inspectBundle(at: Bundle.main.bundleURL)
+    }
+
+    public static var isInApplications: Bool {
+        Bundle.main.bundleURL.deletingLastPathComponent().standardizedFileURL.path == "/Applications"
+    }
+
+    static func inspectBundle(at bundleURL: URL) -> InstallationIssue? {
+        let executable = bundleURL.appendingPathComponent("Contents/MacOS/oust-helper")
+        let plistURL = bundleURL.appendingPathComponent("Contents/Library/LaunchDaemons/" + HelperContract.daemonPlistName)
+        guard FileManager.default.isExecutableFile(atPath: executable.path),
+              let data = try? Data(contentsOf: plistURL) else { return .incompleteBundle }
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              plist["Label"] as? String == HelperContract.daemonIdentifier,
+              plist["BundleProgram"] as? String == "Contents/MacOS/oust-helper",
+              (plist["MachServices"] as? [String: Any])?[HelperContract.machServiceName] as? Bool == true,
+              plist["Program"] == nil, plist["ProgramArguments"] == nil else { return .invalidConfiguration }
+        var code: SecStaticCode?
+        var requirement: SecRequirement?
+        guard SecStaticCodeCreateWithPath(executable as CFURL, [], &code) == errSecSuccess,
+              let code,
+              SecRequirementCreateWithString(HelperContract.daemonRequirement as CFString, [], &requirement) == errSecSuccess,
+              let requirement,
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate), requirement) == errSecSuccess else {
+            return .invalidSignature
+        }
+        return nil
     }
 
     /// Le retire. Un démon en cours d'exécution est arrêté par le système.
     public static func uninstall() async throws {
+        guard beginMaintenance() else { throw LifecycleError.busy }
+        defer { endMaintenance() }
         try await service.unregister()
+        UserDefaults.standard.removeObject(forKey: fingerprintKey)
+    }
+
+    /// Le retrait asynchrone attend l'arrêt du processus avant l'enregistrement.
+    public static func reinstall() async throws {
+        guard beginMaintenance() else { throw LifecycleError.busy }
+        defer { endMaintenance() }
+        try await service.unregister()
+        try service.register()
+        rememberFingerprint()
+    }
+
+    public enum LifecycleError: Error { case busy }
+
+    public enum UpdateState: Sendable, Equatable {
+        case none
+        case deferred
+    }
+
+    private struct Lifecycle {
+        var mutations = 0
+        var maintenance = false
+        var startupAttempted = false
+        var update: UpdateState = .none
+    }
+    private static let lifecycle = Mutex(Lifecycle())
+    private static let fingerprintKey = "privilegedHelper.registeredFingerprint"
+    public static var updateState: UpdateState { lifecycle.withLock { $0.update } }
+
+    private static func beginMaintenance() -> Bool {
+        lifecycle.withLock {
+            guard !$0.maintenance, $0.mutations == 0 else { return false }
+            $0.maintenance = true
+            return true
+        }
+    }
+    private static func endMaintenance() { lifecycle.withLock { $0.maintenance = false } }
+    private static func beginMutation() -> Bool {
+        lifecycle.withLock {
+            guard !$0.maintenance else { return false }
+            $0.mutations += 1
+            return true
+        }
+    }
+    private static func endMutation() { lifecycle.withLock { $0.mutations -= 1 } }
+
+    private static func fingerprint() -> String? {
+        let bundleURL = Bundle.main.bundleURL
+        guard let executable = try? Data(contentsOf: bundleURL.appendingPathComponent("Contents/MacOS/oust-helper")),
+              let plist = try? Data(contentsOf: bundleURL.appendingPathComponent("Contents/Library/LaunchDaemons/" + HelperContract.daemonPlistName)) else { return nil }
+        var hash = SHA256()
+        hash.update(data: Data(bundleURL.standardizedFileURL.path.utf8))
+        hash.update(data: executable)
+        hash.update(data: plist)
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func rememberFingerprint() {
+        // Un refus d'approbation n'est jamais mémorisé comme une installation
+        // fonctionnelle, et une empreinte ne vaut jamais autorisation macOS.
+        if registration == .enabled, let fingerprint = fingerprint() {
+            UserDefaults.standard.set(fingerprint, forKey: fingerprintKey)
+            lifecycle.withLock { $0.update = .none }
+        }
+    }
+
+    /// Actualise uniquement le diagnostic, sans modifier l'enregistrement.
+    /// Un PID absent ou une sonde de version ne ferment pas la course avec une
+    /// autre copie d'Oust! qui lancerait une suppression avant `unregister`.
+    /// Toute réparation reste donc explicitement demandée par l'utilisateur.
+    public static func synchronizeApprovedInstallation() async {
+        let shouldAttempt = lifecycle.withLock {
+            guard !$0.startupAttempted else { return false }
+            $0.startupAttempted = true
+            return true
+        }
+        guard shouldAttempt, installationIssue == nil else { return }
+        let update = installationUpdate(registration: registration, currentFingerprint: fingerprint(),
+                                       registeredFingerprint: UserDefaults.standard.string(forKey: fingerprintKey))
+        lifecycle.withLock { $0.update = update }
+    }
+
+    static func installationUpdate(registration: Registration, currentFingerprint: String?,
+                                   registeredFingerprint: String?) -> UpdateState {
+        guard registration == .enabled, let currentFingerprint,
+              currentFingerprint != registeredFingerprint else { return .none }
+        return .deferred
     }
 
     /// Le volet exact des Réglages Système, plutôt que de laisser chercher.
@@ -106,7 +238,18 @@ public enum PrivilegedHelper {
     /// illisible…) n'a rien fait : elle compte comme injoignable, et l'invite
     /// administrateur prend le relais.
     static func deleteSnapshots(dates: [String], transport: Transport = .system,
-                                timeout: TimeInterval = 300) async -> Call<DeletionResponse> {
+                                timeout: TimeInterval = 300,
+                                deletionStarted: @Sendable () -> Void = {},
+                                isCancelled: @Sendable () -> Bool = { false }) async -> Call<DeletionResponse> {
+        guard beginMutation() else { return .unreachable }
+        defer { endMutation() }
+        // Un service peut être « activé » mais ne jamais démarrer (EX_CONFIG
+        // observé le 20/10/2026). Ne pas lui confier une mutation avec le long
+        // délai APFS avant d'avoir reçu une réponse de lecture en cinq secondes.
+        // Aucun ordre de suppression n'a encore été envoyé : le repli est sûr.
+        guard await status(transport: transport, timeout: min(5, timeout)) != nil else { return .unreachable }
+        guard !isCancelled() else { return .unreachable }
+        deletionStarted()
         let call: Call<DeletionResponse?> = await send(transport: transport, timeout: timeout) { proxy, finish in
             proxy.deleteLocalSnapshots(dates, contractVersion: HelperContract.version) { reply in
                 finish(DeletionResponse(dictionary: reply))
@@ -133,6 +276,8 @@ public enum PrivilegedHelper {
     /// se lit de toute façon que dans la liste relue par `BackupPruner`.
     static func deleteBackups(_ timestamps: [String], destination: String, transport: Transport = .system,
                               timeout: TimeInterval) async -> Call<BackupDeletionResponse> {
+        guard beginMutation() else { return .unreachable }
+        defer { endMutation() }
         guard await status(transport: transport) != nil else { return .unreachable }
         let call: Call<BackupDeletionResponse?> = await send(transport: transport, timeout: timeout) { proxy, finish in
             proxy.deleteBackups(timestamps, destination: destination, contractVersion: HelperContract.version) { reply in

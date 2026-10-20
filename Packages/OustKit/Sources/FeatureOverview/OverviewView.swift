@@ -27,10 +27,9 @@ public struct OverviewView: View {
                 if phase.hasRun || phase.isRunning {
                     CategoryGrid(model: model, volume: volume)
                 }
-                // Seulement s'il y a des snapshots à supprimer : sans eux, le purgeable
-                // est ce que macOS rend de lui-même (caches, iCloud), rien à faire.
+                // La mesure APFS des snapshots est indépendante du purgeable du volume.
                 if volume.isBoot, model.snapshotEstimate > 1_000_000_000, !model.deletableSnapshots.isEmpty {
-                    PurgeableCard(model: model)
+                    SnapshotCard(model: model)
                 }
             }
         }
@@ -65,19 +64,13 @@ private struct HeroCard: View {
     let model: AppModel
     let volume: VolumeDescriptor
 
-    /// Une part par grande famille, telle qu'analysée jusqu'ici.
+    @State private var breakdown = StorageBreakdown()
+    @State private var showsStorageDetails = false
+
+    private var parts: [StoragePart] { breakdown.parts(capacity: volume.capacity) }
     private var gaugeSegments: [DiskGauge.Segment] {
-        let families: [(String, Set<ItemCategory>, Color)] = [
-            ("dev", [.projectArtifacts, .packageCaches, .xcode, .toolVersions, .compressibleProjects, .containers],
-             Palette.colors(for: .developer).glow),
-            ("agents", [.aiAgents, .aiModels], Palette.color(for: .aiAgents)),
-            ("simulators", [.simulators], Palette.color(for: .simulators)),
-            ("system", [.downloads, .trash, .iosBackups, .virtualMachines, .appCaches, .systemDownloads, .attachments,
-                        .screenshots, .cloudFiles, .creative, .games, .diskTraces], Palette.colors(for: .explorer).glow),
-            ("browsers", [.browsers, .duplicates], Palette.colors(for: .browsers).glow),
-        ]
-        return families.map { id, categories, color in
-            DiskGauge.Segment(id: id, value: model.total(of: categories, headlineOnly: false), color: color)
+        parts.filter { $0.category != .free && $0.category != .purgeable }.map {
+            DiskGauge.Segment(id: $0.category.rawValue, value: $0.bytes, color: storageColor($0.category))
         }
     }
 
@@ -106,12 +99,23 @@ private struct HeroCard: View {
                         }
                         .font(Typography.body)
                         .foregroundStyle(Palette.onGradientSecondary)
-                        .frame(maxWidth: 460, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                     }
-                    StorageBar(capacity: volume.capacity, selected: selected)
-                        .frame(maxWidth: 560)
-                    Legend(capacity: volume.capacity, selected: selected)
+                    StorageChart(parts: parts, capacity: volume.capacity, date: model.analysisDate(for: volume),
+                                 showSystemDetails: { showsStorageDetails = true })
+                    Button { showsStorageDetails = true } label: {
+                        Label { Text("storage.details.open", bundle: .oust) } icon: { Image(systemName: "info.circle") }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Typography.caption.weight(.semibold))
+                    .foregroundStyle(Palette.onGradient)
+                    Text(verbatim: L10n.string("storage.breakdown", Formatters.compactBytes(volume.capacity.available),
+                                               Formatters.compactBytes(volume.capacity.purgeable)))
+                        .font(Typography.caption.monospacedDigit()).foregroundStyle(Palette.onGradientSecondary)
+                    Text("storage.explanation", bundle: .oust)
+                        .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: Spacing.medium) {
                         if !phase.hasRun && !phase.isRunning {
                             Button { Task { await model.analyze() } } label: {
@@ -155,44 +159,25 @@ private struct HeroCard: View {
                     }
                     .padding(.top, Spacing.small)
                 }
-                Spacer()
-                DiskGauge(segments: gaugeSegments, cart: selected, capacity: volume.capacity, beat: model.beat)
-                    .frame(width: 260, height: 260)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                DiskGauge(segments: gaugeSegments, cart: 0, capacity: volume.capacity, beat: model.beat)
+                    .frame(width: 174, height: 174)
             }
+        }
+        .task(id: StorageChartKey(volume: volume.id, tree: model.storageTreeIdentifier(for: volume))) {
+            let value = await model.storageBreakdown(for: volume)
+            guard !Task.isCancelled else { return }
+            breakdown = value
+        }
+        .sheet(isPresented: $showsStorageDetails) {
+            StorageDetailsView(model: model, volume: volume, breakdown: breakdown)
         }
     }
 }
 
-private struct Legend: View {
-    let capacity: Capacity
-    let selected: Int64
-
-    var body: some View {
-        // Deux colonnes : sur une ligne, à côté de la jauge, les libellés se
-        // coupaient au milieu des mots (« Sélectio-nné »).
-        Grid(alignment: .leading, horizontalSpacing: Spacing.xLarge, verticalSpacing: Spacing.tight) {
-            GridRow {
-                entry(Color.white.opacity(0.92), "legend.used", capacity.used)
-                entry(Palette.eclatSolid, "legend.selected", selected)
-            }
-            GridRow {
-                entry(Color.white.opacity(0.45), "legend.purgeable", capacity.purgeable)
-                entry(Color.white.opacity(0.16), "legend.free", capacity.available)
-            }
-        }
-        .font(Typography.caption)
-        .foregroundStyle(Palette.onGradientSecondary)
-    }
-
-    private func entry(_ color: Color, _ key: LocalizedStringKey, _ value: Int64) -> some View {
-        HStack(spacing: Spacing.tight) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(key, bundle: .oust)
-            Text(verbatim: Formatters.compactBytes(value)).monospacedDigit().fontWeight(.semibold)
-        }
-        .lineLimit(1)
-        .fixedSize()
-    }
+private struct StorageChartKey: Hashable {
+    let volume: String
+    let tree: ObjectIdentifier?
 }
 
 /// Une tuile par grande famille, qui mène à sa section.
@@ -260,7 +245,7 @@ private struct CategoryGrid: View {
 }
 
 /// L'espace « purgeable », expliqué : la leçon du 18 octobre.
-private struct PurgeableCard: View {
+private struct SnapshotCard: View {
     let model: AppModel
 
     var body: some View {
@@ -278,7 +263,7 @@ private struct PurgeableCard: View {
                         .foregroundStyle(Palette.onGradientSecondary)
                 }
                 Spacer()
-                Button { model.section = .system } label: { Text("overview.see_snapshots", bundle: .oust) }
+                Button { model.section = .timeMachine } label: { Text("overview.see_snapshots", bundle: .oust) }
                     .buttonStyle(OnGradientButtonStyle())
             }
         }
@@ -370,7 +355,7 @@ private struct VolumeChip: View {
                         } else if readOnly {
                             Text("overview.disk_read_only", bundle: .oust)
                         } else {
-                            Text(verbatim: L10n.string("disks.of_total", Formatters.compactBytes(volume.capacity.available),
+                            Text(verbatim: L10n.string("disks.of_total", Formatters.compactBytes(volume.capacity.availableForImportantUsage),
                                                        Formatters.compactBytes(volume.capacity.total)))
                                 .monospacedDigit()
                         }
@@ -381,7 +366,7 @@ private struct VolumeChip: View {
                         .overlay(alignment: .leading) {
                             GeometryReader { proxy in
                                 Capsule().fill(Color.white.opacity(0.9))
-                                    .frame(width: proxy.size.width * volume.capacity.usedFraction)
+                                    .frame(width: proxy.size.width * volume.capacity.occupiedFraction)
                             }
                         }
                         .frame(width: 150, height: 5)

@@ -138,7 +138,7 @@ public struct MenuBarPanel: View {
 
     private func isLow(_ volume: VolumeDescriptor) -> Bool {
         model.watch.settings.alertsLowDisk
-            && LowDiskAlarm.isLow(available: volume.capacity.available, total: volume.capacity.total,
+            && LowDiskAlarm.isLow(available: volume.capacity.availableForImportantUsage, total: volume.capacity.total,
                                   threshold: model.watch.settings.threshold)
     }
 
@@ -175,10 +175,14 @@ public struct MenuBarPanel: View {
 
     private var binContent: String {
         let count = model.cart.count
+        if model.cartOnlySnapshots && !model.cartSnapshotSizesKnown {
+            return L10n.string("cart.snapshot_count", Formatters.count(model.cartSnapshotCount))
+        }
+        let size = Formatters.bytes(model.cartTotal)
         switch count {
         case 0: return L10n.string("menubar.bin_empty")
-        case 1: return L10n.string("watch.items_one", Formatters.compactBytes(model.cartTotal))
-        default: return L10n.string("watch.items_other", Formatters.count(count), Formatters.compactBytes(model.cartTotal))
+        case 1: return L10n.string("watch.items_one", size)
+        default: return L10n.string("watch.items_other", Formatters.count(count), size)
         }
     }
 
@@ -278,11 +282,11 @@ private struct VolumeLine: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         } trailing: {
-            DiskBar(used: volume.capacity.usedFraction, isLow: isLow)
+            DiskBar(used: volume.capacity.occupiedFraction, isLow: isLow)
                 .frame(width: PanelMetrics.bar)
             // Le nombre seul change de largeur : l'unité et « libres » restent
             // dans leurs colonnes, d'un disque à l'autre.
-            let free = FreeSpace(volume.capacity.available)
+            let free = FreeSpace(volume.capacity.availableForImportantUsage)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(verbatim: free.number)
                     .frame(width: PanelMetrics.number, alignment: .trailing)
@@ -316,7 +320,7 @@ private struct VolumeLine: View {
             }
             .frame(width: PanelMetrics.eject)
         }
-        .help(L10n.string("menubar.volume_free", Formatters.compactBytes(volume.capacity.available),
+        .help(L10n.string("menubar.volume_free", Formatters.compactBytes(volume.capacity.availableForImportantUsage),
                           Formatters.compactBytes(volume.capacity.total)))
         .accessibilityElement(children: .contain)
     }

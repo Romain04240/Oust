@@ -26,9 +26,23 @@ settings:
     # Ici, et pas dans Xcode : le projet est régénéré à chaque fichier ajouté,
     # une équipe choisie dans l'interface disparaîtrait sans prévenir.
     DEVELOPMENT_TEAM: "H3W3XYM2NZ"
-    CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    # TCC mémorise l'exigence de signature, pas seulement le bundle ID.
+    # Alterner Apple Development et Developer ID sous le même identifiant
+    # faisait redemander l'Accès complet au disque à chaque essai (20/10/2026).
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Developer ID Application: Daniel-Romain BLANC (H3W3XYM2NZ)"
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    # Xcode n'ajoute pas l'horodatage sécurisé aux builds ordinaires ; la
+    # notarisation l'exige sur l'app et chaque exécutable embarqué.
+    OTHER_CODE_SIGN_FLAGS: "$(inherited) --timestamp"
+    # Ce réglage porte aussi sur les outils embarqués. Après un changement,
+    # une ancienne copie CodeSignOnCopy peut subsister : check-signing.sh
+    # vérifie leurs droits dans l'app finale, pas seulement les produits source.
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+    # L'exécutable lancé porte directement le code de l'app, comme en Release.
+    ENABLE_DEBUG_DYLIB: NO
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
   configs:
     Release:
       # Sans quoi Xcode injecte `get-task-allow`, que la notarisation refuse
@@ -71,7 +85,7 @@ targets:
         product: OustKit
       # Copié dans Contents/MacOS, à côté de l'exécutable de l'app : c'est le
       # chemin que déclare `BundleProgram` dans son plist. Re-signé à la copie
-      # par l'identité de l'app, Apple Development comme Developer ID.
+      # par l'identité Developer ID de l'app.
       - target: OustHelper
         copy:
           destination: executables

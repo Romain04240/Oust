@@ -59,12 +59,14 @@ public struct DiskGauge: View {
                         .scaleEffect(arc.isCart && kick ? 1.04 : 1)
                 }
                 VStack(spacing: 2) {
-                    Text(verbatim: Formatters.compactBytes(capacity.available))
+                    Text(verbatim: Formatters.compactBytes(capacity.availableForImportantUsage))
                         .font(.system(size: size * 0.13, weight: .heavy, design: .rounded))
-                        .contentTransition(.numericText(value: Double(capacity.available)))
+                        .contentTransition(.numericText(value: Double(capacity.availableForImportantUsage)))
                     Text(verbatim: L10n.string("gauge.free_of", Formatters.compactBytes(capacity.total)))
                         .font(.system(size: max(10, size * 0.045), weight: .semibold))
+                        .lineLimit(2).multilineTextAlignment(.center).minimumScaleFactor(0.8)
                 }
+                .frame(width: size * 0.5)
                 .foregroundStyle(.white)
             }
             .frame(width: size, height: size)
@@ -78,7 +80,7 @@ public struct DiskGauge: View {
             withAnimation(.easeIn(duration: 0.08).delay(0.08)) { kick = false }
         }
         .accessibilityElement()
-        .accessibilityLabel(Text(verbatim: L10n.string("gauge.accessibility", Formatters.compactBytes(capacity.available),
+        .accessibilityLabel(Text(verbatim: L10n.string("gauge.accessibility", Formatters.compactBytes(capacity.availableForImportantUsage),
                                                        Formatters.compactBytes(capacity.total), Formatters.compactBytes(cart))))
     }
 
@@ -101,16 +103,17 @@ public struct DiskGauge: View {
         let gap = Double(radius) * 0.065 / mid
         let minimum = max(gap * 2.2, 9.6 * .pi / 180)
 
-        let cartValue = min(Double(cart), Double(capacity.used))
+        let cartValue = min(Double(cart), Double(capacity.occupied))
         var shown: [(String, Double, Color, Bool)] = []
         var hidden = 0.0
         var categoriesTotal = 0.0
         for segment in segments.sorted(by: { $0.value > $1.value }) {
-            let angle = Double(segment.value) / total * .pi * 2
-            categoriesTotal += Double(segment.value)
+            let accepted = min(Double(max(0, segment.value)), max(0, Double(capacity.occupied) - cartValue - categoriesTotal))
+            let angle = accepted / total * .pi * 2
+            categoriesTotal += accepted
             if angle >= minimum { shown.append((segment.id, angle, segment.color, false)) } else { hidden += angle }
         }
-        let others = max(0, Double(capacity.used) - categoriesTotal - cartValue) / total * .pi * 2 + hidden
+        let others = max(0, Double(capacity.occupied) - categoriesTotal - cartValue) / total * .pi * 2 + hidden
         if others > gap { shown.append(("others", others, Color(hex: 0xD9D4EC), false)) }
         let cartAngle = cartValue / total * .pi * 2
         if cartAngle > 0 { shown.append(("cart", max(cartAngle, minimum), .clear, true)) }

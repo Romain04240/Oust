@@ -80,12 +80,14 @@ extension CleanupEngine {
     /// encore, n'est devenue ni favorite, ni partagée, ni masquée, et n'a pas
     /// été retouchée depuis l'analyse. Après la suppression, on relit : seule
     /// une photo qui a vraiment disparu est notée supprimée.
-    func erasePhotos(_ items: [CleanupItem], session: UUID, isCancelled: () -> Bool) async -> [CleanupOutcome] {
+    func erasePhotos(_ items: [CleanupItem], session: UUID, isCancelled: () -> Bool,
+                     progress: (CleanupPhase) -> Void = { _ in }) async -> [CleanupOutcome] {
         func outcome(_ item: CleanupItem, _ result: OutcomeResult) -> CleanupOutcome {
             CleanupOutcome(sessionID: session, date: Date(), item: item, result: result,
                            bytes: result.succeeded ? item.sizes.freeable : 0)
         }
         let ids = items.compactMap(\.method.photoAssetID)
+        progress(.revalidating)
         guard let current = await photos.facts(of: ids) else {
             return items.map { outcome($0, .skipped(.nowProtected(.unknownState))) }
         }
@@ -108,6 +110,7 @@ extension CleanupEngine {
             if isCancelled() {
                 for one in cleared { outcomes[one.item.id] = outcome(one.item, .skipped(.cancelled)) }
             } else {
+                progress(.deleting)
                 switch await photos.delete(cleared.map(\.id)) {
                 case .deleted:
                     let remaining = await photos.facts(of: cleared.map(\.id)) ?? [:]

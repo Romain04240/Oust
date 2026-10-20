@@ -6,7 +6,7 @@
 # lance l'app depuis l'image montée, et s'étonne ensuite qu'elle disparaisse.
 #
 #     Scripts/release.sh && Scripts/dmg.sh [profil-de-notarisation]
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/.."
 
 IDENTITY="Developer ID Application: Daniel-Romain BLANC (H3W3XYM2NZ)"
@@ -44,6 +44,7 @@ else
     echo "▸ pas de profil de notarisation « $PROFILE » : image signée, non notarisée."
     echo "    xcrun notarytool store-credentials $PROFILE --apple-id VOTRE_IDENTIFIANT --team-id H3W3XYM2NZ"
     echo "    puis relancez Scripts/dmg.sh"
+    exit 1
 fi
 
 rm -rf "$STAGE"

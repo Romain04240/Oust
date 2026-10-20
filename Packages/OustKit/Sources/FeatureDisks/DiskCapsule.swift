@@ -35,7 +35,7 @@ public struct DiskToolbar: ToolbarContent {
 
     /// Moins de 10 % libres : la pastille le dit d'un coup d'œil.
     static func isLow(_ capacity: Capacity) -> Bool {
-        capacity.total > 0 && Double(capacity.available) / Double(capacity.total) < 0.1
+        capacity.total > 0 && Double(capacity.availableForImportantUsage) / Double(capacity.total) < 0.1
     }
 }
 
@@ -127,7 +127,7 @@ struct DiskPastille: View {
     @State private var formatting: FormatTarget?
     @State private var pruning: BackupsTarget?
 
-    private var free: String { L10n.string("disks.free", Formatters.compactBytes(volume.capacity.available)) }
+    private var free: String { L10n.string("disks.free", Formatters.compactBytes(volume.capacity.availableForImportantUsage)) }
 
     var body: some View {
         Button { showsPanel.toggle() } label: {
@@ -196,8 +196,8 @@ struct MiniGauge: View {
     var body: some View {
         GeometryReader { proxy in
             let total = Double(max(1, capacity.total))
-            let selectedPart = min(Double(selected), Double(capacity.used)) / total
-            let usedPart = Double(capacity.used) / total - selectedPart
+            let selectedPart = min(Double(selected), Double(capacity.occupied)) / total
+            let usedPart = Double(capacity.occupied) / total - selectedPart
             ZStack(alignment: .leading) {
                 Capsule().fill(.primary.opacity(0.14))
                 HStack(spacing: 0) {

@@ -4,7 +4,7 @@
 - **Plateforme** : macOS 26
 - **Langage** : Swift 6, SwiftUI
 - **Distribution** : Developer ID, hors App Store, gratuite (open source envisagé)
-- **Statut** : v0.1 en construction (octobre 2026)
+- **Statut** : v0.2 (octobre 2026)
 
 ---
 
@@ -49,10 +49,12 @@ DaisyDisk, Mole, SpaceGuard, CleanMyAgent…), mais aucune ne réunit :
   (`~/Library/Safari`, `~/Library/Mail`) et on classe les erreurs (`EPERM` = TCC).
   Lien direct : `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`.
   Un relancement est nécessaire après l'octroi.
-- **Administrateur** : en v0.1, une invite ponctuelle (`do shell script … with
-  administrator privileges`), uniquement pour `tmutil deletelocalsnapshots` sur
-  des dates validées. En phase 3 : démon `SMAppService` aux verbes XPC typés
-  (modèle : `Tacho/Shared/HelperProtocol.swift`).
+- **Administrateur** : composant optionnel `SMAppService`, aux verbes XPC fixes
+  pour les snapshots et sauvegardes Time Machine. L'accord de macOS persiste ;
+  aucun mot de passe n'est conservé. Après changement du binaire, une réparation
+  explicite peut être nécessaire ; le démarrage diagnostique seulement ce besoin.
+  Sans composant disponible, invite ponctuelle (`do shell script … with
+  administrator privileges`) sur les seules dates validées.
 - **Finder (AppleEvents)** : pour mettre à la corbeille avec « Remettre ».
 
 ---
@@ -98,8 +100,11 @@ artefacts de projets des dossiers choisis.
 
 ### 3.5 Capacité et part invisible
 
-- Capacité réelle (`volumeAvailableCapacity`), importante (`…ForImportantUsage`,
-  celle du Finder), purgeable = différence.
+- Libre immédiat : `statfs`, conservé pour les mesures de nettoyage.
+- Disponible macOS (`…ForImportantUsage`) en titre, avec le détail libre immédiat
+  et purgeable (différence). Le purgeable n'est pas la taille des snapshots.
+  Barre de menus et alarmes utilisent le disponible macOS ; les jauges montrent
+  l'occupé hors purgeable, pour éviter tout double comptage.
 - Snapshots listés sur `/System/Volumes/Data` ; `com.apple.os.update-*` jamais touchés.
 - « Non attribué » = utilisé − analysé : part protégée, snapshots, système.
 
@@ -168,9 +173,11 @@ Le mot « panier » n'est pas employé : c'est une corbeille, pas un achat (Roma
 1. Une corbeille unique, toutes catégories confondues : on y jette ce qui doit partir.
 2. Revue : taille libérable, méthode, badges ; désélection ; révéler dans le Finder.
 3. Confirmation renforcée au-delà de 5 Go ou pour un élément « À examiner ».
-4. **Nettoyage en direct** : une pulsation (et non une barre de progression), chaque
-   élément quitte la liste au moment où il est traité, le compteur d'espace
-   libéré monte en temps réel. Annulable à tout moment entre deux éléments.
+4. **Nettoyage en direct** : pulsation, étape réelle, éléments terminés/total,
+   temps écoulé total et de l'étape sur horloge monotone. Chaque élément quitte
+   la liste lorsqu'il est traité. Les snapshots groupés restent annoncés comme
+   lot ; aucun faux pourcentage d'octets ni temps restant. Arrêt entre éléments,
+   avec état « arrêt demandé » si une opération macOS est déjà engagée.
 5. **Rapport honnête** : libéré maintenant, en attente de la corbeille, retenu par
    les snapshots ; puis suivi de la reprise d'espace par APFS pendant 3 minutes.
 
@@ -215,8 +222,9 @@ pourquoi on peut l'enlever et comment il reviendrait.
 
 ### 9.2 Sections
 
-Vue d'ensemble · Développement & IA · Explorateur · Doublons · Navigateurs ·
-Système · Historique · Corbeille.
+Vue d'ensemble · Conseils · Applications · Navigateurs · Système · Time Machine ·
+Explorateur · Gros et vieux fichiers · Doublons · Photos · Cloud · Développement
+& IA · Déplacer · Archivage · Historique · Corbeille.
 
 Les **Réglages** ont leur fenêtre, à la manière des apps d'Apple (Romain,
 18/10/2026) : Oust! › Réglages… (⌘,) ou le panneau de la barre des menus, quatre
@@ -239,3 +247,72 @@ onglets — Général, Analyse, Veille, Avancé.
 - **Phase 3** : démon privilégié, barre de menus et alerte disque bas, politiques
   de rétention, explications détaillées en option, CLI/MCP pour les agents,
   publication notarisée.
+
+## 11. Conseils, archivage et mises à jour (20/10/2026)
+
+- Conseils locaux dans une page dédiée de la barre latérale : projets à archiver,
+  gros médias anciens à envisager sur disque externe, artefacts régénérables,
+  copies locales du nuage. Pas de sélection ni de déplacement automatique.
+  Chaque ligne est cliquable et ouvre les éléments précis du conseil : Finder
+  pour un fichier, projet ciblé dans Archivage, ou liste à cocher avant revue
+  dans la corbeille. Un conseil devenu périmé n'autorise plus son ancienne action.
+  Les actions se déplient sous chaque recommandation, dans la même page ; les
+  fichiers proposés au déplacement préremplissent le parcours de copie vérifiée.
+- Archivage : racines configurables sur place, projets reconnus dans les
+  collections imbriquées ou comme racine directe, seuils de 1 à 24 mois et
+  vue « Tous les projets ». L'activité estimée des sources exclut les dossiers
+  courants de compilation, dépendances et métadonnées Git ; la copie et sa
+  vérification portent toujours sur le projet complet.
+- Snapshots : liste relue avant et après suppression ; bilan par date, sans
+  annoncer un succès global en cas d'échec partiel. Les anciennes entrées
+  disparaissent du modèle lors de l'actualisation. Les commandes ont un délai
+  borné, même si un descendant garde leurs tubes ouverts.
+  L'affichage suit la date décroissante dans les sections, la recherche et la
+  corbeille, indépendamment de la taille des snapshots.
+  Avant tout ordre au composant privilégié, une sonde de lecture de cinq
+  secondes vérifie qu'il répond vraiment. Un composant enregistré mais qui ne
+  démarre pas laisse la main à l'invite administrateur, sans attente du long
+  délai réservé aux suppressions APFS déjà lancées.
+- Mises à jour : exception réseau explicite à RULES §11. Recherche manuelle
+  depuis le menu de l'app ou Réglages › Général, API GitHub Releases du dépôt
+  `Romain04240/Oust`, versions stables et DMG uniquement. Signature Developer ID
+  de l'équipe vérifiée avant ouverture, empreinte SHA-256 vérifiée si publiée.
+  L'utilisateur quitte l'app puis remplace sa copie par le Finder. Pas de
+  remplacement automatique ni de dépendance tierce ajoutée.
+
+### Ajustements suite aux essais du 20/10/2026
+
+- Debug et Release : signature Developer ID identique, sans `get-task-allow` ni
+  exécutable relais Debug. Avant lancement, la signature doit satisfaire
+  l'exigence désignée de la copie distribuée installée. Ce contrôle protège la
+  continuité TCC ; l'app ne lit ni ne modifie la base des autorisations macOS.
+  Le script de développement lance la copie canonique dans `/Applications`,
+  vérifiée avant remplacement. L'ancienne reste récupérable sous `build/` ; un
+  remplacement intervolume est refusé afin de conserver le renommage atomique.
+- Barre de menus : disponible macOS, synchronisé avec les échantillons de la
+  fenêtre et le suivi de reprise APFS, avec lecture périodique en arrière-plan.
+- Vue d'ensemble : jauge réduite, barre et légende par catégories de fichiers
+  issues du dernier arbre analysé, parts bornées à la capacité courante.
+- Tailles des snapshots : lecture native `fs_snapshot_list` et attribut privé
+  APFS ; total par plages de transactions, derrière un adaptateur de lecture
+  limité aux versions macOS validées (voir ADR 0002). La somme des tailles
+  privées est un minimum ; le total par plages inclut les blocs partagés.
+  Afficher « Taille non mesurée » en cas d'indisponibilité, jamais un faux zéro
+  ni le purgeable global en guise de taille.
+
+### Déplacement vérifié et détail de stockage (20/10/2026)
+
+- Page Déplacer pour fichiers et dossiers explicitement choisis ; entrée aussi
+  depuis les conseils, l'Explorateur et les gros fichiers. Destination externe
+  locale, inscriptible et sur un autre volume. Plan visible puis confirmation.
+- Toutes les copies sont terminées et relues (SHA-256, structure, liens,
+  fourches de ressources) avant la corbeille du Mac des originaux par OustClean.
+  Source et destination sont revalidées, ainsi que l'activité après le SHA.
+  Les dépendances Git externes sont protégées. Aucun nom existant n'est écrasé.
+- Une copie échouée/annulée conserve les originaux ; copies partielles signalées
+  et inspectables. Sur exFAT/FAT, les compagnons AppleDouble sont conservés dans
+  une enveloppe. La taille copiée ne promet pas un espace immédiatement libéré.
+- Système et non attribué ouvre un détail : formule du reste de la jauge,
+  autres volumes APFS du même conteneur, métadonnées et emplacements illisibles.
+  Ces mesures restent distinctes : les snapshots et le purgeable ne sont jamais
+  additionnés une deuxième fois et l'inconnu ne reçoit pas une taille inventée.

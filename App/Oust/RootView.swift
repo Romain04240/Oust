@@ -90,6 +90,9 @@ struct RootView: View {
     private var detail: some View {
         switch model.section {
         case .overview: OverviewView(model: model)
+        case .advice: AdviceView(model: model)
+        case .timeMachine: TimeMachineView(model: model)
+        case .transfer: TransferView(model: model.transfer)
         case .developer: DeveloperView(model: model)
         case .archive: ArchiveView(model: model)
         case .explorer: ExplorerView(model: model)
@@ -123,8 +126,8 @@ private struct Sidebar: View {
     // même public, même question (« qu'est-ce qui pèse, là-dedans ? »), et
     // iCloud y est déjà.
     private let sections: [AppSection] = [
-        .overview, .applications, .browsers, .system, .explorer, .largeFiles, .duplicates, .photos, .clouds, .developer,
-        .archive,
+        .overview, .advice, .applications, .browsers, .system, .timeMachine, .explorer, .largeFiles, .duplicates, .photos, .clouds, .developer,
+        .transfer, .archive,
     ]
 
     var body: some View {
@@ -336,6 +339,8 @@ private struct BinTile: View {
                     Group {
                         if model.cart.isEmpty {
                             Text("sidebar.bin_empty", bundle: .oust)
+                        } else if model.cartOnlySnapshots {
+                            Text(verbatim: L10n.string("cart.snapshot_count", Formatters.count(model.cartSnapshotCount)))
                         } else if model.cartFreesNothingHere {
                             // Des fichiers du cloud restés en ligne ne rendent rien ici :
                             // « — à libérer » se lisait comme une erreur (essai du 18/10/2026).

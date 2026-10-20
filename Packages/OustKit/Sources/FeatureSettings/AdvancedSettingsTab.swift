@@ -27,6 +27,7 @@ struct AdvancedSettingsTab: View {
 
             // Le démon privilégié, à installer ou non (docs/adr/0001).
             PrivilegedHelperSection()
+                .disabled(model.cleaning == .running)
         }
     }
 }

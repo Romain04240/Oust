@@ -47,6 +47,11 @@ if ! app=$(xcodebuild build -project Oust.xcodeproj -scheme Oust -destination 'p
     exit 1
 fi
 echo "L'application se construit."
+if [[ "${OUST_UNSIGNED:-}" != 1 ]]; then
+    signed_app=$(xcodebuild -showBuildSettings -project Oust.xcodeproj -scheme Oust -destination 'platform=macOS' 2>/dev/null \
+        | awk '/Build settings for action build and target Oust:/ { app=1; next } /Build settings for action build and target / { app=0 } app && / TARGET_BUILD_DIR = / { sub(/^.* = /, ""); path=$0 } END { if (path != "") print path "/Oust.app" }')
+    Scripts/check-signing.sh "$signed_app"
+fi
 
 echo
 echo "▸ Tout est vert"

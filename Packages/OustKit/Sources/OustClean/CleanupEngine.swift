@@ -20,7 +20,7 @@ public struct CleanupEngine: Sendable {
     let pathGuard: PathGuard
     let processes: @Sendable () -> ProcessSnapshot
     let capacity: @Sendable (URL) -> Capacity?
-    let deleteSnapshots: @Sendable ([LocalSnapshot]) async -> Bool
+    let deleteSnapshots: @Sendable ([LocalSnapshot], @Sendable () -> Bool, @Sendable (CleanupPhase) -> Void) async -> SnapshotDeletionReport
     /// Les applications ouvertes, par identifiant de bundle (caches, Mail, Messages).
     let runningApps: @Sendable () -> Set<String>
     /// La photothèque, par PhotoKit : la seule voie pour en supprimer un élément.
@@ -45,7 +45,8 @@ public struct CleanupEngine: Sendable {
         pathGuard: PathGuard = PathGuard(),
         processes: @escaping @Sendable () -> ProcessSnapshot = { .current() },
         capacity: @escaping @Sendable (URL) -> Capacity? = { VolumeService.capacity(of: $0) },
-        deleteSnapshots: @escaping @Sendable ([LocalSnapshot]) async -> Bool = { await VolumeService.deleteSnapshots($0) },
+        deleteSnapshots: (@Sendable ([LocalSnapshot]) async -> Bool)? = nil,
+        snapshotResults: (@Sendable ([LocalSnapshot]) async -> SnapshotDeletionReport)? = nil,
         runningApps: @escaping @Sendable () -> Set<String> = {
             Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
         },
@@ -61,7 +62,24 @@ public struct CleanupEngine: Sendable {
         self.pathGuard = pathGuard
         self.processes = processes
         self.capacity = capacity
-        self.deleteSnapshots = deleteSnapshots
+        if let snapshotResults {
+            self.deleteSnapshots = { snapshots, _, progress in
+                progress(.deletingSnapshots(count: snapshots.count))
+                return await snapshotResults(snapshots)
+            }
+        } else if let deleteSnapshots {
+            self.deleteSnapshots = { snapshots, _, progress in
+                progress(.deletingSnapshots(count: snapshots.count))
+                let succeeded = await deleteSnapshots(snapshots)
+                let dates = snapshots.compactMap(\.date)
+                return SnapshotDeletionReport(deleted: succeeded ? Set(dates) : [],
+                    failures: succeeded ? [:] : Dictionary(uniqueKeysWithValues: dates.map { ($0, "tmutil") }))
+            }
+        } else {
+            self.deleteSnapshots = { snapshots, isCancelled, progress in
+                await VolumeService.deleteSnapshotResults(snapshots, isCancelled: isCancelled, progress: progress)
+            }
+        }
         self.transit = transit
         self.runningApps = runningApps
         self.origin = origin
@@ -88,12 +106,13 @@ public struct CleanupEngine: Sendable {
     }
 
     func execute(_ items: [CleanupItem], session: UUID = UUID(), cancellation: CleanupCancellation? = nil,
-                 emit: @Sendable (CleanupEvent) -> Void) async -> CleanupReport {
+                 emit: @escaping @Sendable (CleanupEvent) -> Void) async -> CleanupReport {
         let started = Date()
-        let volumes = Self.volumes(of: items)
-        let before = Self.available(on: volumes, capacity: capacity)
         let selectable = items.filter(\.isSelectable)
         emit(.began(total: selectable.count, expectedBytes: selectable.reduce(0) { $0 + $1.sizes.freeable }))
+        emit(.phaseChanged(.preparing, itemIDs: []))
+        let volumes = Self.volumes(of: items)
+        let before = Self.available(on: volumes, capacity: capacity)
 
         var snapshot = processes()
         var lastRefresh = Date()
@@ -101,7 +120,7 @@ public struct CleanupEngine: Sendable {
         var pending = selectable
         var running = 0
         var busyQueues = Set<String>()
-        let isCancelled = { Task.isCancelled || cancellation?.isCancelled == true }
+        let isCancelled: @Sendable () -> Bool = { Task.isCancelled || cancellation?.isCancelled == true }
 
         await withTaskGroup(of: (item: CleanupItem, outcome: CleanupOutcome).self) { group in
             while true {
@@ -124,12 +143,19 @@ public struct CleanupEngine: Sendable {
                             guard case .localSnapshot(let date) = candidate.method else { return nil }
                             return LocalSnapshot(name: "com.apple.TimeMachine.\(date).local")
                         }
-                        let succeeded = await deleteSnapshots(all)
+                        for candidate in batch where candidate.id != item.id { emit(.itemBegan(id: candidate.id)) }
+                        emit(.phaseChanged(.revalidating, itemIDs: batch.map(\.id)))
+                        let reply = await deleteSnapshots(all, isCancelled) { phase in
+                            emit(.phaseChanged(phase, itemIDs: batch.map(\.id)))
+                        }
                         for candidate in batch {
-                            let result: OutcomeResult = succeeded ? .delegated : .failed(message: "tmutil")
+                            guard case .localSnapshot(let date) = candidate.method else { continue }
+                            let succeeded = reply.deleted.contains(date)
+                            let result: OutcomeResult = succeeded ? .delegated
+                                : reply.failures[date] == "snapshot.error.cancelled" ? .skipped(.cancelled)
+                                : .failed(message: reply.failures[date] ?? "snapshot.error.unverified")
                             let one = CleanupOutcome(sessionID: session, date: Date(), item: candidate, result: result,
                                                      bytes: succeeded ? candidate.sizes.freeable : 0)
-                            if candidate.id != item.id { emit(.itemBegan(id: candidate.id)) }
                             await record(one, into: &outcomes, emit: emit)
                         }
                         continue
@@ -138,8 +164,11 @@ public struct CleanupEngine: Sendable {
                         // Toutes les photos d'un coup : une seule confirmation de macOS.
                         let batch = [item] + pending.filter { $0.method.photoAssetID != nil }
                         pending.removeAll { $0.method.photoAssetID != nil }
-                        for one in await erasePhotos(batch, session: session, isCancelled: isCancelled) {
-                            if one.itemID != item.id { emit(.itemBegan(id: one.itemID)) }
+                        for candidate in batch where candidate.id != item.id { emit(.itemBegan(id: candidate.id)) }
+                        let results = await erasePhotos(batch, session: session, isCancelled: isCancelled) { phase in
+                            emit(.phaseChanged(phase, itemIDs: batch.map(\.id)))
+                        }
+                        for one in results {
                             await record(one, into: &outcomes, emit: emit)
                         }
                         continue
@@ -155,10 +184,29 @@ public struct CleanupEngine: Sendable {
                     group.addTask {
                         // La revalidation se fait ici, juste avant d'agir, et non au
                         // moment où l'élément est entré dans la file.
+                        emit(.phaseChanged(.revalidating, itemIDs: [item.id]))
                         if let reason = await revalidate(item, snapshot: current) {
                             return (item, CleanupOutcome(sessionID: session, date: Date(), item: item,
                                                          result: .skipped(reason), bytes: 0))
                         }
+                        // Une revalidation (archive, git, nuage) peut durer :
+                        // Arrêter pendant celle-ci doit encore empêcher la mutation.
+                        if isCancelled() {
+                            return (item, CleanupOutcome(sessionID: session, date: Date(), item: item,
+                                                         result: .skipped(.cancelled), bytes: 0))
+                        }
+                        // Le SHA d'une archive peut durer : un agent démarré
+                        // pendant cette lecture doit encore conserver l'original.
+                        if case .archive = item.method,
+                           let reason = archiveActivityProtection(item, snapshot: processes()) {
+                            return (item, CleanupOutcome(sessionID: session, date: Date(), item: item,
+                                                         result: .skipped(reason), bytes: 0))
+                        }
+                        if isCancelled() {
+                            return (item, CleanupOutcome(sessionID: session, date: Date(), item: item,
+                                                         result: .skipped(.cancelled), bytes: 0))
+                        }
+                        emit(.phaseChanged(.deleting, itemIDs: [item.id]))
                         return (item, await perform(item, session: session))
                     }
                 }
@@ -169,6 +217,7 @@ public struct CleanupEngine: Sendable {
             }
         }
 
+        emit(.phaseChanged(.measuring, itemIDs: []))
         let after = Self.available(on: volumes, capacity: capacity)
         // Le bilan suit l'ordre de la corbeille, pas celui des fins.
         let order = Dictionary(selectable.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -200,11 +249,28 @@ public struct CleanupEngine: Sendable {
         var outcome = outcome
         outcome.origin = origin
         outcomes.append(outcome)
-        if outcome.result != .skipped(.cancelled) { try? await history?.append(outcome) }
+        if outcome.result != .skipped(.cancelled) {
+            emit(.phaseChanged(.journaling, itemIDs: [outcome.itemID]))
+            try? await history?.append(outcome)
+        }
         emit(.itemFinished(outcome))
     }
 
     // MARK: Revalidation
+
+    func archiveActivityProtection(_ item: CleanupItem, snapshot: ProcessSnapshot) -> SkipReason? {
+        guard snapshot.isComplete else { return .nowProtected(.unknownState) }
+        let scopes = (item.activityScope.map { [$0] } ?? []) + item.paths
+        for scope in scopes {
+            if let process = snapshot.busy(under: scope.path) {
+                return .nowProtected(.activeProcess(name: process.name))
+            }
+            if let process = snapshot.running(inside: scope.path) {
+                return .nowProtected(.appRunning(name: process.name))
+            }
+        }
+        return nil
+    }
 
     /// Rend une raison de ne pas toucher l'élément, ou `nil` si tout est en ordre
     /// (RULES.md, règle 2).
@@ -265,7 +331,18 @@ public struct CleanupEngine: Sendable {
         }
         // Archivé : l'original ne part que s'il est encore celui qu'on a copié.
         if case .archive(let copy) = item.method, let original = item.paths.first {
-            guard ArchiveSeal.originalMatchesCopy(original: original, copy: URL(fileURLWithPath: copy)) else {
+            let matches = await withCheckedContinuation { continuation in
+                // Les lectures et SHA de plusieurs Go ne doivent pas retenir
+                // un thread du pool coopératif pendant des minutes.
+                let worker = Thread {
+                    continuation.resume(returning: ArchiveSeal.originalMatchesCopy(
+                        original: original, copy: URL(fileURLWithPath: copy)))
+                }
+                worker.name = "Oust.ArchiveVerification"
+                worker.qualityOfService = .utility
+                worker.start()
+            }
+            guard matches else {
                 return .changedSinceScan
             }
         }
@@ -419,13 +496,6 @@ public struct CleanupEngine: Sendable {
             total += available
         }
         return total
-    }
-}
-
-extension CleanupMethod {
-    var isSnapshot: Bool {
-        if case .localSnapshot = self { return true }
-        return false
     }
 }
 

@@ -750,6 +750,14 @@ struct CommonMenu: View {
             Label { Text("row.reveal", bundle: .oust) } icon: { Image(systemName: "folder") }
         }
         Button {
+            model.transfer.present(sources: [URL(fileURLWithPath: path)])
+            model.searchText = ""
+            model.section = .transfer
+        } label: {
+            Label { Text("advice.prepare_transfer", bundle: .oust) } icon: { Image(systemName: "externaldrive") }
+        }
+        .disabled(!item.isSelectable || model.transfer.isRunning)
+        Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
         } label: {

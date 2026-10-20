@@ -49,7 +49,16 @@ private struct ReviewView: View {
                             // « — » de 64 points ressemblait à une barre blanche (revue du
                             // 18/10/2026). On le dit en toutes lettres, sans les deux petits
                             // « — » dessous. Un snapshot seul garde son « — » : inconnu, pas nul.
-                            if model.cartFreesNothingHere {
+                            if model.cartOnlySnapshots {
+                                Text(verbatim: L10n.string("cart.snapshot_count", Formatters.count(model.cartSnapshotCount)))
+                                    .font(Typography.title).foregroundStyle(Palette.onGradient)
+                                if model.cartSnapshotSizesKnown {
+                                    HeroSize(model.cartTotal, caption: model.cartSnapshotIsAggregate ? "snapshot.selected_total" : "snapshot.private_total", showsZero: true)
+                                } else {
+                                    Text(model.snapshotSizing ? "snapshot.measuring" : "snapshot.size_unknown", bundle: .oust)
+                                        .font(Typography.headline).foregroundStyle(Palette.onGradientSecondary)
+                                }
+                            } else if model.cartFreesNothingHere {
                                 Text("cart.nothing_on_mac", bundle: .oust)
                                     .font(Typography.title).foregroundStyle(Palette.onGradient)
                             } else {
@@ -102,7 +111,9 @@ private struct ReviewView: View {
                         let items = model.cartItems.filter { group.contains($0.method) }
                         if !items.isEmpty {
                             ItemGroup(title: L10n.string(group.titleKey), symbol: group.symbol, tint: group.tint,
-                                      total: items.reduce(0) { $0 + $1.sizes.freeable }) {
+                                      total: items.reduce(0) { $0 + $1.sizes.freeable },
+                                      totalLabel: items.allSatisfy { $0.method.isSnapshot }
+                                        ? model.cartSnapshotBytes.map(Formatters.bytes) ?? L10n.string("snapshot.size_unknown") : nil) {
                                 LazyVStack(spacing: 0) {
                                     ForEach(items) { item in
                                         row(item)
@@ -250,6 +261,18 @@ private struct CleaningView: View {
                         .contentTransition(.numericText(value: Double(model.freedSoFar)))
                         .animation(.snappy, value: model.freedSoFar)
                     Text("cleaning.freed", bundle: .oust).font(Typography.headline).foregroundStyle(Palette.onGradientSecondary)
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        VStack(spacing: Spacing.tight) {
+                            Text(verbatim: phaseDescription)
+                                .font(Typography.headline)
+                            Text(verbatim: L10n.string("cleaning.completed_count",
+                                Formatters.count(model.cleanupProgress.completed), Formatters.count(model.cleanupProgress.total)))
+                            Text(verbatim: L10n.string("cleaning.elapsed",
+                                duration(model.cleanupProgress.elapsed()), duration(model.cleanupProgress.phaseElapsed())))
+                                .font(Typography.caption).monospacedDigit()
+                        }
+                        .foregroundStyle(Palette.onGradient)
+                    }
                     if let current = model.liveQueue.first(where: { $0.id == model.currentItemID }) {
                         Text(verbatim: L10n.string("cleaning.current", current.title))
                             .font(Typography.body).foregroundStyle(Palette.onGradient).lineLimit(1)
@@ -284,10 +307,35 @@ private struct CleaningView: View {
                 .frame(maxWidth: 640, maxHeight: 280)
                 Button { model.cancelCleaning() } label: { Text("cleaning.stop", bundle: .oust) }
                     .buttonStyle(OnGradientButtonStyle())
+                    .disabled(model.cleaningStopRequested)
+                if model.cleaningStopRequested {
+                    Text("cleaning.stop_requested", bundle: .oust)
+                        .font(Typography.caption).foregroundStyle(Palette.onGradient)
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding(Spacing.xxLarge)
             .onSectionBackground()
         }
+    }
+
+    private var phaseDescription: String {
+        switch model.cleanupProgress.phase {
+        case .preparing: L10n.string("cleaning.phase.preparing")
+        case .revalidating: L10n.string("cleaning.phase.revalidating")
+        case .checkingSnapshotComponent: L10n.string("cleaning.phase.checking_component")
+        case .deletingSnapshots(let count): L10n.string("cleaning.phase.snapshot_batch", Formatters.count(count))
+        case .authorizingSnapshots(let count): L10n.string("cleaning.phase.snapshot_authorization", Formatters.count(count))
+        case .verifyingSnapshots: L10n.string("cleaning.phase.verifying_snapshots")
+        case .deleting: L10n.string("cleaning.phase.deleting")
+        case .journaling: L10n.string("cleaning.phase.journaling")
+        case .measuring: L10n.string("cleaning.phase.measuring")
+        }
+    }
+
+    private func duration(_ elapsed: Duration) -> String {
+        let seconds = max(0, elapsed.components.seconds)
+        return Duration.seconds(seconds).formatted(.time(pattern: .hourMinuteSecond))
     }
 }
 
@@ -308,7 +356,18 @@ private struct ReportView: View {
                     // Des fichiers du cloud restés en ligne, ou rien qui soit parti :
                     // un « — » géant puis « de vide fait » et trois « — » (essai du
                     // 18/10/2026). On le dit en toutes lettres, comme la corbeille.
-                    if freedNothingHere {
+                    if onlySnapshots, snapshotSuccesses > 0 {
+                        Text(verbatim: L10n.string("report.snapshots_deleted", Formatters.count(snapshotSuccesses)))
+                            .font(Typography.title).foregroundStyle(Palette.onGradient)
+                        if snapshotRecovered > 0 {
+                            HeroSize(snapshotRecovered, caption: "report.measured")
+                        } else {
+                            Text("report.snapshots_waiting", bundle: .oust)
+                                .font(Typography.headline).foregroundStyle(Palette.onGradientSecondary)
+                        }
+                        Text("report.snapshots_measurement", bundle: .oust)
+                            .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
+                    } else if freedNothingHere {
                         Text("report.nothing_on_mac", bundle: .oust)
                             .font(Typography.title).foregroundStyle(Palette.onGradient)
                     } else {
@@ -408,6 +467,13 @@ private struct ReportView: View {
     /// Rien de compté, et rien dont la taille soit inconnue : un snapshot
     /// supprimé ne compte rien d'avance mais rend de la place, que la mesure
     /// du disque montre.
+    private var onlySnapshots: Bool { !report.outcomes.isEmpty && report.outcomes.allSatisfy { $0.method.isSnapshot } }
+    private var snapshotSuccesses: Int { report.succeeded.filter { $0.method.isSnapshot }.count }
+    private var snapshotRecovered: Int64 {
+        guard let before = report.availableBefore else { return 0 }
+        return max(0, max(model.reclaimed?.available ?? 0, report.availableAfter ?? 0) - before)
+    }
+
     private var freedNothingHere: Bool {
         report.expectedNow + report.pendingInTrash + report.pendingInPhotos == 0
             && !report.succeeded.contains { $0.category == .snapshots }

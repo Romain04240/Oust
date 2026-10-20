@@ -87,33 +87,92 @@ public enum ProjectCandidates {
         home: URL,
         processes: ProcessSnapshot = .current()
     ) async -> [ProjectCandidate] {
-        let fileManager = FileManager.default
-        var folders: [URL] = []
-        var seen = Set<String>()
-        for root in roots {
-            let entries = (try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-                                                               options: [.skipsHiddenFiles])) ?? []
-            for entry in entries {
-                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-                guard values?.isDirectory == true, values?.isSymbolicLink != true else { continue }
-                if seen.insert(PathNormalizer.normalize(entry.resolvingSymlinksInPath().path)).inserted { folders.append(entry) }
-            }
-        }
+        let folders = await Task.detached(priority: .userInitiated) { discover(in: roots) }.value
         guard !folders.isEmpty else { return [] }
 
         let result = await Scanner.scan(folders, options: .measuring)
         let pathGuard = PathGuard(home: home)
         var candidates: [ProjectCandidate] = []
         for (url, node) in zip(folders, result.roots) {
-            guard let modified = node.latestModification, modified < cutoff else { continue }
+            let modified = await Task.detached(priority: .utility) { sourceActivity(at: url) }.value
+            guard modified == nil || modified! < cutoff else { continue }
             var info = stat()
             lstat(url.path, &info)
             var candidate = ProjectCandidate(url: url, lastModified: modified, sizes: node.total,
                                              fileCount: node.fileCount, fileID: UInt64(info.st_ino))
             candidate.blocker = await blocker(for: url, node: node, guard: pathGuard, processes: processes)
+            if modified == nil, candidate.blocker == nil { candidate.blocker = .unknownState }
             candidates.append(candidate)
         }
         return candidates.sorted { $0.sizes.allocated > $1.sizes.allocated }
+    }
+
+    /// Les collections imbriquées et une racine qui est elle-même un projet
+    /// sont reconnues. Aucun lien, paquet, nuage ou autre volume n'est traversé.
+    static let generated: Set<String> = [".git", ".build", "node_modules", ".next", ".nuxt", ".venv", "venv",
+        "DerivedData", "Pods", "__pycache__", ".gradle", ".swiftpm", "target", ".DS_Store"]
+    static let markers: Set<String> = [".git", "Package.swift", "package.json", "pyproject.toml", "Cargo.toml",
+        "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "pubspec.yaml", "project.yml",
+        "CMakeLists.txt", "go.mod", "project.godot"]
+
+    static func discover(in roots: [URL]) -> [URL] {
+        let manager = FileManager.default
+        var found: [URL] = []
+        var seen = Set<String>()
+        func visit(_ url: URL, device: dev_t, depth: Int) -> Bool {
+            guard depth <= 5, !Task.isCancelled else { return false }
+            var info = stat()
+            guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+                  info.st_dev == device, info.st_flags & UInt32(SF_DATALESS) == 0,
+                  (try? url.resourceValues(forKeys: [.isPackageKey]).isPackage) != true else { return false }
+            guard let entries = try? manager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return false }
+            let names = Set(entries.map(\.lastPathComponent))
+            if !names.isDisjoint(with: markers) || names.contains(where: { $0.hasSuffix(".xcodeproj") || $0.hasSuffix(".sln") }) {
+                if seen.insert(url.path).inserted { found.append(url) }
+                return true
+            }
+            var nested = false
+            for entry in entries where !entry.lastPathComponent.hasPrefix(".")
+                && !generated.contains(entry.lastPathComponent) {
+                if visit(entry, device: device, depth: depth + 1) { nested = true }
+            }
+            if !nested, depth == 1, seen.insert(url.path).inserted {
+                found.append(url)
+                return true
+            }
+            return nested
+        }
+        for root in roots.map({ $0.standardizedFileURL }).sorted(by: { $0.path.count < $1.path.count }) {
+            guard !found.contains(where: { PathNormalizer.isWithin(root.path, $0.path) }) else { continue }
+            var info = stat()
+            guard lstat(root.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { continue }
+            _ = visit(root, device: info.st_dev, depth: 0)
+        }
+        return found
+    }
+
+    /// L'activité des sources, pas celle des téléchargements de dépendances ni
+    /// des accès de git en arrière-plan. Ce n'est qu'un conseil : l'archivage
+    /// revalide et copie encore l'intégralité, artefacts et fichiers cachés compris.
+    static func sourceActivity(at url: URL) -> Date? {
+        var root = stat()
+        guard lstat(url.path, &root) == 0 else { return nil }
+        var latest: Date?
+        var stack = [url]
+        while let directory = stack.popLast() {
+            guard !Task.isCancelled,
+                  let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return nil }
+            for entry in entries where !generated.contains(entry.lastPathComponent) {
+                var info = stat()
+                guard lstat(entry.path, &info) == 0, info.st_dev == root.st_dev,
+                      info.st_flags & UInt32(SF_DATALESS) == 0 else { return nil }
+                if info.st_mode & S_IFMT == S_IFLNK { continue }
+                if info.st_mode & S_IFMT == S_IFDIR { stack.append(entry); continue }
+                let date = Date(timeIntervalSince1970: Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1e9)
+                latest = max(latest ?? .distantPast, date)
+            }
+        }
+        return latest ?? Date(timeIntervalSince1970: Double(root.st_mtimespec.tv_sec))
     }
 
     /// La première raison de ne pas archiver, ou `nil`.

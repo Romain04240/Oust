@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import OustHelperContract
 import Synchronization
 
@@ -64,37 +65,46 @@ public struct SystemSnapshotTool: SnapshotTool {
         process.standardOutput = out
         process.standardError = err
 
-        let exited = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in exited.signal() }
-        do {
-            try process.run()
-        } catch {
+        do { try process.run() } catch {
             return Output(status: -1, output: "", errorOutput: error.localizedDescription)
         }
-
-        let captured = Captured()
-        let readers = DispatchGroup()
-        DispatchQueue.global().async(group: readers) {
-            captured.set(out: out.fileHandleForReading.readDataToEndOfFile())
+        let descriptors = [out.fileHandleForReading.fileDescriptor, err.fileHandleForReading.fileDescriptor]
+        for fd in descriptors { _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) }
+        var stdout = Data()
+        var stderr = Data()
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(timeout)
+        var timedOut = false
+        var killDeadline: ContinuousClock.Instant?
+        while process.isRunning {
+            drain(descriptors[0], into: &stdout)
+            drain(descriptors[1], into: &stderr)
+            if !timedOut, clock.now >= deadline {
+                timedOut = true
+                process.terminate()
+                killDeadline = clock.now + .seconds(1)
+            }
+            if let killDeadline, clock.now >= killDeadline {
+                if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.01)
         }
-        DispatchQueue.global().async(group: readers) {
-            captured.set(err: err.fileHandleForReading.readDataToEndOfFile())
-        }
-        if exited.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            exited.wait()
-        }
-        readers.wait()
-        let (stdout, stderr) = captured.both
-        return Output(status: process.terminationStatus,
-                      output: String(decoding: stdout, as: UTF8.self),
-                      errorOutput: String(decoding: stderr, as: UTF8.self))
+        drain(descriptors[0], into: &stdout)
+        drain(descriptors[1], into: &stderr)
+        try? out.fileHandleForReading.close()
+        try? err.fileHandleForReading.close()
+        let status: Int32 = timedOut || process.isRunning ? -1 : process.terminationStatus
+        return Output(status: status, output: String(decoding: stdout, as: UTF8.self),
+                      errorOutput: timedOut ? "tmutil timed out" : String(decoding: stderr, as: UTF8.self))
     }
 
-    private final class Captured: Sendable {
-        private let data = Mutex((out: Data(), err: Data()))
-        func set(out: Data) { data.withLock { $0.out = out } }
-        func set(err: Data) { data.withLock { $0.err = err } }
-        var both: (Data, Data) { data.withLock { ($0.out, $0.err) } }
+    private static func drain(_ fd: Int32, into data: inout Data) {
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        for _ in 0..<16 {
+            let count = Darwin.read(fd, &buffer, buffer.count)
+            guard count > 0 else { return }
+            data.append(contentsOf: buffer.prefix(count))
+        }
     }
 }

@@ -70,12 +70,17 @@ public final class ArchiveProgress: Sendable {
     private let copied = Atomic<Int64>(0)
     private let files = Atomic<Int>(0)
     private let cancelled = Atomic<Bool>(false)
+    private let verifying = Atomic<Bool>(false)
 
     public init() {}
 
     public var copiedBytes: Int64 { copied.load(ordering: .relaxed) }
     public var copiedFiles: Int { files.load(ordering: .relaxed) }
     public var isCancelled: Bool { cancelled.load(ordering: .relaxed) }
+    public var isVerifying: Bool { verifying.load(ordering: .relaxed) }
+
+    func beginVerification() { verifying.store(true, ordering: .relaxed) }
+    func beginCopy() { verifying.store(false, ordering: .relaxed) }
 
     public func cancel() { cancelled.store(true, ordering: .relaxed) }
 
@@ -163,7 +168,7 @@ public struct ArchiveCopier: Sendable {
     public func copy(_ project: URL, into folder: URL, appleDouble: Bool, progress: ArchiveProgress) -> Attempt {
         let rootPath = project.standardizedFileURL.path
         var root = stat()
-        guard lstat(rootPath, &root) == 0, root.st_mode & S_IFMT == S_IFDIR else {
+        guard lstat(rootPath, &root) == 0, [S_IFDIR, S_IFREG].contains(root.st_mode & S_IFMT) else {
             return Attempt(result: .failure(.readFailed(path: "", code: errno)), staging: nil)
         }
         do {
@@ -171,19 +176,61 @@ public struct ArchiveCopier: Sendable {
         } catch {
             return Attempt(result: .failure(.copyFailed(path: "", code: EACCES)), staging: nil)
         }
+        if root.st_mode & S_IFMT == S_IFREG {
+            return copySingleFile(project, into: folder, before: root, appleDouble: appleDouble, progress: progress)
+        }
         let staging = folder.appendingPathComponent(ArchiveStaging.name(for: project.lastPathComponent), isDirectory: true)
         guard mkdir(staging.path, 0o700) == 0 else {
             return Attempt(result: .failure(.copyFailed(path: "", code: errno)), staging: nil)
         }
         do {
+            progress.beginCopy()
             let entries = try copyTree(from: rootPath, device: root.st_dev, to: staging.path, progress: progress)
-            try verifyTree(staging.path, against: entries, appleDouble: appleDouble)
+            progress.beginVerification()
+            try verifyTree(staging.path, against: entries, appleDouble: appleDouble, progress: progress)
+            if progress.isCancelled { throw ArchiveError.cancelled }
             let final = try promote(staging, in: folder, name: project.lastPathComponent)
             let bytes = entries.reduce(Int64(0)) { total, entry in
                 if case .file(let size, _) = entry.kind { total + size } else { total }
             }
             return Attempt(result: .success(ArchiveCopy(source: project, destination: final, entries: entries, bytes: bytes)),
                            staging: nil)
+        } catch let error as ArchiveError {
+            return Attempt(result: .failure(error), staging: staging)
+        } catch {
+            return Attempt(result: .failure(.copyFailed(path: "", code: EIO)), staging: staging)
+        }
+    }
+
+    /// Les fichiers isolés passent par le même dossier de préparation réservé.
+    private func copySingleFile(_ source: URL, into folder: URL, before: stat, appleDouble: Bool, progress: ArchiveProgress) -> Attempt {
+        let staging = folder.appendingPathComponent(ArchiveStaging.name(for: source.lastPathComponent), isDirectory: true)
+        guard mkdir(staging.path, 0o700) == 0 else {
+            return Attempt(result: .failure(.copyFailed(path: "", code: errno)), staging: nil)
+        }
+        let temporary = staging.appendingPathComponent(source.lastPathComponent)
+        do {
+            if progress.isCancelled { throw ArchiveError.cancelled }
+            progress.beginCopy()
+            let entry = try copyFile(source.path, to: temporary.path, relative: "", before: before, progress: progress)
+            progress.add(bytes: Int64(before.st_size))
+            progress.beginVerification()
+            guard try Self.sha256(of: temporary.path, uncached: true, progress: progress) == {
+                if case .file(_, let hash) = entry.kind { hash } else { "" }
+            }() else { throw ArchiveError.verificationFailed(path: "") }
+            if progress.isCancelled { throw ArchiveError.cancelled }
+            let final: URL
+            if appleDouble {
+                // Le compagnon ._ porte parfois la fourche de ressources. Garder
+                // l'enveloppe entière évite de perdre ces métadonnées au renommage.
+                let envelope = try promote(staging, in: folder, name: source.lastPathComponent)
+                final = envelope.appendingPathComponent(source.lastPathComponent)
+            } else {
+                final = try promote(temporary, in: folder, name: source.lastPathComponent)
+                _ = ArchiveStaging.discard(staging)
+            }
+            return Attempt(result: .success(ArchiveCopy(source: source, destination: final, entries: [entry],
+                                                        bytes: Int64(before.st_size))), staging: nil)
         } catch let error as ArchiveError {
             return Attempt(result: .failure(error), staging: staging)
         } catch {
@@ -213,7 +260,8 @@ public struct ArchiveCopier: Sendable {
                 let destination = stagingPath + "/" + relative
                 var info = stat()
                 guard lstat(source, &info) == 0 else { throw ArchiveError.readFailed(path: relative, code: errno) }
-                guard info.st_dev == device else { throw ArchiveError.crossesVolume(path: relative) }
+                guard info.st_dev == device, info.st_flags & 0x0080_0000 == 0 else { throw ArchiveError.crossesVolume(path: relative) }
+                guard info.st_flags & UInt32(SF_DATALESS) == 0 else { throw ArchiveError.readFailed(path: relative, code: EIO) }
 
                 switch info.st_mode & S_IFMT {
                 case S_IFDIR:
@@ -223,7 +271,7 @@ public struct ArchiveCopier: Sendable {
                     pending.append(relative)
 
                 case S_IFREG:
-                    entries.append(try copyFile(source, to: destination, relative: relative, before: info))
+                    entries.append(try copyFile(source, to: destination, relative: relative, before: info, progress: progress))
                     progress.add(bytes: Int64(info.st_size))
 
                 case S_IFLNK:
@@ -254,7 +302,7 @@ public struct ArchiveCopier: Sendable {
     }
 
     private func copyFile(_ source: String, to destination: String, relative: String,
-                          before: stat) throws -> ManifestEntry {
+                          before: stat, progress: ArchiveProgress) throws -> ManifestEntry {
         let flags = copyfile_flags_t(COPYFILE_ALL | COPYFILE_NOFOLLOW | COPYFILE_EXCL)
         guard copyfile(source, destination, nil, flags) == 0 else {
             throw ArchiveError.copyFailed(path: relative, code: errno)
@@ -262,14 +310,19 @@ public struct ArchiveCopier: Sendable {
         tamper?(URL(fileURLWithPath: destination))
 
         let original: String
-        do { original = try Self.sha256(of: source, uncached: false) }
+        do { original = try Self.sha256(of: source, uncached: false, progress: progress) }
+        catch let error as ArchiveError { throw error }
         catch { throw ArchiveError.readFailed(path: relative, code: (error as? POSIXError)?.code.rawValue ?? EIO) }
         let copied: String
-        do { copied = try Self.sha256(of: destination, uncached: true) }
+        do { copied = try Self.sha256(of: destination, uncached: true, progress: progress) }
+        catch let error as ArchiveError { throw error }
         catch { throw ArchiveError.verificationFailed(path: relative) }
 
         var after = stat()
-        guard lstat(source, &after) == 0, after.st_size == before.st_size,
+        guard lstat(source, &after) == 0, after.st_dev == before.st_dev, after.st_ino == before.st_ino,
+              after.st_mode == before.st_mode, after.st_size == before.st_size,
+              after.st_ctimespec.tv_sec == before.st_ctimespec.tv_sec,
+              after.st_ctimespec.tv_nsec == before.st_ctimespec.tv_nsec,
               after.st_mtimespec.tv_sec == before.st_mtimespec.tv_sec,
               after.st_mtimespec.tv_nsec == before.st_mtimespec.tv_nsec else {
             throw ArchiveError.sourceChanged(path: relative)
@@ -286,7 +339,8 @@ public struct ArchiveCopier: Sendable {
     /// La copie entière, relue : chaque entrée attendue est là, du bon type et de
     /// la bonne taille, et rien d'autre — sauf les fichiers `._` que macOS ajoute
     /// sur un volume qui ne garde pas les attributs étendus.
-    private func verifyTree(_ stagingPath: String, against entries: [ManifestEntry], appleDouble: Bool) throws {
+    private func verifyTree(_ stagingPath: String, against entries: [ManifestEntry], appleDouble: Bool,
+                            progress: ArchiveProgress) throws {
         var expected: [String: ManifestEntry.Kind] = [:]
         for entry in entries { expected[entry.relativePath] = entry.kind }
         var seen = 0
@@ -297,6 +351,7 @@ public struct ArchiveCopier: Sendable {
                 throw ArchiveError.verificationFailed(path: relativeDirectory)
             }
             for name in names {
+                if progress.isCancelled { throw ArchiveError.cancelled }
                 let relative = relativeDirectory.isEmpty ? name : relativeDirectory + "/" + name
                 guard let kind = expected[relative] else {
                     if appleDouble && name.hasPrefix("._") { continue }
@@ -307,8 +362,10 @@ public struct ArchiveCopier: Sendable {
                 switch (kind, info.st_mode & S_IFMT) {
                 case (.directory, S_IFDIR):
                     pending.append(relative)
-                case (.file(let size, _), S_IFREG) where Int64(info.st_size) == size:
-                    break
+                case (.file(let size, let hash), S_IFREG) where Int64(info.st_size) == size:
+                    guard try Self.sha256(of: directory + "/" + name, uncached: true, progress: progress) == hash else {
+                        throw ArchiveError.verificationFailed(path: relative)
+                    }
                 case (.symlink(let target), S_IFLNK) where Self.linkTarget(directory + "/" + name) == target:
                     break
                 default:
@@ -328,13 +385,7 @@ public struct ArchiveCopier: Sendable {
             if renamex_np(staging.path, candidate.path, UInt32(RENAME_EXCL)) == 0 { return candidate }
             let code = errno
             if code == EEXIST { continue }
-            // Un volume qui ne connaît pas RENAME_EXCL (certains exFAT) : on vérifie
-            // à la main, la fenêtre est minuscule et la copie nous appartient.
-            if code == ENOTSUP || code == EINVAL {
-                var info = stat()
-                if lstat(candidate.path, &info) == 0 { continue }
-                if rename(staging.path, candidate.path) == 0 { return candidate }
-            }
+            // Sans renommage exclusif, on refuse : un contrôle préalable ne ferme pas la course.
             throw ArchiveError.copyFailed(path: "", code: code)
         }
         throw ArchiveError.copyFailed(path: "", code: EEXIST)
@@ -344,12 +395,14 @@ public struct ArchiveCopier: Sendable {
 
     /// L'empreinte SHA-256 du contenu. `uncached` : vider vers le disque puis
     /// relire sans remplir le cache.
-    static func sha256(of path: String, uncached: Bool) throws -> String {
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+    static func sha256(of path: String, uncached: Bool, progress: ArchiveProgress? = nil) throws -> String {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         defer { close(fd) }
+        var opened = stat()
+        guard fstat(fd, &opened) == 0, opened.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EIO) }
         if uncached {
-            if fcntl(fd, F_FULLFSYNC) != 0 { fsync(fd) }
+            if fcntl(fd, F_FULLFSYNC) != 0, fsync(fd) != 0 { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
             _ = fcntl(fd, F_NOCACHE, 1)
         }
         var hasher = SHA256()
@@ -357,6 +410,7 @@ public struct ArchiveCopier: Sendable {
         let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: size, alignment: 16)
         defer { buffer.deallocate() }
         while true {
+            if progress?.isCancelled == true { throw ArchiveError.cancelled }
             let count = read(fd, buffer.baseAddress, size)
             if count < 0 {
                 if errno == EINTR { continue }

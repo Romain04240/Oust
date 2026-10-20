@@ -5,7 +5,7 @@
 # SMAppService refuse d'enregistrer le démon privilégié, et Gatekeeper refuse
 # l'app sur un autre Mac. Seul un certificat Developer ID Application convient à
 # une app distribuée hors Mac App Store.
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/.."
 
 IDENTITY="Developer ID Application: Daniel-Romain BLANC (H3W3XYM2NZ)"
@@ -24,6 +24,7 @@ xcodebuild -project Oust.xcodeproj -scheme Oust -configuration Release \
     CODE_SIGN_IDENTITY="$IDENTITY" \
     PROVISIONING_PROFILE_SPECIFIER="" \
     DEVELOPMENT_TEAM=H3W3XYM2NZ \
+    ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
     OTHER_CODE_SIGN_FLAGS="--timestamp" \
     build 2>&1 | tail -2
 

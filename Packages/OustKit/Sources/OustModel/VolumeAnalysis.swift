@@ -88,7 +88,9 @@ extension AppModel {
 
     /// Ce que la corbeille d'Oust! rendrait sur ce disque.
     public func cartTotal(on volume: VolumeDescriptor) -> Int64 {
-        cartItems.filter { belongs($0, to: volume) }.reduce(0) { $0 + $1.sizes.freeable }
+        let regular = cartItems.filter { !$0.method.isSnapshot && belongs($0, to: volume) }
+            .reduce(0) { $0 + $1.sizes.freeable }
+        return regular + (volume.isBoot ? (cartSnapshotBytes ?? 0) : 0)
     }
 
     // MARK: À quel disque appartient un élément

@@ -8,15 +8,17 @@ import OustLocalization
 public struct HeroSize: View {
     let bytes: Int64
     let caption: LocalizedStringKey?
+    let showsZero: Bool
 
-    public init(_ bytes: Int64, caption: LocalizedStringKey? = nil) {
+    public init(_ bytes: Int64, caption: LocalizedStringKey? = nil, showsZero: Bool = false) {
         self.bytes = bytes
         self.caption = caption
+        self.showsZero = showsZero
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            Text(verbatim: Formatters.compactBytes(bytes))
+            Text(verbatim: showsZero && bytes == 0 ? Formatters.bytes(bytes) : Formatters.compactBytes(bytes))
                 .font(Typography.hero)
                 .foregroundStyle(Palette.onGradient)
                 .contentTransition(.numericText(value: Double(bytes)))
@@ -198,8 +200,8 @@ public struct StorageBar: View {
         GeometryReader { proxy in
             let total = Double(max(1, capacity.total))
             let width = proxy.size.width
-            let selectedPart = min(Double(selected), Double(capacity.used)) / total
-            let usedPart = Double(capacity.used) / total - selectedPart
+            let selectedPart = min(Double(selected), Double(capacity.occupied)) / total
+            let usedPart = Double(capacity.occupied) / total - selectedPart
             let purgeablePart = min(Double(capacity.purgeable), Double(capacity.available) + Double(capacity.purgeable)) / total
             HStack(spacing: 2) {
                 Rectangle().fill(Color.white.opacity(0.92)).frame(width: width * usedPart)

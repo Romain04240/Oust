@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Le résultat d'un outil du système.
 public struct CommandResult: Sendable {
@@ -42,68 +43,65 @@ public enum Command {
     ) async -> CommandResult {
         guard FileManager.default.isExecutableFile(atPath: executable) else { return .notRun }
         return await withCheckedContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = arguments
-            if let directory { process.currentDirectoryURL = directory }
-            if let environment {
-                process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
-            }
-            let out = Pipe()
-            let err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            process.standardInput = FileHandle.nullDevice
-
-            let box = ResultBox()
-            let group = DispatchGroup()
-            let queue = DispatchQueue(label: "fr.meaillais.oust.command", attributes: .concurrent)
-
-            group.enter()
-            queue.async {
-                box.setStdout((try? out.fileHandleForReading.readToEnd()) ?? Data())
-                group.leave()
-            }
-            group.enter()
-            queue.async {
-                box.setStderr((try? err.fileHandleForReading.readToEnd()) ?? Data())
-                group.leave()
-            }
-            group.enter()
-            process.terminationHandler = { _ in group.leave() }
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(returning: .notRun)
-                return
-            }
-
-            queue.asyncAfter(deadline: .now() + timeout) {
-                if process.isRunning {
-                    box.markTimedOut()
-                    process.terminate()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = arguments
+                process.currentDirectoryURL = directory
+                if let environment {
+                    process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
                 }
-            }
-
-            group.notify(queue: queue) {
-                continuation.resume(returning: box.result(status: process.terminationStatus))
+                let out = Pipe()
+                let err = Pipe()
+                process.standardOutput = out
+                process.standardError = err
+                process.standardInput = FileHandle.nullDevice
+                do { try process.run() } catch {
+                    continuation.resume(returning: .notRun)
+                    return
+                }
+                // Un descendant peut hériter des tubes puis survivre à osascript.
+                // Attendre EOF rendait alors le délai inopérant : l'interface
+                // tournait indéfiniment. Les lectures ne bloquent jamais.
+                let descriptors = [out.fileHandleForReading.fileDescriptor, err.fileHandleForReading.fileDescriptor]
+                for fd in descriptors { _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) }
+                var stdout = Data()
+                var stderr = Data()
+                let clock = ContinuousClock()
+                let deadline = clock.now + .seconds(max(0, timeout))
+                var timedOut = false
+                var killDeadline: ContinuousClock.Instant?
+                while process.isRunning {
+                    drain(descriptors[0], into: &stdout)
+                    drain(descriptors[1], into: &stderr)
+                    if !timedOut, clock.now >= deadline {
+                        timedOut = true
+                        process.terminate()
+                        killDeadline = clock.now + .seconds(1)
+                    }
+                    if let killDeadline, clock.now >= killDeadline {
+                        if process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
+                        break
+                    }
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                drain(descriptors[0], into: &stdout)
+                drain(descriptors[1], into: &stderr)
+                try? out.fileHandleForReading.close()
+                try? err.fileHandleForReading.close()
+                let status: Int32 = process.isRunning ? -1 : process.terminationStatus
+                continuation.resume(returning: CommandResult(status: status, stdout: stdout, stderr: stderr, timedOut: timedOut))
             }
         }
     }
 
-    /// Petite boîte synchronisée : les deux tubes se lisent sur d'autres files.
-    private final class ResultBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stdout = Data()
-        private var stderr = Data()
-        private var timedOut = false
-
-        func setStdout(_ data: Data) { lock.withLock { stdout = data } }
-        func setStderr(_ data: Data) { lock.withLock { stderr = data } }
-        func markTimedOut() { lock.withLock { timedOut = true } }
-        func result(status: Int32) -> CommandResult {
-            lock.withLock { CommandResult(status: status, stdout: stdout, stderr: stderr, timedOut: timedOut) }
+    private static func drain(_ fd: Int32, into data: inout Data) {
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        // Limite par tour : un producteur bavard ne doit pas empêcher le délai.
+        for _ in 0..<16 {
+            let count = Darwin.read(fd, &buffer, buffer.count)
+            guard count > 0 else { return }
+            data.append(contentsOf: buffer.prefix(count))
         }
     }
 }

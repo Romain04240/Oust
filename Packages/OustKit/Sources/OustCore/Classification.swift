@@ -107,11 +107,12 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
         case .projectArtifacts, .packageCaches, .xcode, .simulators, .aiAgents, .aiModels,
              .toolVersions, .containers, .compressibleProjects:
             .developer
-        case .downloads, .trash, .iosBackups, .virtualMachines, .snapshots,
+        case .downloads, .trash, .iosBackups, .virtualMachines,
              .appCaches, .systemDownloads, .attachments, .screenshots, .cloudFiles, .creative, .games,
              .diskTraces, .protectedOnDisk:
             .system
         case .browsers: .browsers
+        case .snapshots: .timeMachine
         case .duplicates, .similarImages: .duplicates
         case .explorer: .explorer
         case .applications, .appLeftovers: .applications
@@ -171,6 +172,9 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
 /// Les sections de la barre latérale.
 public enum AppSection: String, Sendable, Hashable, Codable, CaseIterable, Identifiable {
     case overview
+    case advice
+    case timeMachine
+    case transfer
     case developer
     /// Archiver les projets inactifs sur un disque externe (phase 2).
     case archive
@@ -196,6 +200,9 @@ public enum AppSection: String, Sendable, Hashable, Codable, CaseIterable, Ident
     public var symbol: String {
         switch self {
         case .overview: "gauge.with.dots.needle.67percent"
+        case .advice: "lightbulb"
+        case .timeMachine: "clock.arrow.circlepath"
+        case .transfer: "externaldrive.badge.plus"
         case .developer: "chevron.left.forwardslash.chevron.right"
         case .archive: "tray.and.arrow.down"
         case .explorer: "list.bullet.indent"

@@ -164,12 +164,16 @@ struct DiskPanel: View {
     private var capacity: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack {
-                Text(verbatim: L10n.string("disks.used", Formatters.compactBytes(volume.capacity.used)))
+                Text(verbatim: L10n.string("disks.used", Formatters.compactBytes(volume.capacity.occupied)))
                 Spacer()
-                Text(verbatim: L10n.string("disks.available", Formatters.compactBytes(volume.capacity.available)))
+                Text(verbatim: L10n.string("disks.available", Formatters.compactBytes(volume.capacity.availableForImportantUsage)))
                     .foregroundStyle(DiskToolbar.isLow(volume.capacity) ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.primary))
             }
             .font(Typography.caption.monospacedDigit().weight(.semibold))
+            Text(verbatim: L10n.string("storage.breakdown", Formatters.compactBytes(volume.capacity.available),
+                                       Formatters.compactBytes(volume.capacity.purgeable)))
+                .font(Typography.caption.monospacedDigit()).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             MiniGauge(capacity: volume.capacity, selected: volume.isBoot ? model.cartTotal : 0)
                 .frame(height: 8)
         }

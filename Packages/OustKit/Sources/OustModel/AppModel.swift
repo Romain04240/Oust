@@ -59,8 +59,17 @@ public final class AppModel {
 
     // MARK: Volumes
 
-    public private(set) var volumes: [VolumeDescriptor] = []
+    public private(set) var volumes: [VolumeDescriptor] = [] {
+        didSet { watch.updateBoot(bootVolume) }
+    }
     public private(set) var snapshots: [LocalSnapshot] = []
+    public private(set) var snapshotReadFailed = false
+    public private(set) var snapshotSizing = false
+    public private(set) var snapshotRetainedBytes: Int64?
+    private var snapshotMeasuredIDs: Set<String> = []
+    public private(set) var snapshotsRefreshing = false
+    private var snapshotsRevision = 0
+    @ObservationIgnored var snapshotSizeTask: Task<Void, Never>?
     /// Un disque qu'on vient de brancher, à proposer à l'analyse.
     public var offeredVolume: VolumeDescriptor?
     public var bootVolume: VolumeDescriptor? { volumes.first(where: \.isBoot) }
@@ -125,6 +134,8 @@ public final class AppModel {
     public private(set) var currentItemID: String?
     /// Les éléments en cours : quatre au plus partent à la fois.
     public private(set) var currentItemIDs: Set<String> = []
+    public private(set) var cleanupProgress = CleanupProgress()
+    public private(set) var cleaningStopRequested = false
     public private(set) var freedSoFar: Int64 = 0
     public private(set) var beat = 0
     public private(set) var reclaimed: Capacity?
@@ -140,7 +151,11 @@ public final class AppModel {
     // MARK: Sections de la phase 2
 
     public let applications: ApplicationsModel
+    public var storageAdvice: [StorageAdvice] = []
+    public var adviceSearch: Phase = .idle
+    public let updates = UpdateModel()
     public let archive: ArchiveModel
+    public let transfer = TransferModel()
     public let largeFiles: LargeFilesModel
 
     // MARK: Photothèque
@@ -188,6 +203,7 @@ public final class AppModel {
         self.similarImages = SimilarImagesModel(home: home)
         applications.app = self
         archive.app = self
+        transfer.app = self
         largeFiles.app = self
         photos.app = self
         clouds.app = self
@@ -203,6 +219,9 @@ public final class AppModel {
         guard !started else { return }
         started = true
         refreshVolumes()
+        // Un composant changé est signalé à l'utilisateur ; aucune opération
+        // administrateur en cours dans une autre copie n'est interrompue.
+        Task { await PrivilegedHelper.synchronizeApprovedInstallation() }
         // Ce qu'un lancement précédent n'a pas fini d'effacer.
         transit.resume(volumes: volumes.filter { !$0.isBoot }.map(\.mountURL))
         Task { await disk.start() }
@@ -243,11 +262,48 @@ public final class AppModel {
         if fresh != volumes { volumes = fresh }
     }
 
-    public func refreshSnapshots() async {
-        snapshots = await VolumeService.localSnapshots()
+    public func refreshSnapshots(using listing: (@Sendable () async -> [LocalSnapshot]?)? = nil,
+                                 inventory: (@Sendable () async -> SnapshotInventory?)? = nil) async {
+        snapshotsRevision += 1
+        snapshotRetainedBytes = nil
+        snapshotMeasuredIDs = []
+        snapshotSizing = false
+        snapshotSizeTask = nil
+        let revision = snapshotsRevision
+        snapshotsRefreshing = true
+        let fresh = await (listing ?? { await VolumeService.readLocalSnapshots() })()
+        guard revision == snapshotsRevision else { return }
+        snapshotsRefreshing = false
+        guard let fresh else { snapshotReadFailed = true; return }
+        snapshotReadFailed = false
+        snapshots = fresh
+        let currentIDs = Set(fresh.map { "snapshot|" + $0.name })
+        let obsolete = Set(items.values.filter { $0.category == .snapshots && !currentIDs.contains($0.id) }.map(\.id))
+        for id in obsolete { items.removeValue(forKey: id) }
+        cart.subtract(obsolete)
+        snapshotRetainedBytes = nil
         for snapshot in snapshots {
             let item = snapshotItem(snapshot)
             items[item.id] = item
+        }
+        if listing == nil || inventory != nil {
+            snapshotSizing = true
+            snapshotSizeTask = Task {
+                let inventory = await (inventory ?? { await SnapshotInventoryReader.shared.read() })()
+                guard revision == snapshotsRevision else { return }
+                snapshotSizing = false
+                if let inventory,
+                   Set(inventory.snapshots.filter(\.isDeletable).map(\.name)) == Set(snapshots.filter(\.isDeletable).map(\.name)) {
+                    let byName = Dictionary(inventory.snapshots.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+                    snapshots = snapshots.map { byName[$0.name] ?? $0 }
+                    snapshotRetainedBytes = inventory.retainedBytes
+                    snapshotMeasuredIDs = Set(snapshots.filter(\.isDeletable).map { "snapshot|" + $0.name })
+                    for snapshot in snapshots {
+                        let item = snapshotItem(snapshot)
+                        items[item.id] = item
+                    }
+                }
+            }
         }
     }
 
@@ -342,8 +398,23 @@ public final class AppModel {
     /// sont ceux du disque choisi dans la vue d'ensemble.
     public func items(in categories: Set<ItemCategory>) -> [CleanupItem] {
         let scope = itemScope()
-        return items.values.filter { categories.contains($0.category) && scope($0) }
-            .sorted { $0.sizes.freeable > $1.sizes.freeable }
+        return orderedForDisplay(items.values.filter { categories.contains($0.category) && scope($0) })
+    }
+
+    /// Les points de restauration se lisent par date ; les autres propositions
+    /// restent classées par place récupérable. Les égalités ont un ordre stable.
+    private func orderedForDisplay(_ candidates: [CleanupItem]) -> [CleanupItem] {
+        candidates.sorted { left, right in
+            let lhs = left.method.isSnapshot, rhs = right.method.isSnapshot
+            if lhs != rhs { return lhs }
+            if lhs {
+                let first = left.lastActivity ?? .distantPast, second = right.lastActivity ?? .distantPast
+                if first != second { return first > second }
+            } else if left.sizes.freeable != right.sizes.freeable {
+                return left.sizes.freeable > right.sizes.freeable
+            }
+            return left.id < right.id
+        }
     }
 
     // MARK: - Recherche et filtres
@@ -375,7 +446,7 @@ public final class AppModel {
     public var searchResults: [CleanupItem] {
         let filter = ItemFilter(query: searchText)
         guard filter.isActive else { return [] }
-        return items.values.filter(filter.matchesQuery).sorted { $0.sizes.freeable > $1.sizes.freeable }
+        return orderedForDisplay(items.values.filter(filter.matchesQuery))
     }
 
     public var isSearching: Bool { ItemFilter(query: searchText).isActive }
@@ -597,12 +668,17 @@ public final class AppModel {
     public func clearCart() { cart.removeAll() }
 
     public var cartItems: [CleanupItem] {
-        cart.compactMap { items[$0] }.sorted { $0.sizes.freeable > $1.sizes.freeable }
+        orderedForDisplay(cart.compactMap { items[$0] })
     }
 
     /// Ce que le panier rendrait, d'après les tailles libérables.
-    public var cartTotal: Int64 { cartItems.reduce(0) { $0 + $1.sizes.freeable } }
-    public var cartFreesNow: Int64 { cartItems.filter(\.method.freesImmediately).reduce(0) { $0 + $1.sizes.freeable } }
+    public var cartTotal: Int64 {
+        cartItems.filter { !$0.method.isSnapshot }.reduce(0) { $0 + $1.sizes.freeable } + (cartSnapshotBytes ?? 0)
+    }
+    public var cartFreesNow: Int64 {
+        cartItems.filter { $0.method.freesImmediately && !$0.method.isSnapshot }.reduce(0) { $0 + $1.sizes.freeable }
+            + (cartSnapshotBytes ?? 0)
+    }
     public var cartGoesToTrash: Int64 {
         cartItems.filter { $0.method == .trash || $0.method == .trashFromCloud }.reduce(0) { $0 + $1.sizes.freeable }
     }
@@ -642,6 +718,8 @@ public final class AppModel {
         freedSoFar = 0
         currentItemID = nil
         currentItemIDs = []
+        cleanupProgress = CleanupProgress(total: queue.filter(\.isSelectable).count)
+        cleaningStopRequested = false
         reclaimed = nil
         cleaning = .running
         let engine = engine
@@ -655,8 +733,11 @@ public final class AppModel {
             let clock = ContinuousClock()
             var lastBeat = clock.now - .seconds(1)
             for await event in engine.run(queue, cancellation: cancellation) {
+                self.cleanupProgress.receive(event)
                 switch event {
                 case .began:
+                    break
+                case .phaseChanged:
                     break
                 case .itemBegan(let id):
                     self.currentItemID = id
@@ -669,6 +750,10 @@ public final class AppModel {
                     self.liveOutcomes.append(outcome)
                     self.liveQueue.removeAll { $0.id == outcome.itemID }
                     if outcome.result.succeeded {
+                        if self.items[outcome.itemID]?.method.isSnapshot == true {
+                            self.snapshotRetainedBytes = nil
+                            self.snapshotMeasuredIDs = []
+                        }
                         self.freedSoFar += outcome.bytes
                         self.beat += 1
                         self.cart.remove(outcome.itemID)
@@ -708,6 +793,8 @@ public final class AppModel {
 
     /// Arrête entre deux éléments ; ceux déjà partis finissent, le bilan arrive.
     public func cancelCleaning() {
+        guard cleaning == .running else { return }
+        cleaningStopRequested = true
         cancellation?.cancel()
     }
 
@@ -748,6 +835,7 @@ public final class AppModel {
         Task {
             for await capacity in VolumeService.watchReclaim(of: boot.scanRoot) {
                 self.reclaimed = capacity
+                if let index = self.volumes.firstIndex(where: \.isBoot) { self.volumes[index].capacity = capacity }
             }
             self.refreshVolumes()
         }
@@ -833,11 +921,29 @@ public final class AppModel {
             lastActivity: snapshot.creationDate,
             rebuild: .irreversible
         )
+        item.measuredSnapshotBytes = snapshot.privateBytes
+        if let bytes = snapshot.privateBytes { item.sizes = Sizes(private: bytes) }
         if !snapshot.isDeletable { item.protect(.systemPath) }
         return item
     }
 
-    /// Une estimation, faute d'API : la part purgeable du volume, que les
-    /// snapshots expliquent en grande partie (SPEC §3.5).
-    public var snapshotEstimate: Int64 { bootVolume?.capacity.purgeable ?? 0 }
+    /// Les tailles APFS restent distinctes de l'espace purgeable du volume.
+    public var cartOnlySnapshots: Bool { !cartItems.isEmpty && cartItems.allSatisfy { $0.method.isSnapshot } }
+    public var cartSnapshotCount: Int { cartItems.filter { $0.method.isSnapshot }.count }
+    public var cartSnapshotSizesKnown: Bool {
+        cartItems.filter { $0.method.isSnapshot }.allSatisfy { $0.measuredSnapshotBytes != nil }
+    }
+    public var cartSnapshotIsAggregate: Bool {
+        let selected = Set(cartItems.filter { $0.method.isSnapshot }.map(\.id))
+        return !selected.isEmpty && selected == snapshotMeasuredIDs
+            && selected == Set(deletableSnapshots.map(\.id)) && snapshotRetainedBytes != nil
+    }
+    public var cartSnapshotBytes: Int64? {
+        let selected = cartItems.filter { $0.method.isSnapshot }
+        guard !selected.isEmpty else { return 0 }
+        guard selected.allSatisfy({ $0.measuredSnapshotBytes != nil }) else { return nil }
+        if cartSnapshotIsAggregate { return snapshotRetainedBytes }
+        return selected.reduce(0) { $0 + ($1.measuredSnapshotBytes ?? 0) }
+    }
+    public var snapshotEstimate: Int64 { snapshotRetainedBytes ?? 0 }
 }

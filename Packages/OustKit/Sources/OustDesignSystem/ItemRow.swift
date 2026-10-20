@@ -62,7 +62,7 @@ public struct ItemRow: View {
                     }
                     // Le moins important de la ligne : c'est lui qui raccourcit
                     // en premier quand la place manque, pas les pastilles.
-                    Text(verbatim: Describe.rebuild(item.rebuild))
+                    Text(verbatim: item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild))
                         .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1)
                         .layoutPriority(-1)
                 }
@@ -72,7 +72,16 @@ public struct ItemRow: View {
             }
             Spacer(minLength: Spacing.medium)
             VStack(alignment: .trailing, spacing: Spacing.hair) {
-                Text(verbatim: Formatters.compactBytes(item.sizes.freeable)).font(Typography.size)
+                if item.method.isSnapshot {
+                    if let bytes = item.measuredSnapshotBytes {
+                        Text(verbatim: L10n.string("snapshot.private_size", Formatters.bytes(bytes)))
+                            .font(Typography.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    } else {
+                        Text("snapshot.size_unknown", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(verbatim: Formatters.compactBytes(item.sizes.freeable)).font(Typography.size)
+                }
                 if item.sizes.retained > 0 {
                     Text(verbatim: L10n.string("row.retained", Formatters.compactBytes(item.sizes.retained)))
                         .font(Typography.caption).foregroundStyle(.secondary)
@@ -133,7 +142,7 @@ public struct Explanation: View {
                 SafetyBadge(item.safety)
             }
             section("explain.what", Describe.ruleWhat(item.ruleID))
-            section("explain.back", Describe.ruleBack(item.ruleID) + " " + Describe.rebuild(item.rebuild))
+            section("explain.back", Describe.ruleBack(item.ruleID) + " " + (item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild)))
             section("explain.method", Describe.method(item.method))
             if !item.protections.isEmpty {
                 section("explain.protected", item.protections.map(Describe.protection).joined(separator: "\n"))
@@ -269,19 +278,21 @@ public struct ItemGroup<Content: View>: View {
     let symbol: String
     let tint: Color
     let total: Int64
+    let totalLabel: String?
     let selectAllTitle: LocalizedStringKey
     let selectAll: (() -> Void)?
     let content: Content
 
     /// `selectAllTitle` : l'intitulé du bouton d'en-tête, « Cocher le sûr » par
     /// défaut ; « Tout cocher » / « Tout décocher » là où tout peut être choisi.
-    public init(title: String, symbol: String, tint: Color, total: Int64,
+    public init(title: String, symbol: String, tint: Color, total: Int64, totalLabel: String? = nil,
                 selectAllTitle: LocalizedStringKey = "group.select_safe", selectAll: (() -> Void)? = nil,
                 @ViewBuilder content: () -> Content) {
         self.title = title
         self.symbol = symbol
         self.tint = tint
         self.total = total
+        self.totalLabel = totalLabel
         self.selectAllTitle = selectAllTitle
         self.selectAll = selectAll
         self.content = content()
@@ -293,7 +304,7 @@ public struct ItemGroup<Content: View>: View {
                 Image(systemName: symbol).foregroundStyle(tint).font(.system(size: 15, weight: .bold))
                 Text(verbatim: title).font(Typography.headline)
                 Spacer()
-                Text(verbatim: Formatters.compactBytes(total)).font(Typography.size).foregroundStyle(.secondary)
+                Text(verbatim: totalLabel ?? Formatters.compactBytes(total)).font(Typography.size).foregroundStyle(.secondary)
                 if let selectAll {
                     Button(action: selectAll) { Text(selectAllTitle, bundle: .oust) }
                         .buttonStyle(.borderless)

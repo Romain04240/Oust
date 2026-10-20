@@ -63,12 +63,12 @@ public final class MenuBarController: NSObject {
         self.item = nil
     }
 
-    /// L'espace libre à côté de l'icône, seulement sous le seuil d'alerte :
-    /// relu à chaque changement du modèle, sans minuterie.
+    /// Le disponible macOS à côté de l'icône : le même chiffre que la fenêtre,
+    /// relu à chaque nouvel échantillon du modèle.
     private func trackLabel() {
         guard let button = item?.button else { return }
         let title = withObservationTracking {
-            model.watch.isLow ? model.watch.boot.map { " " + Formatters.compactBytes($0.capacity.available) } : nil
+            model.watch.boot.map { " " + Formatters.compactBytes($0.capacity.availableForImportantUsage) }
         } onChange: { [weak self] in
             Task { @MainActor in self?.trackLabel() }
         }

@@ -42,6 +42,29 @@ struct GeneralSettingsTab: View {
             }
 
             Section {
+                Text("updates.privacy", bundle: .oust)
+                    .font(.caption)
+                HStack {
+                    Text(verbatim: L10n.string("updates.installed", model.updates.currentVersion))
+                    Spacer()
+                    if model.updates.busy { ProgressView().controlSize(.small) }
+                    Button { Task { await model.updates.check() } } label: { Text("updates.check", bundle: .oust) }
+                        .disabled(model.updates.busy)
+                }
+                if let message = model.updates.message {
+                    Text(verbatim: message).font(.caption).textSelection(.enabled)
+                }
+                if model.updates.release != nil {
+                    if model.updates.installer != nil {
+                        Button { model.updates.openInstaller() } label: { Text("updates.open_installer", bundle: .oust) }
+                    } else {
+                        Button { Task { await model.updates.download() } } label: { Text("updates.download", bundle: .oust) }
+                            .disabled(model.updates.busy)
+                    }
+                }
+            } header: { Text("updates.title", bundle: .oust) }
+
+            Section {
                 Label { Text("settings.promise_offline", bundle: .oust) } icon: { Image(systemName: "wifi.slash") }
                 Label { Text("settings.promise_trash", bundle: .oust) } icon: { Image(systemName: "trash.square") }
                 Label { Text("settings.promise_history", bundle: .oust) } icon: { Image(systemName: "clock") }

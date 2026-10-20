@@ -144,6 +144,35 @@ struct HelperSecurityTests {
         #expect(tool.deletions == ["2026-10-17-014534"])
     }
 
+    @Test("Une annulation pendant la sonde n'envoie aucun ordre ni signal de suppression")
+    func cancelledAfterProbe() async throws {
+        let requirement = try #require(Self.ownRequirement())
+        let tool = FakeSnapshotTool(listed: HelperServiceTests.listing)
+        let host = Host(service: HelperService(tool: tool, clientRequirement: requirement))
+        let started = Mutex(false)
+        let call = await PrivilegedHelper.deleteSnapshots(
+            dates: ["2026-10-17-014534"], transport: host.transport(daemonRequirement: requirement),
+            deletionStarted: { started.withLock { $0 = true } }, isCancelled: { true })
+        #expect(call.isUnreachable)
+        #expect(!started.withLock { $0 })
+        #expect(tool.deletions.isEmpty)
+        #expect(tool.listings == 0)
+    }
+
+    @Test("Le début de suppression est annoncé seulement après une sonde réussie")
+    func deletionStartsAfterProbe() async throws {
+        let requirement = try #require(Self.ownRequirement())
+        let tool = FakeSnapshotTool(listed: HelperServiceTests.listing)
+        let host = Host(service: HelperService(tool: tool, clientRequirement: requirement))
+        let started = Mutex(false)
+        let call = await PrivilegedHelper.deleteSnapshots(
+            dates: ["2026-10-17-014534"], transport: host.transport(daemonRequirement: requirement),
+            deletionStarted: { started.withLock { $0 = true } })
+        guard case .answered = call else { Issue.record("pas de réponse : \(call)"); return }
+        #expect(started.withLock { $0 })
+        #expect(tool.deletions == ["2026-10-17-014534"])
+    }
+
     @Test("L'application ne croit pas un démon qui n'est pas le sien")
     func refusesForeignDaemon() async throws {
         let ownRequirement = try #require(Self.ownRequirement())
@@ -192,6 +221,20 @@ struct HelperSecurityTests {
 
     // MARK: Outils
 
+    @Test("Un démon enregistré mais muet ne reçoit aucun ordre de suppression")
+    func silentRegisteredHelper() async throws {
+        let requirement = try #require(Self.ownRequirement())
+        let host = SilentHost()
+        let clock = ContinuousClock()
+        let start = clock.now
+        let result = await PrivilegedHelper.deleteSnapshots(dates: ["2026-10-17-014534"],
+            transport: host.transport(requirement: requirement), timeout: 0.15)
+        #expect(result.isUnreachable)
+        #expect(host.service.statusReads.withLock { $0 } == 1)
+        #expect(host.service.deletions.withLock { $0 } == 0)
+        #expect(clock.now - start < .seconds(3))
+    }
+
     /// L'exigence désignée du processus de test : ce qu'il satisfait à coup sûr.
     static func ownRequirement() -> String? {
         var code: SecCode?
@@ -225,6 +268,51 @@ struct HelperSecurityTests {
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { finish(nil) }
         }
     }
+}
+
+/// Simule le service enregistré dont launchd ne parvient pas à fournir de
+/// réponse. Le canal reste ouvert ; seule la sonde de disponibilité expire.
+private final class SilentHost: NSObject, NSXPCListenerDelegate {
+    let service = SilentService()
+    let listener = NSXPCListener.anonymous()
+
+    override init() {
+        super.init()
+        listener.delegate = self
+        listener.resume()
+    }
+    deinit { listener.invalidate() }
+
+    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        connection.exportedInterface = HelperInterface.make()
+        connection.exportedObject = service
+        connection.resume()
+        return true
+    }
+
+    func transport(requirement: String) -> PrivilegedHelper.Transport {
+        let endpoint = Endpoint(value: listener.endpoint)
+        return PrivilegedHelper.Transport(isRegistered: { true },
+            connect: { NSXPCConnection(listenerEndpoint: endpoint.value) }, daemonRequirement: requirement)
+    }
+    private struct Endpoint: @unchecked Sendable { let value: NSXPCListenerEndpoint }
+}
+
+private final class SilentService: NSObject, OustHelperProtocol {
+    let statusReads = Mutex(0)
+    let deletions = Mutex(0)
+    let pendingReplies = Mutex<[@Sendable (NSDictionary) -> Void]>([])
+    func readStatus(withReply reply: @escaping @Sendable (NSDictionary) -> Void) {
+        statusReads.withLock { $0 += 1 }
+        pendingReplies.withLock { $0.append(reply) }
+    }
+    func deleteLocalSnapshots(_ dates: [String], contractVersion: Int,
+                              withReply reply: @escaping @Sendable (NSDictionary) -> Void) {
+        deletions.withLock { $0 += 1 }
+        reply([:])
+    }
+    func deleteBackups(_ timestamps: [String], destination: String, contractVersion: Int,
+                       withReply reply: @escaping @Sendable (NSDictionary) -> Void) { reply([:]) }
 }
 
 /// Un écouteur anonyme qui porte le service du démon le temps d'un test.
