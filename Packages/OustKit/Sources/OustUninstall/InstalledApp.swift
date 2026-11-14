@@ -48,6 +48,11 @@ public struct InstalledApp: Sendable, Hashable, Identifiable {
     /// Désinstallable par Oust!.
     public var isUninstallable: Bool { exclusion == nil }
 
+    /// Une date absente ne permet pas de conclure que l'application est inutilisée.
+    public func wasLastOpened(before cutoff: Date) -> Bool {
+        lastUsed.map { $0 < cutoff } ?? false
+    }
+
     /// Tous les identifiants qui désignent cette application.
     public var allIDs: [String] {
         (bundleID.map { [$0] } ?? []) + embeddedIDs

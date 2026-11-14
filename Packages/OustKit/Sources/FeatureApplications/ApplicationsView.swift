@@ -11,6 +11,8 @@ import OustUninstall
 /// qu'ont laissé les applications déjà jetées à la main.
 public struct ApplicationsView: View {
     @Bindable var model: AppModel
+    @State private var query = ""
+    @State private var showsOnlyUnused = false
 
     public init(model: AppModel) {
         self.model = model
@@ -19,6 +21,15 @@ public struct ApplicationsView: View {
     private var applications: ApplicationsModel { model.applications }
 
     public var body: some View {
+        let unusedCutoff = Calendar.current.date(byAdding: .month, value: -6, to: .now)
+        let uninstallable = filtered(applications.uninstallable).filter { app in
+            guard showsOnlyUnused else { return true }
+            return !applications.isRunning(app) && (unusedCutoff.map { app.wasLastOpened(before: $0) } ?? false)
+        }
+        let excluded = showsOnlyUnused ? [] : filtered(applications.excluded)
+        let visibleSelection = applications.selected.flatMap { selected in
+            !showsOnlyUnused || uninstallable.contains(where: { $0.id == selected.id }) ? selected : nil
+        }
         ZStack {
             SectionBackground(.applications)
             VStack(alignment: .leading, spacing: Spacing.large) {
@@ -49,9 +60,10 @@ public struct ApplicationsView: View {
                     // 1080 pt de fenêtre, une liste à 380 ne laissait au détail
                     // que 350 pt, et « À examiner » s'y repliait sur trois lignes.
                     HStack(alignment: .top, spacing: Spacing.large) {
-                        AppList(model: model)
+                        AppList(model: model, query: $query, showsOnlyUnused: $showsOnlyUnused,
+                                uninstallable: uninstallable, excluded: excluded, selected: visibleSelection)
                             .frame(width: 300)
-                        AppDetail(model: model)
+                        AppDetail(model: model, selected: visibleSelection)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
@@ -64,22 +76,39 @@ public struct ApplicationsView: View {
         }
         .onAppear { applications.pruneMissing() }
     }
+
+    private func filtered(_ apps: [InstalledApp]) -> [InstalledApp] {
+        let needle = query.trimmingCharacters(in: .whitespaces)
+        guard !needle.isEmpty else { return apps }
+        return apps.filter { $0.name.localizedCaseInsensitiveContains(needle) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(needle) }
+    }
 }
 
 // MARK: - Liste
 
 private struct AppList: View {
     let model: AppModel
-    @State private var query = ""
+    @Binding var query: String
+    @Binding var showsOnlyUnused: Bool
+    let uninstallable: [InstalledApp]
+    let excluded: [InstalledApp]
+    let selected: InstalledApp?
 
     private var applications: ApplicationsModel { model.applications }
 
     var body: some View {
         ListSurface {
             VStack(spacing: 0) {
-                TextField(text: $query) { Text("applications.search", bundle: .oust) }
-                    .textFieldStyle(.roundedBorder)
-                    .padding(Spacing.medium)
+                VStack(alignment: .leading, spacing: Spacing.small) {
+                    TextField(text: $query) { Text("applications.search", bundle: .oust) }
+                        .textFieldStyle(.roundedBorder)
+                    Toggle(isOn: $showsOnlyUnused) {
+                        Text("applications.unused_filter", bundle: .oust)
+                    }
+                    .toggleStyle(.checkbox)
+                    .help(L10n.string("applications.unused_filter_help"))
+                }
+                .padding(Spacing.medium)
                 if applications.phase.isRunning {
                     Text(verbatim: L10n.string("applications.measuring", Formatters.count(applications.measuredCount),
                                                Formatters.count(applications.apps.count)))
@@ -87,18 +116,23 @@ private struct AppList: View {
                         .padding(.bottom, Spacing.small)
                 }
                 List(selection: Binding(
-                    get: { applications.selectedID },
+                    get: { selected?.id },
                     set: { id in
-                        guard let id, let app = applications.apps.first(where: { $0.id == id }) else { return }
+                        guard let id, id != applications.selectedID,
+                              let app = uninstallable.first(where: { $0.id == id })
+                                ?? excluded.first(where: { $0.id == id }) else { return }
                         Task { await applications.select(app) }
                     }
                 )) {
                     Section {
-                        ForEach(filtered(applications.uninstallable)) { app in
+                        ForEach(uninstallable) { app in
                             AppRow(app: app, running: applications.isRunning(app)).tag(app.id)
                         }
+                        if showsOnlyUnused && uninstallable.isEmpty && !applications.phase.isRunning {
+                            Text("applications.unused_no_matches", bundle: .oust)
+                                .font(Typography.caption)
+                        }
                     }
-                    let excluded = filtered(applications.excluded)
                     if !excluded.isEmpty {
                         Section(isExpanded: Binding(get: { applications.showsProtected },
                                                     set: { applications.showsProtected = $0 })) {
@@ -118,12 +152,6 @@ private struct AppList: View {
                 OrphanEntry(applications: applications)
             }
         }
-    }
-
-    private func filtered(_ apps: [InstalledApp]) -> [InstalledApp] {
-        let needle = query.trimmingCharacters(in: .whitespaces)
-        guard !needle.isEmpty else { return apps }
-        return apps.filter { $0.name.localizedCaseInsensitiveContains(needle) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(needle) }
     }
 }
 
@@ -225,6 +253,7 @@ private struct AppIcon: View {
 
 private struct AppDetail: View {
     let model: AppModel
+    let selected: InstalledApp?
 
     private var applications: ApplicationsModel { model.applications }
 
@@ -233,7 +262,7 @@ private struct AppDetail: View {
             TrashedAppDetail(model: model, id: trashed)
         } else if applications.showsOrphans {
             OrphanDetail(model: model)
-        } else if let app = applications.selected {
+        } else if let app = selected {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.large) {
                     Header(app: app, applications: applications)

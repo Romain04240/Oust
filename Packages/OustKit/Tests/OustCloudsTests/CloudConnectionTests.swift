@@ -24,7 +24,7 @@ struct CloudConnectionTests {
     }
 
     @Test("Le File Provider d'un compte se lit dans l'attribut de son dossier")
-    func providerAttribute() throws {
+    func providerAttribute() async throws {
         #expect(CloudConnectionCheck.provider(fromDomainAttribute: "com.google.drivefs.fpext/gdrive-108259002140719301520")
                 == "com.google.drivefs.fpext")
         #expect(CloudConnectionCheck.provider(fromDomainAttribute: "com.oplus.devicespace.extension/DeviceSpace")
@@ -32,15 +32,23 @@ struct CloudConnectionTests {
         #expect(CloudConnectionCheck.provider(fromDomainAttribute: "sans-domaine") == nil)
         #expect(CloudConnectionCheck.provider(fromDomainAttribute: "/gdrive-1") == nil)
 
-        // Seul macOS pose l'attribut : un dossier ordinaire n'en a pas, et ne
-        // peut pas s'en donner un.
         let bench = try CloudBench()
         let account = bench.storage.appendingPathComponent("GoogleDrive-a@b.fr", isDirectory: true)
         try bench.folder(account)
+        let file = try bench.file(account.appendingPathComponent("facture.pdf"))
         #expect(CloudConnectionCheck.providerID(of: account) == nil)
+
+        // macOS 27.2.1 accepte cette écriture sur un dossier de test. Même si
+        // l'attribut est lisible, fileproviderd doit reconnaître le fichier.
         let value = Array("com.google.drivefs.fpext/gdrive-1".utf8)
-        #expect(setxattr(account.path, "com.apple.file-provider-domain-id", value, value.count, 0, XATTR_NOFOLLOW) != 0)
-        #expect(CloudConnectionCheck.providerID(of: account) == nil)
+        let written = setxattr(account.path, "com.apple.file-provider-domain-id", value, value.count, 0, XATTR_NOFOLLOW)
+        if written == 0 {
+            #expect(CloudConnectionCheck.providerID(of: account) == "com.google.drivefs.fpext")
+        } else {
+            #expect(CloudConnectionCheck.providerID(of: account) == nil)
+        }
+        #expect(await CloudConnectionCheck.connection(of: file, accountRoot: account, running: ["com.google.drivefs"])
+                == .disconnected)
     }
 
     @Test("Le compte d'un fichier : son dossier sous CloudStorage, rien pour iCloud Drive")

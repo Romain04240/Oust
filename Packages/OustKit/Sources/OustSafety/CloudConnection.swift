@@ -55,9 +55,9 @@ public enum CloudConnectionCheck {
         }
     }
 
-    /// Le File Provider d'un compte, d'après l'attribut que macOS pose sur son
-    /// dossier. Le noyau refuse qu'un autre processus le pose (constaté le
-    /// 18/10/2026) : un dossier ordinaire ne peut pas se faire passer pour un compte.
+    /// L'identifiant du File Provider d'après l'attribut du dossier. Cet attribut
+    /// peut être écrit sur un dossier ordinaire : l'identification par fileproviderd
+    /// dans `connection(of:accountRoot:running:)` doit réussir avant de l'utiliser.
     public static func providerID(of accountRoot: URL) -> String? {
         let name = "com.apple.file-provider-domain-id"
         let size = getxattr(accountRoot.path, name, nil, 0, 0, XATTR_NOFOLLOW)

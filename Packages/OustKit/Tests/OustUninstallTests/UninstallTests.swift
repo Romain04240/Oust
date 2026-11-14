@@ -97,6 +97,24 @@ final class FakeMac {
 @Suite("Le désinstalleur ne prend que ce qui appartient à l'application")
 struct UninstallTests {
 
+    @Test("Seules les dates connues strictement antérieures au seuil sont retenues")
+    func unusedAppsRequireAKnownDateBeforeTheCutoff() throws {
+        let mac = try FakeMac()
+        let cutoff = Date(timeIntervalSince1970: 1_750_000_000)
+        let dates: [String: Date] = [
+            "Ancienne.app": cutoff.addingTimeInterval(-1),
+            "Limite.app": cutoff,
+            "Récente.app": cutoff.addingTimeInterval(1),
+        ]
+        for name in ["Ancienne", "Limite", "Récente", "Inconnue"] {
+            try mac.app("\(name).app", id: "test.oust.\(name)")
+        }
+        let apps = AppCatalog.installedApps(in: [mac.applications], entitlements: { _ in [] },
+                                           lastUsed: { dates[$0.lastPathComponent] })
+        #expect(apps.count == 4)
+        #expect(apps.filter { $0.wasLastOpened(before: cutoff) }.map(\.url.lastPathComponent) == ["Ancienne.app"])
+    }
+
     @Test("Les applications de premier niveau et d'un sous-dossier, pas leurs assistants")
     func bundles() throws {
         let mac = try FakeMac()

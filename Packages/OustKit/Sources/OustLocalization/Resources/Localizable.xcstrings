@@ -919,6 +919,57 @@
         }
       }
     },
+    "applications.unused_filter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last opened over 6 months ago"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernière ouverture il y a plus de 6 mois"
+          }
+        }
+      }
+    },
+    "applications.unused_filter_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows removable apps with a known last-opened date that were closed at the last scan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Affiche les applications désinstallables dont la date d’ouverture est connue et qui étaient fermées lors de la dernière analyse."
+          }
+        }
+      }
+    },
+    "applications.unused_no_matches": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No apps match this filter"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune application ne correspond à ce filtre"
+          }
+        }
+      }
+    },
     "applications.subtitle": {
       "extractionState": "manual",
       "localizations": {
