@@ -132,6 +132,7 @@ public enum Palette {
         case .iosBackups: Color(hex: 0x3EE0A8)
         case .appCaches: Color(hex: 0x5CB4FF)
         case .userLogs: Color(hex: 0x5CB4FF)
+        case .preferenceDiagnostics: Color(hex: 0xB3A3FF)
         case .systemDownloads: Color(hex: 0x6F8CFF)
         case .attachments: Color(hex: 0xFF8A4C)
         case .screenshots: Color(hex: 0xFFD25C)

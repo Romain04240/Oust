@@ -401,6 +401,7 @@ public struct CleanupEngine: Sendable {
         for path in item.paths {
             guard !pathGuard.protectsUserLogs(path), let resolved = PathGuard.withResolvedParent(path),
                   !pathGuard.protectsUserLogs(resolved),
+                  !pathGuard.protectsPreferences(path, resolved: resolved),
                   !pathGuard.protectsSafariDownload(path, resolved: resolved, protectAncestors: item.method != .evictLocalCopy)
             else { return outcome(.skipped(.refusedByGuard)) }
             resolvedPaths.append(resolved)

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OustCore
 import Testing
 @testable import OustScan
 
@@ -8,6 +9,95 @@ import Testing
 @Suite("La réanalyse incrémentale")
 struct IncrementalTests {
     let options = ScanOptions(threads: 4, leafThreshold: 100_000)
+
+    @Test("Le parcours protège le dossier Preferences remplacé avant l'ouverture")
+    func replacedPreferenceDirectory() async throws {
+        let fixture = try Fixture()
+        let preferences = try fixture.directory("Library/Preferences")
+        let options = ScanOptions(threads: 2, leafThreshold: 100_000, readOnlyPreferencesDirectory: preferences.path)
+        let walk = Walk(options: options, progress: ScanProgress(), ownership: Ownership())
+        try FileManager.default.moveItem(at: preferences, to: fixture.root.appendingPathComponent("AnciennesPreferences"))
+        let plist = try fixture.file("Library/Preferences/Fictif.plist", bytes: 180_000)
+        _ = try fixture.file("Library/Preferences/Petit.plist", bytes: 200)
+        let roots = await walk.run(roots: [preferences.path])
+        let tree = try #require(roots.first)
+        #expect(!walk.hasCurrentPreferenceDirectory)
+        #expect(tree.total.allocated >= Fixture.allocated(plist))
+        #expect(tree.total.freeable == 0)
+        #expect(tree.files.first?.sizes.freeable == 0)
+        #expect(tree.smallFiles.allocated > 0 && tree.smallFiles.freeable == 0)
+    }
+
+    @Test("Changer la cible de Preferences invalide l'index incrémental et son cache")
+    func redirectedPreferenceDirectoryInvalidatesIndex() async throws {
+        let fixture = try Fixture()
+        let library = try fixture.directory("Library")
+        let preferences = library.appendingPathComponent("Preferences")
+        let a = try fixture.directory("A")
+        let b = try fixture.directory("B")
+        _ = try fixture.file("A/Fictif.plist", bytes: 180_000)
+        _ = try fixture.file("B/Fictif.plist", bytes: 180_000)
+        let fm = FileManager.default
+        try fm.createSymbolicLink(at: preferences, withDestinationURL: a)
+        let options = ScanOptions(threads: 2, readOnlyPreferencesDirectory: preferences.path)
+        let (old, _) = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        #expect(old.root.descendant(atPath: a.path)?.total.freeable == 0)
+        #expect((old.root.descendant(atPath: b.path)?.total.freeable ?? 0) > 0)
+        let store = TreeStore(directory: fixture.root.appendingPathComponent("CacheFictif"))
+        try store.save(old)
+        #expect(store.load(rootPath: old.rootPath)?.hasCurrentPreferenceDirectory == true)
+
+        try fm.removeItem(at: preferences)
+        try fm.createSymbolicLink(at: preferences, withDestinationURL: b)
+        var events = FileSystemChanges()
+        events.directories = [library.path]
+        let projected = await old.applying(events, eventID: old.eventID, database: old.eventDatabase ?? "",
+                                           progress: ScanProgress(), now: Date())
+        #expect(projected == nil)
+        #expect(store.load(rootPath: old.rootPath) == nil)
+        let safe = old.checkedForDisplay()
+        #expect(safe.root.total.allocated == old.root.total.allocated && safe.root.total.freeable == 0)
+        let (fresh, how) = await ScanIndex.refresh(old, root: fixture.root, options: options)
+        #expect(how == .full(.optionsChanged))
+        #expect((fresh.root.descendant(atPath: a.path)?.total.freeable ?? 0) > 0)
+        #expect(fresh.root.descendant(atPath: b.path)?.total.freeable == 0)
+    }
+
+    @Test("Le cache est invalidé quand la même cible de Preferences change de chemin")
+    func movedPreferenceDirectoryWithSameIdentityInvalidatesCache() async throws {
+        let fixture = try Fixture()
+        let library = try fixture.directory("Library")
+        let preferences = library.appendingPathComponent("Preferences")
+        let a = try fixture.directory("A")
+        let b = try fixture.directory("B")
+        let intermediate = fixture.root.appendingPathComponent("Intermediaire")
+        _ = try fixture.file("A/Fictif.plist", bytes: 180_000)
+        _ = try fixture.file("B/Fictif.plist", bytes: 180_000)
+        let fm = FileManager.default
+        try fm.createSymbolicLink(at: preferences, withDestinationURL: a)
+        let options = ScanOptions(threads: 2, readOnlyPreferencesDirectory: preferences.path)
+        let (old, _) = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        let store = TreeStore(directory: fixture.root.appendingPathComponent("CacheFictif"))
+        try store.save(old)
+        #expect(store.load(rootPath: old.rootPath)?.root.descendant(atPath: a.path)?.total.freeable == 0)
+        #expect((old.root.descendant(atPath: b.path)?.total.freeable ?? 0) > 0)
+
+        try fm.moveItem(at: a, to: intermediate)
+        try fm.moveItem(at: b, to: a)
+        try fm.moveItem(at: intermediate, to: b)
+        try fm.removeItem(at: preferences)
+        try fm.createSymbolicLink(at: preferences, withDestinationURL: b)
+
+        let original = try #require(old.preferenceDirectory)
+        let moved = PreferenceDirectory.capturingLocation(at: preferences.path)
+        #expect(original.identity != nil && original.identity == moved.identity)
+        #expect(original.resolvedPath != moved.resolvedPath)
+        #expect(!old.canReuse(for: options) && store.load(rootPath: old.rootPath) == nil)
+        let (fresh, how) = await ScanIndex.refresh(old, root: fixture.root, options: options)
+        #expect(how == .full(.optionsChanged))
+        #expect((fresh.root.descendant(atPath: a.path)?.total.freeable ?? 0) > 0)
+        #expect(fresh.root.descendant(atPath: b.path)?.total.freeable == 0)
+    }
 
     /// Ce qu'on compare d'un arbre à l'autre : chaque dossier, ses totaux et ses
     /// feuilles, à son chemin relatif.
@@ -145,14 +235,14 @@ struct IncrementalTests {
         let forged = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
                                eventID: previous.eventID, eventDatabase: "base-effacée",
                                scannedAt: previous.scannedAt, fullScanAt: previous.fullScanAt,
-                               skippedVolumes: [])
+                               skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory)
         let refreshed = await ScanIndex.refresh(forged, root: fixture.root, options: options)
         #expect(refreshed.how == .full(.historyLost))
 
         let old = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
                             eventID: previous.eventID, eventDatabase: previous.eventDatabase,
                             scannedAt: previous.scannedAt, fullScanAt: Date(timeIntervalSinceNow: -30 * 86_400),
-                            skippedVolumes: [])
+                            skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory)
         #expect(await ScanIndex.refresh(old, root: fixture.root, options: options).how == .full(.tooOld))
     }
 
@@ -236,5 +326,24 @@ struct SpotlightParseTests {
 
         #expect(files.map(\.path) == [big.path])
         #expect(files.first?.sizes.allocated == Fixture.allocated(big))
+    }
+
+    @Test("L’aperçu Spotlight garde la taille des préférences et indique un gain nul")
+    func preferenceSizes() throws {
+        let fixture = try Fixture()
+        let preferences = try fixture.directory("Library/Preferences")
+        let protected = try fixture.file("Library/Preferences/org.fixture.large.plist", bytes: 3_000_000)
+        let ordinary = try fixture.file("ordinaire.plist", bytes: 3_000_000)
+        let alias = fixture.root.appendingPathComponent("AliasLibrary")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: preferences.deletingLastPathComponent())
+        let redirected = alias.appendingPathComponent("Preferences/\(protected.lastPathComponent)")
+        let output = [redirected.path, protected.path, ordinary.path].joined(separator: "\0")
+
+        let files = Spotlight.parse(Data(output.utf8), minimumBytes: 1_000_000,
+                                    readOnlyPreferencesDirectory: preferences.path)
+        let sizes = Dictionary(uniqueKeysWithValues: files.map { ($0.path, $0.sizes) })
+        #expect(sizes[redirected.path]?.allocated == Fixture.allocated(protected))
+        #expect(sizes[redirected.path]?.freeable == 0)
+        #expect((sizes[ordinary.path]?.freeable ?? 0) > 0)
     }
 }

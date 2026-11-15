@@ -89,9 +89,12 @@ struct OrphanTests {
         // Les journaux restent visibles avec les autres restes et protégés.
         let log = try #require(items.first { $0.paths.first?.deletingLastPathComponent().lastPathComponent == "Logs" })
         #expect(log.safety == .protected && log.protections.contains(.unknownState) && !log.isSelectable)
+        let preference = try #require(items.first { $0.paths.first?.lastPathComponent == "com.bar.app.plist" })
+        #expect(preference.safety == .protected && preference.protections.contains(.systemPath) && !preference.isSelectable)
         #expect(items.allSatisfy { $0.method == .trash && $0.category == .appLeftovers })
         #expect(items.allSatisfy { !PreselectionPolicy().preselects($0) })
-        #expect(items.filter { $0.id != log.id }.allSatisfy { $0.safety == .review && $0.isSelectable })
+        #expect(items.filter { $0.id != log.id && $0.id != preference.id }
+            .allSatisfy { $0.safety == .review && $0.isSelectable })
     }
 
     @Test("Un nom, un jeton, une bibliothèque partagée, Apple, des secrets : jamais")
@@ -152,7 +155,7 @@ struct OrphanTests {
         try mac.libraryItem("Preferences/ByHost/com.discord.discord.ShipIt.77E16911-5964-57FF-8A84-969695B90B9F.plist")
         // Un mot générique n'en dit pas autant.
         try mac.app("Helper.app", id: "fr.outil.helper")
-        try mac.libraryItem("Preferences/com.autre.helper.plist")
+        try mac.libraryItem("Preferences/ByHost/com.autre.helper.77E16911-5964-57FF-8A84-969695B90B9F.plist")
 
         let found = orphans(mac)
         let byID = Dictionary(uniqueKeysWithValues: found.flatMap(\.leftovers).map { ($0.identifier, $0.protection) })
@@ -208,7 +211,9 @@ struct OrphanTests {
         #expect(relative(mac, found) == [
             "Application Support/com.imo.anytrans", "Preferences/com.imo.anytrans.plist", "Preferences/com.imo.helper.plist",
         ])
-        #expect(found.flatMap(\.leftovers).allSatisfy { $0.protection == nil })
+        #expect(found.flatMap(\.leftovers).allSatisfy {
+            $0.protection == ($0.kind == .preferences ? .systemPath : nil)
+        })
 
         // Mais s'il tourne, quelque chose s'en sert : l'éditeur est encore là.
         let busy = orphans(mac, running: [helper.appendingPathComponent("Contents/MacOS/Assistant").path])
@@ -301,7 +306,9 @@ struct OrphanTests {
         #expect(found.map(\.ownerInTrash) == [true])
         let measured = await OrphanFinder.measured(found, canReadContainers: true,
                                                    openPaths: { _ in [] }, holder: { _ in nil })
-        #expect(measured.flatMap(\.leftovers).allSatisfy { $0.protection == nil })
+        #expect(measured.flatMap(\.leftovers).allSatisfy {
+            $0.protection == ($0.kind == .preferences ? .systemPath : nil)
+        })
 
         // Sans elle, une écriture d'aujourd'hui protège.
         let alone = await OrphanFinder.measured(orphans(mac), canReadContainers: true,
@@ -309,22 +316,31 @@ struct OrphanTests {
         #expect(alone.flatMap(\.leftovers).allSatisfy { $0.protection == .recentlyWritten(days: 7) })
     }
 
-    @Test("Retirés : à la corbeille du Mac, au journal, sous « Restes d'applications »")
+    @Test("Restes d'applications : le dossier part, le plist protégé reste")
     func endToEnd() async throws {
         let mac = try FakeMac()
         let folder = try mac.libraryItem("Application Support/com.bar.app", directory: true)
-        let preferences = try mac.libraryItem("Preferences/com.bar.app.plist")
-        let group = try #require(orphans(mac).first)
+        let preferences = try mac.libraryItem("Preferences/com.bar.app.plist", bytes: 180_000)
+        let measured = await OrphanFinder.measured(orphans(mac), canReadContainers: true, recencyDays: 0,
+                                                  openPaths: { _ in [] }, holder: { _ in nil })
+        let group = try #require(measured.first)
         let items = group.leftovers.map { $0.cleanupItem(in: group) }
+        let preference = try #require(items.first { $0.paths.first?.path == preferences.path })
+        let folderItem = try #require(items.first { $0.paths.first?.path == folder.path })
+        #expect(!preference.isSelectable && preference.protections == [.systemPath])
+        #expect(preference.sizes.allocated > 0 && preference.sizes.freeable == 0)
+        #expect(group.freeable == folderItem.sizes.freeable && group.freeable > 0)
 
         var report: CleanupReport?
         for await event in mac.engine().run(items) {
             if case .finished(let final) = event { report = final }
         }
 
-        #expect(report?.outcomes.map(\.result) == [.trashed, .trashed])
+        let outcomes = try #require(report?.outcomes)
+        #expect(outcomes.first { $0.paths == [folder.path] }?.result == .trashed)
+        #expect(outcomes.allSatisfy { $0.paths != [preferences.path] })
         #expect(!FileManager.default.fileExists(atPath: folder.path))
-        #expect(!FileManager.default.fileExists(atPath: preferences.path))
+        #expect(FileManager.default.fileExists(atPath: preferences.path))
         let history = await HistoryStore(directory: mac.historyFolder).load()
         #expect(Set(history.map(\.category)) == [.appLeftovers])
     }

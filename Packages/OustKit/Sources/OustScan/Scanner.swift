@@ -19,19 +19,23 @@ public struct ScanOptions: Sendable, Hashable {
     /// une extension ; `._*` : un préfixe (les fichiers AppleDouble d'un disque
     /// exFAT, que la règle des traces de macOS compte).
     public var notableNames: Set<String>
+    /// Les plist directs de ce dossier comptent uniquement comme espace occupé.
+    public var readOnlyPreferencesDirectory: String?
 
     public init(
         threads: Int = min(12, max(4, ProcessInfo.processInfo.activeProcessorCount)),
         leafThreshold: Int64 = 1_000_000,
         measurePrivateSizes: Bool = true,
         excludedPaths: Set<String> = [],
-        notableNames: Set<String> = []
+        notableNames: Set<String> = [],
+        readOnlyPreferencesDirectory: String? = nil
     ) {
         self.threads = threads
         self.leafThreshold = leafThreshold
         self.measurePrivateSizes = measurePrivateSizes
         self.excludedPaths = excludedPaths
         self.notableNames = notableNames
+        self.readOnlyPreferencesDirectory = readOnlyPreferencesDirectory
     }
 
     /// Pour mesurer des éléments : pas de feuilles, juste des totaux.
@@ -72,6 +76,8 @@ public struct ScanResult: Sendable {
     /// Qui compte chaque lien physique et chaque clone : de quoi réanalyser un
     /// dossier plus tard sans compter deux fois ni oublier.
     let ownership: Ownership
+    /// Absent quand la cible a changé pendant la mesure et que les gains ont été écartés.
+    let preferenceDirectory: PreferenceDirectory?
 
     public var root: TreeNode? { roots.first }
 }
@@ -112,8 +118,11 @@ public enum Scanner {
         let ownership = Ownership()
         let walk = Walk(options: options, progress: progress, ownership: ownership)
         let nodes = await walk.run(roots: roots.map { $0.standardizedFileURL.path })
+        let stablePreferences = walk.hasCurrentPreferenceDirectory
+        if !stablePreferences { for node in nodes { node.suppressFreeable() } }
         return ScanResult(roots: nodes, duration: Date().timeIntervalSince(started),
-                          skippedVolumes: walk.skippedVolumes, ownership: ownership)
+                          skippedVolumes: walk.skippedVolumes, ownership: ownership,
+                          preferenceDirectory: stablePreferences ? walk.preferenceDirectory : nil)
     }
 
     /// Mesure des éléments sans garder leur arborescence.
@@ -201,6 +210,7 @@ final class Walk: @unchecked Sendable {
     private let notableExtensions: Set<String>
     /// Les motifs `préfixe*` de `notableNames`, sans l'étoile.
     private let notablePrefixes: [String]
+    let preferenceDirectory: PreferenceDirectory
     private let extendedSupported = Atomic<Bool>(true)
     private let skipped = Mutex<[String]>([])
     /// Les nœuds relus, pour ne recalculer que leurs totaux et ceux de leurs
@@ -221,6 +231,17 @@ final class Walk: @unchecked Sendable {
         self.notableExtensions = Set(options.notableNames.filter { $0.hasPrefix("*.") }.map { String($0.dropFirst(2)) })
         self.notablePrefixes = options.notableNames.filter { $0.hasSuffix("*") && !$0.hasPrefix("*") }
             .map { String($0.dropLast()) }.sorted()
+        self.preferenceDirectory = PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
+    }
+
+    var hasCurrentPreferenceDirectory: Bool {
+        preferenceDirectory == PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
+    }
+
+    private func protectsPreferences(_ matches: (PreferenceDirectory) -> Bool) -> Bool {
+        if preferenceDirectory.isUncertain || matches(preferenceDirectory) { return true }
+        let current = PreferenceDirectory(options.readOnlyPreferencesDirectory)
+        return current.isUncertain || (current.identity != preferenceDirectory.identity && matches(current))
     }
 
     /// Un parcours complet de chaque racine.
@@ -251,7 +272,11 @@ final class Walk: @unchecked Sendable {
                 if options.measurePrivateSizes, let privateSize = BulkReader.privateSize(path: path) {
                     node.ownFiles = Sizes(allocated: allocated, freeable: privateSize)
                 }
-                if SafariDownloadPath.containsPackage(path) { node.ownFiles.freeable = 0 }
+                if SafariDownloadPath.containsPackage(path)
+                    || (options.readOnlyPreferencesDirectory != nil && PreferenceDirectory.isPlist(node.name)
+                        && protectsPreferences({ $0.matches((path as NSString).deletingLastPathComponent) })) {
+                    node.ownFiles.freeable = 0
+                }
                 node.recomputeTotals()
             }
         }
@@ -367,6 +392,7 @@ final class Walk: @unchecked Sendable {
             node.resetOwnContent()
             return []
         }
+        var insideReadOnlyPreferences: Bool?
         // Relu avec succès : un dossier refusé hier peut être lisible aujourd'hui.
         node.status = .ok
         if job.shallow != nil {
@@ -429,7 +455,12 @@ final class Walk: @unchecked Sendable {
                       let privateSize = BulkReader.privateSize(directoryFD: fd, name: entry.name) {
                 freeable = privateSize
             }
+            let isPlist = options.readOnlyPreferencesDirectory != nil && PreferenceDirectory.isPlist(entry.name)
+            if isPlist, insideReadOnlyPreferences == nil {
+                insideReadOnlyPreferences = protectsPreferences { $0.matches(openDirectory: fd) }
+            }
             let protected = insideSafariDownload || SafariDownloadPath.hasPackageExtension(entry.name)
+                || (isPlist && insideReadOnlyPreferences == true)
             let sizes = Sizes(allocated: allocated, freeable: protected ? 0 : freeable)
             node.ownFiles += sizes
             node.ownFileCount += 1

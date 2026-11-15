@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OustCore
 
 /// Une arborescence analysée, et de quoi la tenir à jour sans tout relire.
 ///
@@ -19,8 +20,27 @@ public struct ScanIndex: Sendable {
     /// disparu) ne s'accumulent pas.
     public let fullScanAt: Date
     public let skippedVolumes: [String]
+    let preferenceDirectory: PreferenceDirectory?
 
     public var rootPath: String { root.path }
+
+    package var hasCurrentPreferenceDirectory: Bool {
+        preferenceDirectory == PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
+    }
+
+    package var hasWithheldGains: Bool { preferenceDirectory == nil }
+
+    package func canReuse(for options: ScanOptions) -> Bool {
+        self.options.describesSameTree(as: options) && hasCurrentPreferenceDirectory
+    }
+
+    package func checkedForDisplay(for options: ScanOptions? = nil) -> ScanIndex {
+        guard !hasWithheldGains, !canReuse(for: options ?? self.options) else { return self }
+        let safeRoot = root.clone()
+        safeRoot.suppressFreeable()
+        return ScanIndex(root: safeRoot, options: self.options, ownership: ownership, eventID: eventID, eventDatabase: eventDatabase,
+                         scannedAt: scannedAt, fullScanAt: fullScanAt, skippedVolumes: skippedVolumes, preferenceDirectory: nil)
+    }
 }
 
 /// Comment l'index a été rafraîchi.
@@ -53,7 +73,7 @@ extension ScanIndex {
         guard let previous, previous.rootPath == rootPath else {
             return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.noIndex))
         }
-        guard previous.options.describesSameTree(as: options) else {
+        guard previous.canReuse(for: options) else {
             return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.optionsChanged))
         }
         guard now.timeIntervalSince(previous.fullScanAt) < maximumAge else {
@@ -70,10 +90,14 @@ extension ScanIndex {
         if changes.historyLost {
             return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.historyLost))
         }
+        guard previous.hasCurrentPreferenceDirectory else {
+            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.optionsChanged))
+        }
         if changes.directories.isEmpty && changes.recursive.isEmpty {
             let index = ScanIndex(root: previous.root, options: options, ownership: previous.ownership,
                                   eventID: start, eventDatabase: database, scannedAt: now,
-                                  fullScanAt: previous.fullScanAt, skippedVolumes: previous.skippedVolumes)
+                                  fullScanAt: previous.fullScanAt, skippedVolumes: previous.skippedVolumes,
+                                  preferenceDirectory: previous.preferenceDirectory)
             return (index, .unchanged)
         }
         guard let updated = await previous.applying(changes, eventID: start, database: database,
@@ -92,7 +116,7 @@ extension ScanIndex {
         let root = result.roots[0]
         return ScanIndex(root: root, options: options, ownership: result.ownership, eventID: start,
                          eventDatabase: database, scannedAt: now, fullScanAt: now,
-                         skippedVolumes: result.skippedVolumes)
+                         skippedVolumes: result.skippedVolumes, preferenceDirectory: result.preferenceDirectory)
     }
 
     /// Relit les dossiers signalés, sur une copie de l'arbre.
@@ -100,6 +124,7 @@ extension ScanIndex {
     /// `nil` quand il y a tant à relire qu'un parcours complet ira aussi vite.
     func applying(_ changes: FileSystemChanges, eventID: UInt64, database: String, progress: ScanProgress,
                   now: Date) async -> (index: ScanIndex, how: IndexRefresh)? {
+        guard hasCurrentPreferenceDirectory else { return nil }
         let root = root.clone()
         let ownership = ownership.copy()
         var info = stat()
@@ -187,8 +212,9 @@ extension ScanIndex {
         }
 
         let walk = Walk(options: options, progress: progress, ownership: ownership)
+        guard walk.preferenceDirectory == preferenceDirectory else { return nil }
         dropped += await walk.run(jobs: jobs, root: root)
-        guard !progress.isCancelled else { return nil }
+        guard !progress.isCancelled, walk.hasCurrentPreferenceDirectory else { return nil }
 
         // Les dossiers disparus ne comptent plus leurs liens physiques et leurs
         // clones ; un dossier simplement déplacé garde son inode, donc les siens.
@@ -204,7 +230,7 @@ extension ScanIndex {
         let skipped = Array(Set(skippedVolumes).union(walk.skippedVolumes)).sorted()
         let index = ScanIndex(root: root, options: options, ownership: ownership, eventID: eventID,
                               eventDatabase: database, scannedAt: now, fullScanAt: fullScanAt,
-                              skippedVolumes: skipped)
+                              skippedVolumes: skipped, preferenceDirectory: preferenceDirectory)
         return (index, .incremental(directories: jobs.count))
     }
 }
@@ -214,6 +240,7 @@ extension ScanOptions {
     func describesSameTree(as other: ScanOptions) -> Bool {
         leafThreshold == other.leafThreshold && measurePrivateSizes == other.measurePrivateSizes
             && excludedPaths == other.excludedPaths && notableNames == other.notableNames
+            && readOnlyPreferencesDirectory == other.readOnlyPreferencesDirectory
     }
 }
 

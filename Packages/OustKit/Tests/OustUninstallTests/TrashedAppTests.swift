@@ -172,7 +172,9 @@ struct TrashedAppTests {
             "Preferences/com.exemple.foo.plist", "Saved Application State/com.exemple.foo.savedState",
             "Containers/com.exemple.foo", "LaunchAgents/com.exemple.foo.agent.plist",
         ])
-        #expect(trashed.leftovers.allSatisfy { $0.protection == nil })
+        #expect(trashed.leftovers.allSatisfy {
+            $0.protection == ($0.kind == .preferences ? .systemPath : nil)
+        })
         #expect(trashed.freeable >= 1_500_000)
         #expect(trashed.isWorthOffering)
         #expect(trashed.app.name == "Foo")
@@ -187,15 +189,18 @@ struct TrashedAppTests {
         #expect(trashed.items.allSatisfy { $0.method == .trash && $0.category == .applications })
     }
 
-    @Test("Moins de 1 Mo de restes : on ne dérange pas")
+    @Test("Un plist protégé ne déclenche pas de proposition même au-dessus du seuil")
     func belowThreshold() async throws {
         let mac = try FakeMac()
         try mac.app("Foo.app", id: "com.exemple.foo")
-        try mac.libraryItem("Preferences/com.exemple.foo.plist")
+        try mac.libraryItem("Preferences/com.exemple.foo.plist", bytes: 2_000_000)
         let trashed = await TrashedAppFinder.measured(try offer(try examine(mac, try trash(mac, "Foo.app"))),
                                                       recencyDays: 7)
+        let preference = try #require(trashed.items.first)
         #expect(trashed.leftovers.count == 1)
-        #expect(!trashed.isWorthOffering)
+        #expect(preference.sizes.allocated >= TrashedAppFinder.offerThreshold && preference.sizes.freeable == 0)
+        #expect(!preference.isSelectable && preference.protections == [.systemPath])
+        #expect(trashed.freeable == 0 && !trashed.isWorthOffering)
     }
 
     @Test("Une application proche encore installée protège ce qui ne se reconstruit pas")

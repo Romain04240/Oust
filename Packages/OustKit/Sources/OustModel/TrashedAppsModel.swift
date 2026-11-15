@@ -177,12 +177,16 @@ public final class TrashedAppsModel {
             return
         }
         log.notice("Proposé : \(report.leftovers.count, privacy: .public) restes, \(report.freeable, privacy: .public) octets")
+        publish(report)
+        await notify(report)
+    }
+
+    func publish(_ report: TrashedApp) {
         reports.removeAll { $0.app.bundleID == report.app.bundleID }
         reports.insert(report, at: 0)
         withdrawn[report.id] = nil
         chosen[report.id] = report.preselectedIDs
         onLeftovers?(report)
-        await notify(report)
     }
 
     /// La recherche, puis la mesure. `nil` s'il n'y a rien à proposer.
@@ -214,10 +218,20 @@ public final class TrashedAppsModel {
 
     // MARK: - Notification
 
-    private func notify(_ report: TrashedApp) async {
-        notifications = await Notifier.ensurePermission()
+    func notify(_ report: TrashedApp,
+                ensurePermission: @MainActor () async -> NotificationPermission = Notifier.ensurePermission,
+                post: @MainActor (TrashedApp) async -> Void = TrashedAppsModel.postNotification) async {
+        notifications = await ensurePermission()
         log.notice("Permission de notifier : \(String(describing: self.notifications), privacy: .public)")
-        guard notifications == .allowed else { return }
+        guard notifications == .allowed, isEnabled,
+              let index = reports.firstIndex(where: {
+                  $0.id == report.id && $0.app.fileID == report.app.fileID && $0.trashedAt == report.trashedAt
+              }) else { return }
+        guard let current = refreshRemainingLeftovers(at: index), current.isWorthOffering else { return }
+        await post(current)
+    }
+
+    private static func postNotification(_ report: TrashedApp) async {
         await Notifier.post(
             id: Self.notificationPrefix + (report.app.bundleID ?? report.id),
             title: L10n.string("trashed.notification.title", report.app.name),
@@ -333,13 +347,31 @@ public final class TrashedAppsModel {
     /// ou à la main).
     public func pruneMissing() {
         for index in reports.indices.reversed() {
-            reports[index].leftovers.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
-            if reports[index].leftovers.isEmpty {
-                let id = reports[index].id
-                reports.remove(at: index)
-                chosen[id] = nil
-            }
+            refreshRemainingLeftovers(at: index)
         }
+    }
+
+    @discardableResult
+    private func refreshRemainingLeftovers(at index: Int) -> TrashedApp? {
+        var report = reports[index]
+        let previousIDs = Set(report.items.map(\.id))
+        report.leftovers.removeAll { leftover in
+            let path = leftover.url.path
+            return !FileManager.default.fileExists(atPath: path)
+                || leftover.fileID == 0
+                || FileFacts.of(path)?.inode != leftover.fileID
+        }
+        report.leftovers = LeftoverFinder.recheckingPreferenceVeto(report.leftovers)
+        let allowed = Set(report.items.filter(\.isSelectable).map(\.id))
+        app?.remove(Array(previousIDs.subtracting(allowed)))
+        if report.leftovers.isEmpty {
+            reports.remove(at: index)
+            chosen[report.id] = nil
+            return nil
+        }
+        reports[index] = report
+        chosen[report.id]?.formIntersection(allowed)
+        return report
     }
 
     public var totalFreeable: Int64 { reports.reduce(0) { $0 + $1.freeable } }

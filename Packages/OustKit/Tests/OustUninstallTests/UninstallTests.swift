@@ -166,6 +166,23 @@ struct UninstallTests {
         #expect(LeftoverFinder.leftovers(of: pages, among: mac.installed(), home: mac.home).isEmpty)
     }
 
+    @Test("Les préférences protégées restent visibles parmi les restes de l’application installée")
+    func protectedPreferenceSizes() async throws {
+        let mac = try FakeMac()
+        try mac.app("Foo.app", id: "com.foo.app")
+        let preference = try mac.libraryItem("Preferences/com.foo.app.plist", bytes: 180_000)
+        let control = try mac.libraryItem("Caches/com.foo.app", directory: true)
+        let apps = mac.installed()
+        let app = try #require(apps.first { $0.bundleID == "com.foo.app" })
+        let leftovers = await LeftoverFinder.measured(LeftoverFinder.leftovers(of: app, among: apps, home: mac.home))
+        let rows = leftovers.map { $0.cleanupItem(for: app) }
+        let preferenceItem = try #require(rows.first { $0.paths.first?.path == preference.path })
+        let controlItem = try #require(rows.first { $0.paths.first?.path == control.path })
+        #expect(!preferenceItem.isSelectable && preferenceItem.protections == [.systemPath])
+        #expect(preferenceItem.sizes.allocated > 0 && preferenceItem.sizes.freeable == 0)
+        #expect(controlItem.isSelectable && controlItem.sizes.freeable > 0)
+    }
+
     @Test("Correspondance stricte : identifiant, nom unique, conteneur, groupe, agent")
     func strictLeftovers() throws {
         let mac = try FakeMac()

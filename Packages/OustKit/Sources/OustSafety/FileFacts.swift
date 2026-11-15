@@ -33,6 +33,12 @@ public struct FileFacts: Sendable {
         return FileFacts(info)
     }
 
+    package static func openFile(_ descriptor: Int32) -> FileFacts? {
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { return nil }
+        return FileFacts(info)
+    }
+
     private init(_ info: stat) {
         inode = UInt64(info.st_ino)
         size = Int64(info.st_size)

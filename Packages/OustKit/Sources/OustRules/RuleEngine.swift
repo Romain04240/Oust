@@ -6,7 +6,20 @@ import OustSafety
 /// Un lot d'éléments trouvés et mesurés, pour remplir l'interface au fil de l'eau.
 public struct RuleBatch: Sendable {
     public let finder: FinderKind
-    public let items: [CleanupItem]
+    fileprivate let measuredItems: [CleanupItem]
+    fileprivate let preferenceLocations: [String: AnalyzedItemLocation]
+
+    public var items: [CleanupItem] {
+        measuredItems.filter { item in
+            guard item.isInvalidPreference else { return true }
+            guard let url = item.paths.first else { return false }
+            return preferenceLocation(for: item)?.isCurrent(at: url) == true
+        }
+    }
+
+    package func preferenceLocation(for item: CleanupItem) -> AnalyzedItemLocation? {
+        preferenceLocations[item.id]
+    }
 }
 
 /// Les chercheurs, dans l'ordre où ils rendent leurs résultats.
@@ -14,7 +27,7 @@ public enum FinderKind: String, Sendable, CaseIterable {
     case packageCaches, xcode, simulators, agents, models, userContent, projectArtifacts
     case toolVersions, toolCleanups, appCaches, personalFiles, cloud, compression
     case creative, games, appData, pro
-    case userLogs
+    case userLogs, preferenceDiagnostics
     /// Sur un autre disque seulement (`RuleContext.volume`) : rien ailleurs.
     case volumeInstallers, volumeTrash, volumeTraces, volumeKept
 }
@@ -71,7 +84,11 @@ public enum RuleEngine {
                         group.addTask {
                             let candidates = await find(kind, context: context)
                             let items = await measure(candidates, using: measurer, pathGuard: pathGuard)
-                            return RuleBatch(finder: kind, items: items)
+                            var locations: [String: AnalyzedItemLocation] = [:]
+                            for candidate in candidates where candidate.item.isInvalidPreference {
+                                locations[candidate.item.id] = candidate.location
+                            }
+                            return RuleBatch(finder: kind, measuredItems: items, preferenceLocations: locations)
                         }
                     }
                     for await batch in group {
@@ -87,9 +104,9 @@ public enum RuleEngine {
     /// Tout, d'un bloc (tests, CLI).
     public static func collect(_ context: RuleContext, finders: [FinderKind] = FinderKind.allCases,
                                measurer: Measurer = .disk) async -> [CleanupItem] {
-        var items: [CleanupItem] = []
-        for await batch in run(context, finders: finders, measurer: measurer) { items += batch.items }
-        return items
+        var batches: [RuleBatch] = []
+        for await batch in run(context, finders: finders, measurer: measurer) { batches.append(batch) }
+        return batches.flatMap(\.items)
     }
 
     static func find(_ kind: FinderKind, context: RuleContext) async -> [Candidate] {
@@ -116,6 +133,7 @@ public enum RuleEngine {
         case .toolCleanups: await ToolCleanupsFinder(context: context).find()
         case .appCaches: await AppCachesFinder(context: context).find()
         case .userLogs: UserLogsFinder(context: context).find()
+        case .preferenceDiagnostics: PreferenceDiagnosticsFinder(context: context).find()
         case .personalFiles: await PersonalFilesFinder(context: context).find()
         case .cloud: await CloudCopiesFinder(context: context).find()
         case .compression: await CompressionFinder(context: context).find()
@@ -133,13 +151,16 @@ public enum RuleEngine {
     /// Mesure les candidats d'un seul passage du moteur d'analyse, et note leur
     /// empreinte pour la revalidation (RULES.md, règle 2).
     static func measure(_ candidates: [Candidate], using measurer: Measurer, pathGuard: PathGuard) async -> [CleanupItem] {
-        let candidates = candidates.filter { candidate in
-            guard let location = candidate.safariDownload, let path = candidate.item.paths.first else { return true }
+        func isCurrent(_ candidate: Candidate) -> Bool {
+            guard let location = candidate.location else { return true }
+            guard let path = candidate.item.paths.first else { return false }
             return location.isCurrent(at: path)
         }
+        let candidates = candidates.filter(isCurrent)
         let paths = candidates.filter(\.needsMeasure).flatMap(\.item.paths)
-        let measures = await measurer.measure(Array(Set(paths)))
+        let measures = paths.isEmpty ? [:] : await measurer.measure(Array(Set(paths)))
         return candidates.compactMap { candidate in
+            guard isCurrent(candidate) else { return nil }
             var item = candidate.item
             if candidate.needsMeasure {
                 var sizes = Sizes.zero
@@ -152,10 +173,9 @@ public enum RuleEngine {
                     inaccessible = inaccessible || measure.inaccessible
                 }
                 if item.isIncompleteSafariDownload {
-                    guard let location = candidate.safariDownload, let path = item.paths.first,
-                          location.isCurrent(at: path) else { return nil }
+                    guard let location = candidate.location, let path = item.paths.first else { return nil }
                     if let measure = measures[path], !inaccessible,
-                       measure.directoryDevice == location.package.device, measure.directoryFileID == location.package.inode {
+                       measure.directoryDevice == location.entry.device, measure.directoryFileID == location.entry.inode {
                         item.sizes = Sizes(allocated: sizes.allocated, freeable: 0)
                     }
                 } else {
@@ -213,7 +233,8 @@ public enum RuleCatalog {
         "agent.worktree", "agent.codex_worktree", "agent.claude_history", "agent.claude_history_orphan",
         "agent.codex_sessions", "agent.codex_workspace", "agent.codex_images", "agent.cache",
         "model.huggingface", "model.lmstudio", "model.ollama", "model.app_models",
-        "downloads.installer", "downloads.large", CleanupItem.incompleteSafariDownloadRuleID, "trash.contents",
+        "downloads.installer", "downloads.large", CleanupItem.incompleteSafariDownloadRuleID,
+        CleanupItem.invalidPreferenceRuleID, "trash.contents",
         "ios.backup", "vm.image", "vm.docker",
         "snapshot.time_machine", "browser.cache", "browser.history", "browser.cookies",
         "duplicate.copy", "explorer.item",

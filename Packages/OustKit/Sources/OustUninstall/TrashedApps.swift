@@ -373,7 +373,7 @@ public enum TrashedAppFinder {
 
         leftovers = leftovers.map { leftover in
             var leftover = leftover
-            guard leftover.protection == nil else { return leftover }
+            guard leftover.contextualProtection == nil else { return leftover }
             let identifier = Self.identifier(of: leftover, in: app)
             if let owner = claims.owner(of: identifier) {
                 leftover.protection = .usedByAnotherApp(name: owner)
@@ -417,7 +417,7 @@ public enum TrashedAppFinder {
                 leftover.sizes = measure.sizes
                 if measure.inaccessible, leftover.protection == nil { leftover.protection = .needsFullDiskAccess }
             }
-            guard leftover.protection == nil else { return leftover }
+            guard leftover.contextualProtection == nil else { return leftover }
             if open.contains(where: { PathNormalizer.isWithin($0, leftover.url.path) }) {
                 leftover.protection = .activeProcess(name: holder(leftover.url) ?? trashed.app.name)
             } else if let latest = [leftover.modificationDate, measure?.latestModification].compactMap({ $0 }).max(),
@@ -426,7 +426,8 @@ public enum TrashedAppFinder {
             }
             return leftover
         }
-        trashed.leftovers.sort { $0.sizes.allocated > $1.sizes.allocated }
+        trashed.leftovers = LeftoverFinder.recheckingPreferenceVeto(trashed.leftovers)
+            .sorted { $0.sizes.allocated > $1.sizes.allocated }
         return trashed
     }
 
@@ -487,10 +488,12 @@ public enum TrashedAppFinder {
             guard sameBundle || sameLabel || associated.contains(where: ids.contains), pathGuard.allows(url) else { continue }
             var info = stat()
             lstat(url.path, &info)
-            found.append(Leftover(
+            var leftover = Leftover(
                 url: url, kind: .launchAgent, match: .launchAgentProgram, fileID: UInt64(info.st_ino),
                 modificationDate: Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec))
-            ))
+            )
+            leftover.preferenceHome = home
+            found.append(leftover)
         }
         return found
     }

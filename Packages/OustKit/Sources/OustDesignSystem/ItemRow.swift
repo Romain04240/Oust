@@ -58,6 +58,8 @@ public struct ItemRow: View {
                     SafetyBadge(item.safety)
                     if item.isIncompleteSafariDownload {
                         Tag(L10n.string("system.safari_download_review"), symbol: "lock.fill", tint: Palette.vivid(for: .protected))
+                    } else if item.isInvalidPreference {
+                        Tag(Describe.ruleTitle(item.ruleID), symbol: "lock.fill", tint: Palette.vivid(for: .protected))
                     } else if let reason = item.protections.first {
                         Tag(Describe.protection(reason), symbol: "lock.fill", tint: Palette.vivid(for: .protected))
                     }
@@ -66,7 +68,7 @@ public struct ItemRow: View {
                     }
                     // Le moins important de la ligne : c'est lui qui raccourcit
                     // en premier quand la place manque, pas les pastilles.
-                    if !item.isIncompleteSafariDownload {
+                    if !item.isIncompleteSafariDownload && !item.isInvalidPreference {
                         Text(verbatim: item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild))
                             .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1)
                             .layoutPriority(-1)
@@ -94,10 +96,10 @@ public struct ItemRow: View {
                     } else {
                         Text("snapshot.size_unknown", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
                     }
-                } else {
+                } else if !item.isInvalidPreference {
                     Text(verbatim: Formatters.compactBytes(item.sizes.freeable)).font(Typography.size)
                 }
-                if !item.isIncompleteSafariDownload, item.sizes.retained > 0 {
+                if !item.isIncompleteSafariDownload, !item.isInvalidPreference, item.sizes.retained > 0 {
                     Text(verbatim: L10n.string("row.retained", Formatters.compactBytes(item.sizes.retained)))
                         .font(Typography.caption).foregroundStyle(.secondary)
                 }
@@ -157,7 +159,7 @@ public struct Explanation: View {
                 SafetyBadge(item.safety)
             }
             section("explain.what", Describe.ruleWhat(item.ruleID))
-            if item.isIncompleteSafariDownload {
+            if item.isIncompleteSafariDownload || item.isInvalidPreference {
                 section("explain.back", Describe.ruleBack(item.ruleID))
             } else {
                 section("explain.back", Describe.ruleBack(item.ruleID) + " " + (item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild)))
@@ -180,7 +182,7 @@ public struct Explanation: View {
             if item.isIncompleteSafariDownload, item.sizes.allocated > 0 {
                 Text(verbatim: L10n.string("system.safari_download_occupied", Formatters.bytes(item.sizes.allocated)))
                     .font(Typography.caption).foregroundStyle(.secondary)
-            } else if !item.isIncompleteSafariDownload {
+            } else if !item.isIncompleteSafariDownload && !item.isInvalidPreference {
                 Text(verbatim: L10n.string("explain.sizes", Formatters.bytes(item.sizes.allocated), Formatters.bytes(item.sizes.freeable)))
                     .font(Typography.caption).foregroundStyle(.secondary)
             }

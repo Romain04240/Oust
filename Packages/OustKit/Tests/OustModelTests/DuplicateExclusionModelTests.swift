@@ -192,7 +192,7 @@ struct DuplicateExclusionModelTests {
 }
 
 /// Simule les valeurs persistées sans écrire dans les préférences du Mac.
-private final class MemoryDefaults: UserDefaults, @unchecked Sendable {
+final class MemoryDefaults: UserDefaults, @unchecked Sendable {
     private var values: [String: Any] = [:]
 
     override func object(forKey defaultName: String) -> Any? { values[defaultName] }

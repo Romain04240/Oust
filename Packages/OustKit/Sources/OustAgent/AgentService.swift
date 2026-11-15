@@ -178,7 +178,8 @@ public struct AgentService: Sendable {
         let what = Describe.ruleWhat(rule)
         // Une règle inconnue du catalogue rend sa clé telle quelle.
         guard item != nil || what != "rule.\(rule).what" else { throw AgentError.unknownItems([id]) }
-        let rebuild = rule == CleanupItem.incompleteSafariDownloadRuleID ? nil : item?.rebuild.label
+        let rebuild = rule == CleanupItem.incompleteSafariDownloadRuleID || rule == CleanupItem.invalidPreferenceRuleID
+            ? nil : item?.rebuild.label
         let back = [Describe.ruleBack(rule), rebuild].compactMap { $0 }.joined(separator: " ")
         return ExplainReport(id: id, rule: rule, title: Describe.ruleTitle(rule), what: what, back: back,
                              method: item?.method.label, protections: item?.protections.map(\.label) ?? [],

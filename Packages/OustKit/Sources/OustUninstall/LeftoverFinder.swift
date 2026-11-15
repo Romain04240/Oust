@@ -60,21 +60,31 @@ public struct Leftover: Sendable, Hashable, Identifiable {
     public let url: URL
     public let kind: LeftoverKind
     public let match: LeftoverMatch
-    public var sizes: Sizes
+    private var measuredSizes: Sizes
+    public var sizes: Sizes {
+        get { isPreferencePathProtected ? Sizes(allocated: measuredSizes.allocated, freeable: 0) : measuredSizes }
+        set { measuredSizes = newValue }
+    }
     public let fileID: UInt64
     public let modificationDate: Date?
+    var contextualProtection: ProtectionReason?
+    var isPreferencePathProtected = false
+    var preferenceHome: URL?
     /// Pourquoi on ne peut pas le retirer, s'il y a une raison.
-    public var protection: ProtectionReason?
+    public var protection: ProtectionReason? {
+        get { contextualProtection ?? (isPreferencePathProtected ? .systemPath : nil) }
+        set { contextualProtection = newValue }
+    }
 
     public init(url: URL, kind: LeftoverKind, match: LeftoverMatch, sizes: Sizes = .zero, fileID: UInt64 = 0,
                 modificationDate: Date? = nil, protection: ProtectionReason? = nil) {
         self.url = url
         self.kind = kind
         self.match = match
-        self.sizes = sizes
+        self.measuredSizes = sizes
         self.fileID = fileID
         self.modificationDate = modificationDate
-        self.protection = protection
+        self.contextualProtection = protection
     }
 
     /// Une correspondance par nom est la moins sûre : jamais mieux qu'« à examiner ».
@@ -121,13 +131,16 @@ public enum LeftoverFinder {
             let name = url.lastPathComponent
             guard !name.lowercased().hasPrefix("com.apple."), found[url.path] == nil else { return }
             var info = stat()
-            guard lstat(url.path, &info) == 0, pathGuard.allows(url) else { return }
+            guard lstat(url.path, &info) == 0, pathGuard.checkLeftoverForInspection(url) == .allowed else { return }
             let shared = claimedBy[key].map { ProtectionReason.usedByAnotherApp(name: $0) }
-            found[url.path] = Leftover(
+            var leftover = Leftover(
                 url: url, kind: kind, match: match, fileID: UInt64(info.st_ino),
                 modificationDate: Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)),
                 protection: shared ?? protection
             )
+            leftover.isPreferencePathProtected = pathGuard.protectsUserPreferences(url)
+            leftover.preferenceHome = home
+            found[url.path] = leftover
         }
 
         // Par identifiant : l'application et ses paquets embarqués.
@@ -205,7 +218,7 @@ public enum LeftoverFinder {
     /// Mesure les restes ; liens physiques et clones comptés une fois.
     public static func measured(_ leftovers: [Leftover]) async -> [Leftover] {
         let measures = await Scanner.measure(leftovers.map(\.url))
-        return leftovers.map { leftover in
+        let measured = leftovers.map { leftover in
             var measured = leftover
             measured.sizes = measures[leftover.url]?.sizes ?? .zero
             if measures[leftover.url]?.inaccessible == true, measured.protection == nil {
@@ -213,6 +226,25 @@ public enum LeftoverFinder {
             }
             return measured
         }
+        return recheckingPreferenceVeto(measured)
+    }
+
+    package static func recheckingPreferenceVeto(_ leftovers: [Leftover]) -> [Leftover] {
+        let protectsPreferences = preferenceVeto(for: leftovers.map(\.preferenceHome))
+        return leftovers.map { leftover in
+            var leftover = leftover
+            if !leftover.isPreferencePathProtected {
+                leftover.isPreferencePathProtected = protectsPreferences(leftover.url, leftover.preferenceHome)
+            }
+            return leftover
+        }
+    }
+
+    static func preferenceVeto(for homes: [URL?]) -> (URL, URL?) -> Bool {
+        let defaultHome = FileManager.default.homeDirectoryForCurrentUser
+        let distinctHomes = Set(homes.map { $0 ?? defaultHome })
+        let guards = Dictionary(uniqueKeysWithValues: distinctHomes.map { ($0, PathGuard(home: $0)) })
+        return { url, home in guards[home ?? defaultHome]?.protectsUserPreferences(url) ?? true }
     }
 
     // MARK: Détails

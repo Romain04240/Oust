@@ -39,8 +39,13 @@ public final class DiskIndexModel {
     /// Les réglages de l'arbre partagé : les fichiers de 100 Ko et plus un à un
     /// (onglets Types et Âge de l'Explorateur), et les marqueurs de projets
     /// retenus même petits (chercheur d'artefacts).
-    static var options: ScanOptions {
-        ScanOptions(leafThreshold: 100_000, notableNames: RuleEngine.notableNames)
+    static func options(for home: URL) -> ScanOptions {
+        ScanOptions(leafThreshold: 100_000, notableNames: RuleEngine.notableNames,
+                    readOnlyPreferencesDirectory: preferencesDirectory(for: home))
+    }
+
+    nonisolated static func preferencesDirectory(for home: URL) -> String {
+        PreferenceDirectory.url(in: home.standardizedFileURL).path
     }
 
     /// Les gros fichiers montrés en attendant l'arbre : le seuil le plus bas de
@@ -59,7 +64,7 @@ public final class DiskIndexModel {
         let store = store
         let root = boot.scanRoot.standardizedFileURL.path
         let loaded = await Task.detached(priority: .userInitiated) { store.load(rootPath: root) }.value
-        guard let loaded, index == nil, refreshTask == nil else { return }
+        guard let loaded, loaded.canReuse(for: Self.options(for: app.home)), index == nil, refreshTask == nil else { return }
         index = loaded
         attachExplorer()
         refresh()
@@ -86,14 +91,16 @@ public final class DiskIndexModel {
         if previous == nil { findLargeFilesWithSpotlight(boot) }
         isRefreshing = true
         let store = store
+        let options = Self.options(for: app.home)
         let started = Date()
         let task = Task<ScanIndex?, Never> {
-            let (fresh, how) = await ScanIndex.refresh(previous, root: boot.scanRoot, options: Self.options,
-                                                       progress: progress)
+            let (scanned, how) = await ScanIndex.refresh(previous, root: boot.scanRoot, options: options,
+                                                         progress: progress)
             self.refreshTask = nil
             self.runningProgress = nil
             self.isRefreshing = false
             guard !progress.isCancelled else { return nil }
+            let fresh = scanned.checkedForDisplay(for: Self.options(for: app.home))
             self.index = fresh
             self.lastRefresh = how
             self.lastDuration = Date().timeIntervalSince(started)
@@ -114,8 +121,9 @@ public final class DiskIndexModel {
     /// parcours, s'il montre le disque de démarrage (ou rien encore).
     private func attachExplorer() {
         guard let app, let boot = app.bootVolume, app.treeVolume == nil || app.treeVolume?.isBoot == true else { return }
-        if let index {
-            app.showSharedTree(index.root, volume: boot, date: index.scannedAt)
+        if let index, index.canReuse(for: Self.options(for: app.home))
+            || (index.hasWithheldGains && runningProgress == nil) {
+            app.showSharedTree(index, volume: boot)
         } else if let runningProgress {
             app.showSharedScan(volume: boot, progress: runningProgress)
         }
@@ -131,9 +139,12 @@ public final class DiskIndexModel {
     // MARK: Spotlight
 
     private func findLargeFilesWithSpotlight(_ boot: VolumeDescriptor) {
+        guard let app else { return }
+        let preferencesDirectory = Self.preferencesDirectory(for: app.home)
         spotlightTask?.cancel()
         spotlightTask = Task {
-            let files = await Spotlight.largeFiles(minimumBytes: Self.spotlightMinimum, under: boot.scanRoot)
+            let files = await Spotlight.largeFiles(minimumBytes: Self.spotlightMinimum, under: boot.scanRoot,
+                                                   readOnlyPreferencesDirectory: preferencesDirectory)
             guard !Task.isCancelled, self.index == nil else { return }
             self.spotlightFiles = files
         }
@@ -142,14 +153,16 @@ public final class DiskIndexModel {
 
 extension AppModel {
     /// Montre l'arbre partagé dans l'Explorateur.
-    func showSharedTree(_ root: TreeNode, volume: VolumeDescriptor, date: Date) {
+    func showSharedTree(_ index: ScanIndex, volume: VolumeDescriptor) {
+        displayedBootIndex = index
         treeVolume = volume
-        tree = root
-        explorer = .done(date)
+        tree = index.root
+        explorer = .done(index.scannedAt)
     }
 
     /// Le premier parcours du disque de démarrage, suivi par l'Explorateur.
     func showSharedScan(volume: VolumeDescriptor, progress: ScanProgress) {
+        displayedBootIndex = nil
         treeVolume = volume
         scanProgress = progress
         tree = nil

@@ -92,10 +92,12 @@ extension AppModel {
     @discardableResult
     public func storedAnalysis(for volume: VolumeDescriptor) async -> ScanIndex? {
         guard !volume.isBoot else { return nil }
-        if let known = volumeIndexes[volume.id] { return known }
+        let options = Self.volumeScanOptions(for: volume, home: home)
+        if let known = volumeIndexes[volume.id], known.canReuse(for: options) { return known }
         guard let store = Self.volumeStore(for: volume) else { return nil }
         let root = volume.scanRoot.standardizedFileURL.path
-        guard let loaded = await Task.detached(priority: .userInitiated, operation: { store.load(rootPath: root) }).value
+        guard let loaded = await Task.detached(priority: .userInitiated, operation: { store.load(rootPath: root) }).value,
+              loaded.canReuse(for: options)
         else { return nil }
         volumeIndexes[volume.id] = loaded
         return loaded

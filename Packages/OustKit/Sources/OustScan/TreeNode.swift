@@ -20,7 +20,7 @@ public enum NodeStatus: Sendable, Hashable {
 public struct FileLeaf: Sendable, Hashable, Identifiable {
     public var id: UInt64 { fileID }
     public let name: String
-    public let sizes: Sizes
+    public internal(set) var sizes: Sizes
     public let modified: Date?
     /// Le dernier accès selon le système de fichiers. APFS ne le met à jour que
     /// paresseusement (et pas du tout pendant l'analyse d'Oust!, qui le coupe) :
@@ -168,6 +168,18 @@ public final class TreeNode: @unchecked Sendable, Identifiable {
         inaccessibleCount = inaccessible
         latestModification = latest
         children.sort { $0.total.allocated > $1.total.allocated }
+    }
+
+    /// En cas de changement de cible pendant le parcours, seuls les octets occupés sont publiés.
+    func suppressFreeable() {
+        var pending = [self]
+        while let node = pending.popLast() {
+            node.ownFiles.freeable = 0
+            node.smallFiles.freeable = 0
+            node.total.freeable = 0
+            for index in node.files.indices { node.files[index].sizes.freeable = 0 }
+            pending.append(contentsOf: node.children)
+        }
     }
 
     /// Une copie profonde des dossiers. Les feuilles sont des valeurs : leurs

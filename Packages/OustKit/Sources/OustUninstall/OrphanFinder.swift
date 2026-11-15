@@ -15,24 +15,34 @@ public struct OrphanLeftover: Sendable, Hashable, Identifiable {
     public let kind: LeftoverKind
     /// L'identifiant dont le reste porte le nom (`com.foo.app` pour `com.foo.app.plist`).
     public let identifier: String
-    public var sizes: Sizes
+    private var measuredSizes: Sizes
+    public var sizes: Sizes {
+        get { isPreferencePathProtected ? Sizes(allocated: measuredSizes.allocated, freeable: 0) : measuredSizes }
+        set { measuredSizes = newValue }
+    }
     public let fileID: UInt64
     public let modificationDate: Date?
     /// La date la plus récente dans tout ce qu'il contient, une fois mesuré.
     public var latestModification: Date?
+    var contextualProtection: ProtectionReason?
+    var isPreferencePathProtected = false
+    var preferenceHome: URL?
     /// Pourquoi on ne peut pas le retirer, s'il y a une raison.
-    public var protection: ProtectionReason?
+    public var protection: ProtectionReason? {
+        get { contextualProtection ?? (isPreferencePathProtected ? .systemPath : nil) }
+        set { contextualProtection = newValue }
+    }
 
     public init(url: URL, kind: LeftoverKind, identifier: String, sizes: Sizes = .zero, fileID: UInt64 = 0,
                 modificationDate: Date? = nil, latestModification: Date? = nil, protection: ProtectionReason? = nil) {
         self.url = url
         self.kind = kind
         self.identifier = identifier
-        self.sizes = sizes
+        self.measuredSizes = sizes
         self.fileID = fileID
         self.modificationDate = modificationDate
         self.latestModification = latestModification
-        self.protection = protection
+        self.contextualProtection = protection
     }
 
     /// La règle qui porte l'explication (`rule.orphan.<genre>.what`…).
@@ -231,7 +241,7 @@ public enum OrphanFinder {
         let pathGuard = PathGuard(home: home)
         var kept: [Candidate] = []
         for var candidate in candidates {
-            if !pathGuard.allows(candidate.url) {
+            if pathGuard.checkLeftoverForInspection(candidate.url) != .allowed {
                 guard pathGuard.protectsUserLogs(candidate.url) else { continue }
                 candidate.protection = candidate.protection ?? .unknownState
             }
@@ -250,7 +260,7 @@ public enum OrphanFinder {
             candidate.ownerInTrash = trashed.contains(candidate.identifier.lowercased())
             kept.append(candidate)
         }
-        return grouped(kept)
+        return grouped(kept, home: home, pathGuard: pathGuard)
     }
 
     /// Mesure les restes, puis protège ce que quelque chose utilise encore : un
@@ -273,7 +283,7 @@ public enum OrphanFinder {
         let measures = await Scanner.measure(urls)
         let library = commonLibrary(of: all.map(\.url))
         let open = library.map(openPaths) ?? []
-        return groups.map { group in
+        let measured = groups.map { group in
             var group = group
             group.leftovers = group.leftovers.map { leftover in
                 var leftover = leftover
@@ -282,7 +292,7 @@ public enum OrphanFinder {
                     leftover.latestModification = measure.latestModification
                     if measure.inaccessible, leftover.protection == nil { leftover.protection = .needsFullDiskAccess }
                 }
-                guard leftover.protection == nil else { return leftover }
+                guard leftover.contextualProtection == nil else { return leftover }
                 if open.contains(where: { PathNormalizer.isWithin($0, leftover.url.path) }) {
                     leftover.protection = .activeProcess(name: holder(leftover.url) ?? leftover.identifier)
                 } else if !group.ownerInTrash,
@@ -292,12 +302,29 @@ public enum OrphanFinder {
                 }
                 return leftover
             }
-            group.leftovers.sort { $0.sizes.allocated > $1.sizes.allocated }
             return group
         }
-        .sorted { lhs, rhs in
+        return recheckingPreferenceVeto(measured).map { group in
+            var group = group
+            group.leftovers.sort { $0.sizes.allocated > $1.sizes.allocated }
+            return group
+        }.sorted { lhs, rhs in
             lhs.freeable != rhs.freeable ? lhs.freeable > rhs.freeable
                 : lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        }
+    }
+
+    package static func recheckingPreferenceVeto(_ groups: [OrphanGroup]) -> [OrphanGroup] {
+        let protectsPreferences = LeftoverFinder.preferenceVeto(for: groups.flatMap(\.leftovers).map(\.preferenceHome))
+        return groups.map { group in
+            var group = group
+            for index in group.leftovers.indices {
+                let leftover = group.leftovers[index]
+                if !leftover.isPreferencePathProtected {
+                    group.leftovers[index].isPreferencePathProtected = protectsPreferences(leftover.url, leftover.preferenceHome)
+                }
+            }
+            return group
         }
     }
 
@@ -467,7 +494,7 @@ public enum OrphanFinder {
 
     /// Une famille par racine : `com.foo.app`, puis tout ce qui commence par
     /// `com.foo.app.`. Les agents sans identifiant forment leur propre famille.
-    static func grouped(_ candidates: [Candidate]) -> [OrphanGroup] {
+    static func grouped(_ candidates: [Candidate], home: URL, pathGuard: PathGuard) -> [OrphanGroup] {
         var roots: [(key: String, identifier: String, appName: String?, inTrash: Bool, members: [Candidate])] = []
         let ordered = candidates.sorted { $0.identifier.count != $1.identifier.count
             ? $0.identifier.count < $1.identifier.count : $0.url.path < $1.url.path }
@@ -488,12 +515,15 @@ public enum OrphanFinder {
                         leftovers: root.members.map { candidate in
                 var info = stat()
                 lstat(candidate.url.path, &info)
-                return OrphanLeftover(
+                var leftover = OrphanLeftover(
                     url: candidate.url, kind: candidate.kind, identifier: candidate.identifier,
                     fileID: UInt64(info.st_ino),
                     modificationDate: Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)),
                     protection: candidate.protection
                 )
+                leftover.isPreferencePathProtected = pathGuard.protectsUserPreferences(candidate.url)
+                leftover.preferenceHome = home
+                return leftover
             })
         }
     }

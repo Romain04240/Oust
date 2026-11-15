@@ -11,7 +11,7 @@ enum HumanText {
         var lines: [String] = []
         let width = report.items.map(\.safetyLabel.count).max() ?? 0
         for item in report.items {
-            let size = item.rule == CleanupItem.incompleteSafariDownloadRuleID
+            let size = item.rule == CleanupItem.incompleteSafariDownloadRuleID || item.rule == CleanupItem.invalidPreferenceRuleID
                 ? "" : Formatters.compactBytes(item.sizes.freeableBytes)
             let label = item.safetyLabel.padding(toLength: width, withPad: " ", startingAt: 0)
             let owner = item.owner.isEmpty || item.owner == item.title ? "" : " — " + item.owner
@@ -53,7 +53,7 @@ enum HumanText {
                     lines.append("")
                     lines.append(L10n.string("system.safari_download_occupied", Formatters.bytes(item.sizes.allocatedBytes)))
                 }
-            } else {
+            } else if item.rule != CleanupItem.invalidPreferenceRuleID {
                 lines.append("")
                 lines.append(L10n.string("explain.sizes", Formatters.bytes(item.sizes.allocatedBytes),
                                          Formatters.bytes(item.sizes.freeableBytes)))

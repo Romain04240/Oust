@@ -49,11 +49,22 @@ extension AppModel {
         analysisVolumeID = volume.isBoot ? nil : volume.id
         // Les gros fichiers suivent l'arbre de l'Explorateur : celui du disque
         // de démarrage est toujours là, celui d'un autre disque après son analyse.
-        if volume.isBoot, treeVolume?.isBoot == false, !explorer.isRunning { explore(volume) }
-        if !volume.isBoot, let index = volumeIndexes[volume.id], treeVolume?.id != volume.id, !explorer.isRunning {
+        guard !explorer.isRunning else { return }
+        if volume.isBoot {
+            if treeVolume?.isBoot == false {
+                explore(volume)
+            } else if let index = displayedBootIndex, tree === index.root {
+                let displayed = index.checkedForDisplay(for: DiskIndexModel.options(for: home))
+                if displayed.root !== tree { showSharedTree(displayed, volume: volume) }
+            }
+        } else if let index = volumeIndexes[volume.id] {
+            let options = Self.volumeScanOptions(for: volume, home: home)
+            guard tree !== index.root || treeVolume?.id != volume.id || !index.canReuse(for: options) else { return }
+            let displayed = index.checkedForDisplay(for: options)
+            displayedBootIndex = nil
             treeVolume = volume
-            tree = index.root
-            explorer = .done(index.scannedAt)
+            tree = displayed.root
+            explorer = .done(displayed.scannedAt)
         }
     }
 
@@ -168,10 +179,8 @@ extension AppModel {
     /// `nil` si on l'a arrêté (l'Explorateur est passé à un autre disque) : les
     /// chercheurs relisent alors le disque eux-mêmes.
     func volumeIndexForAnalysis(_ volume: VolumeDescriptor) async -> ScanIndex? {
-        let options = Self.volumeScanOptions(for: volume)
         let started = Date()
-        var previous = liveVolumeScans.contains(volume.id) ? volumeIndexes[volume.id] : nil
-        if let known = previous, !Self.describeSameTree(known.options, options) { previous = nil }
+        let previous = liveVolumeScans.contains(volume.id) ? volumeIndexes[volume.id] : nil
         explore(volume, rescan: true, previous: previous)
         await scanTask?.value
         guard let index = volumeIndexes[volume.id], index.scannedAt >= started else { return nil }
@@ -182,17 +191,13 @@ extension AppModel {
     /// sauvegardes Time Machine jamais ouvertes (des liens physiques de
     /// dossiers, comptés une fois par sauvegarde), et sur un système de
     /// fichiers qui n'est pas celui de macOS, ses traces retenues par leur nom.
-    nonisolated static func volumeScanOptions(for volume: VolumeDescriptor) -> ScanOptions {
+    nonisolated static func volumeScanOptions(for volume: VolumeDescriptor, home: URL) -> ScanOptions {
         let fileSystem = VolumeService.facts(of: volume.scanRoot)?.fileSystem ?? "apfs"
         let backups = volume.scanRoot.appendingPathComponent(VolumeProtection.timeMachineFolder).standardizedFileURL.path
         let excluded: Set<String> = FileManager.default.fileExists(atPath: backups) ? [backups] : []
         return ScanOptions(leafThreshold: 100_000, excludedPaths: excluded,
-                           notableNames: RuleEngine.notableNames(fileSystem: fileSystem))
-    }
-
-    nonisolated static func describeSameTree(_ lhs: ScanOptions, _ rhs: ScanOptions) -> Bool {
-        lhs.leafThreshold == rhs.leafThreshold && lhs.measurePrivateSizes == rhs.measurePrivateSizes
-            && lhs.excludedPaths == rhs.excludedPaths && lhs.notableNames == rhs.notableNames
+                           notableNames: RuleEngine.notableNames(fileSystem: fileSystem),
+                           readOnlyPreferencesDirectory: DiskIndexModel.preferencesDirectory(for: home))
     }
 
     // MARK: Doublons d'un autre disque

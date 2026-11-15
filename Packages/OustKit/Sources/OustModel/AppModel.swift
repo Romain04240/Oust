@@ -92,6 +92,8 @@ public final class AppModel {
 
     public internal(set) var analysis: Phase = .idle
     public internal(set) var items: [String: CleanupItem] = [:]
+    @ObservationIgnored private var preferenceLocations: [String: AnalyzedItemLocation] = [:]
+    @ObservationIgnored private var preferenceRevalidationTask: Task<Void, Never>?
     public internal(set) var finishedFinders: Set<FinderKind> = []
 
     // MARK: Explorateur
@@ -99,6 +101,7 @@ public final class AppModel {
     public internal(set) var explorer: Phase = .idle
     public internal(set) var tree: TreeNode?
     public internal(set) var treeVolume: VolumeDescriptor?
+    @ObservationIgnored var displayedBootIndex: ScanIndex?
     public internal(set) var scanProgress = ScanProgress()
     var scanTask: Task<Void, Never>?
     /// L'analyse gardée de chaque autre disque, par son point de montage : relue
@@ -370,6 +373,8 @@ public final class AppModel {
         items = items.filter { $0.value.category == .snapshots || $0.value.category.section == .duplicates
             || $0.value.category.section == .photos || $0.value.category.section == .clouds
             || !isOnBootVolume($0.value) }
+        preferenceLocations = preferenceLocations.filter { items[$0.key] != nil }
+        stopPreferenceRevalidationIfEmpty()
         // Les sections qui suivent l'arbre de l'Explorateur (gros fichiers)
         // reviennent au disque de démarrage.
         if let boot = bootVolume, treeVolume?.isBoot == false, !explorer.isRunning { explore(boot) }
@@ -385,9 +390,7 @@ public final class AppModel {
 
         refreshBrowsers()
         for await batch in RuleEngine.run(context, measurer: .tree(tree)) {
-            for item in batch.items {
-                recordAnalyzedItem(item, preselect: firstTime, policy: policy)
-            }
+            recordAnalyzedBatch(batch, preselect: firstTime, policy: policy)
             finishedFinders.insert(batch.finder)
         }
         cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
@@ -423,7 +426,7 @@ public final class AppModel {
     /// sont ceux du disque choisi dans la vue d'ensemble.
     public func items(in categories: Set<ItemCategory>) -> [CleanupItem] {
         let scope = itemScope()
-        return orderedForDisplay(items.values.filter { categories.contains($0.category) && scope($0) })
+        return orderedForDisplay(items.values.filter { categories.contains($0.category) && scope($0) && isCurrentAnalyzedItem($0) })
     }
 
     /// Les points de restauration se lisent par date ; les autres propositions
@@ -471,7 +474,7 @@ public final class AppModel {
     public var searchResults: [CleanupItem] {
         let filter = ItemFilter(query: searchText)
         guard filter.isActive else { return [] }
-        return orderedForDisplay(items.values.filter(filter.matchesQuery))
+        return orderedForDisplay(items.values.filter { filter.matchesQuery($0) && isCurrentAnalyzedItem($0) })
     }
 
     public var isSearching: Bool { ItemFilter(query: searchText).isActive }
@@ -514,6 +517,7 @@ public final class AppModel {
         }
         let progress = ScanProgress()
         scanProgress = progress
+        displayedBootIndex = nil
         treeVolume = volume
         tree = nil
         explorer = .running
@@ -536,10 +540,12 @@ public final class AppModel {
             // ordinateur, sans que les événements de ce Mac le sachent.
             // Les mêmes réglages que l'arbre partagé, et de quoi trouver les
             // traces de macOS : les règles du disque y lisent leurs marqueurs.
-            let options = Self.volumeScanOptions(for: volume)
-            let (fresh, _) = await ScanIndex.refresh(previous, root: volume.scanRoot, options: options, progress: progress)
+            let options = Self.volumeScanOptions(for: volume, home: home)
+            let (scanned, _) = await ScanIndex.refresh(previous, root: volume.scanRoot, options: options, progress: progress)
             guard !progress.isCancelled else { return }
             await self.refreshVolumesInBackground()
+            guard !progress.isCancelled else { return }
+            let fresh = scanned.checkedForDisplay(for: Self.volumeScanOptions(for: volume, home: home))
             if isMounted {
                 self.volumeIndexes[volume.id] = fresh
                 self.liveVolumeScans.insert(volume.id)
@@ -567,7 +573,11 @@ public final class AppModel {
     /// chemin, c'est son élément (et sa méthode) qui sert.
     public func item(for node: TreeNode) -> CleanupItem {
         let path = PathNormalizer.normalize(node.path)
-        if let known = items.values.first(where: { $0.paths.count == 1 && PathNormalizer.normalize($0.paths[0].path) == path }) {
+        if let known = items.values.first(where: {
+            $0.paths.count == 1 && PathNormalizer.normalize($0.paths[0].path) == path
+                && (!$0.isInvalidPreference || $0.fingerprint?.fileID == node.fileID)
+                && isCurrentAnalyzedItem($0)
+        }) {
             return known
         }
         return explorerItem(url: URL(fileURLWithPath: path), title: node.name, sizes: node.total,
@@ -576,6 +586,10 @@ public final class AppModel {
 
     public func item(for file: FileLeaf, in node: TreeNode) -> CleanupItem {
         let url = URL(fileURLWithPath: PathNormalizer.normalize(node.path)).appendingPathComponent(file.name)
+        if let diagnostic = items["\(CleanupItem.invalidPreferenceRuleID)|\(url.path)"],
+           diagnostic.fingerprint?.fileID == file.fileID, isCurrentAnalyzedItem(diagnostic) {
+            return diagnostic
+        }
         return explorerItem(url: url, title: file.name, sizes: file.sizes, modified: file.modified)
     }
 
@@ -677,13 +691,65 @@ public final class AppModel {
 
     public func isInCart(_ id: String) -> Bool { cart.contains(id) }
 
-    func recordAnalyzedItem(_ item: CleanupItem, preselect: Bool, policy: PreselectionPolicy) {
+    func recordAnalyzedItem(_ item: CleanupItem, preferenceLocation: AnalyzedItemLocation? = nil,
+                            preselect: Bool, policy: PreselectionPolicy) {
+        if item.isInvalidPreference {
+            guard let url = item.paths.first, let preferenceLocation, preferenceLocation.isCurrent(at: url) else { return }
+            preferenceLocations[item.id] = preferenceLocation
+        }
         items[item.id] = item
+        if item.isInvalidPreference { startPreferenceRevalidation() }
         if !canSelectForCleanup(item) {
             cart.remove(item.id)
         } else if preselect, policy.preselects(item) {
             cart.insert(item.id)
         }
+    }
+
+    func recordAnalyzedBatch(_ batch: RuleBatch, preselect: Bool, policy: PreselectionPolicy) {
+        for item in batch.items {
+            recordAnalyzedItem(item, preferenceLocation: batch.preferenceLocation(for: item),
+                               preselect: preselect, policy: policy)
+        }
+    }
+
+    private func isCurrentAnalyzedItem(_ item: CleanupItem) -> Bool {
+        guard item.isInvalidPreference else { return true }
+        guard let url = item.paths.first else { return false }
+        return preferenceLocations[item.id]?.isCurrent(at: url) == true
+    }
+
+    /// Un plist peut changer sans modifier l'état observé par la vue. Revérifie
+    /// uniquement les fiches affichables, y compris après remplacement de leur
+    /// dossier, sans garder de descripteur ni suivre toute la bibliothèque.
+    private func startPreferenceRevalidation() {
+        guard preferenceRevalidationTask == nil else { return }
+        preferenceRevalidationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
+                guard !Task.isCancelled, let self else { return }
+                self.removeStalePreferenceDiagnostics()
+            }
+        }
+    }
+
+    private func removeStalePreferenceDiagnostics() {
+        let obsolete = Set(preferenceLocations.keys.filter { id in
+            guard let item = items[id], item.isInvalidPreference else { return true }
+            return !isCurrentAnalyzedItem(item)
+        })
+        guard !obsolete.isEmpty else { return }
+        for id in obsolete { preferenceLocations[id] = nil }
+        items = items.filter { !$0.value.isInvalidPreference || !obsolete.contains($0.key) }
+        cart.subtract(obsolete)
+        stopPreferenceRevalidationIfEmpty()
+    }
+
+    private func stopPreferenceRevalidationIfEmpty() {
+        guard preferenceLocations.isEmpty else { return }
+        preferenceRevalidationTask?.cancel()
+        preferenceRevalidationTask = nil
     }
 
     public var canMoveFiles: Bool { engine.supports(.trash) }

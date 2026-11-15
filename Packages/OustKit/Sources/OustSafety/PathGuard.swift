@@ -77,7 +77,12 @@ public struct PathGuard: Sendable {
         check(url, protectUserLogs: true)
     }
 
-    private func check(_ url: URL, protectUserLogs: Bool) -> Verdict {
+    /// L’inventaire des restes peut signaler une préférence protégée.
+    package func checkLeftoverForInspection(_ url: URL) -> Verdict {
+        check(url, protectUserLogs: true, protectPreferences: false)
+    }
+
+    private func check(_ url: URL, protectUserLogs: Bool, protectPreferences: Bool = true) -> Verdict {
         let raw = url.path
         guard raw.hasPrefix("/") else { return .refused("relative") }
         guard !raw.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }) else { return .refused("dot-components") }
@@ -94,6 +99,7 @@ public struct PathGuard: Sendable {
         let candidates = Set([resolved, literal])
         if !exact.isDisjoint(with: candidates) { return .refused("protected-root") }
         if protectUserLogs && protectsUserLogs(url, resolved: resolvedURL) { return .refused("user-logs") }
+        if protectPreferences && protectsPreferences(url, resolved: resolvedURL) { return .refused("user-preferences") }
         if protectsSafariDownload(url, resolved: resolvedURL) { return .refused("safari-incomplete-download") }
 
         for candidate in candidates {
@@ -188,6 +194,7 @@ public struct PathGuard: Sendable {
         }
         guard !CloudFile.isSafariDownload(url),
               let resolved = Self.withResolvedParent(url),
+              !protectsPreferences(url, resolved: resolved),
               !protectsSafariDownload(url, resolved: resolved, protectAncestors: false) else { return false }
         let path = Self.normalize(raw)
         return cloudRoots.contains { root in
@@ -196,6 +203,71 @@ public struct PathGuard: Sendable {
     }
 
     public func allows(_ url: URL) -> Bool { check(url) == .allowed }
+
+    package func protectsUserPreferences(_ url: URL) -> Bool {
+        guard let resolved = Self.withResolvedParent(url) else { return true }
+        return protectsPreferences(url, resolved: resolved)
+    }
+
+    package func protectsPreferences(_ url: URL, resolved: URL) -> Bool {
+        let directory = PreferenceDirectory.url(in: URL(fileURLWithPath: home))
+        let identity = PreferenceDirectory(directory.path)
+        // Sans accès à Library, une redirection peut encore désigner ce chemin.
+        guard !identity.isUncertain else { return true }
+        let canonical = directory.resolvingSymlinksInPath()
+        let candidates = [url, resolved]
+        if candidates.contains(where: {
+            PathNormalizer.isWithin(directory.path, $0.path) || PathNormalizer.isWithin(canonical.path, $0.path)
+        }) { return true }
+
+        if candidates.contains(where: {
+            let parent = $0.deletingLastPathComponent().path
+            return Self.normalize(parent) == Self.normalize(directory.path)
+                || Self.normalize(parent) == Self.normalize(canonical.path) || identity.matches(parent)
+        }) {
+            if PreferenceDirectory.isPlist(resolved.lastPathComponent) { return true }
+            // APFS peut accepter un autre suffixe pour la même entrée, par
+            // exemple « pliſt ». Le noyau connaît le nom enregistré du fichier.
+            return Self.canonicalEntryName(at: resolved).map(PreferenceDirectory.isPlist) ?? true
+        }
+
+        guard let entry = FileFacts.of(resolved.path),
+              (entry.mode & S_IFMT) == S_IFDIR || (entry.mode & S_IFMT) == S_IFLNK else { return false }
+        let target = (entry.mode & S_IFMT) == S_IFLNK
+            ? FileFacts.of(resolved.resolvingSymlinksInPath().path) : nil
+        // Un répertoire qui emporte les préférences doit être refusé même
+        // quand le dernier composant a une autre casse sur APFS.
+        for root in [directory, canonical] {
+            var ancestor = root
+            while ancestor.path != "/" {
+                if let current = FileFacts.of(ancestor.path),
+                   (current.device == entry.device && current.inode == entry.inode)
+                    || (current.device == target?.device && current.inode == target?.inode) { return true }
+                ancestor.deleteLastPathComponent()
+            }
+        }
+        return false
+    }
+
+    private static func canonicalEntryName(at url: URL) -> String? {
+        var attributes = attrlist()
+        attributes.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
+        attributes.commonattr = UInt32(ATTR_CMN_NAME)
+        let recordSize = 12
+        var buffer = [UInt8](repeating: 0, count: recordSize + Int(NAME_MAX) + 4)
+        let status = buffer.withUnsafeMutableBytes { raw in
+            getattrlist(url.path, &attributes, raw.baseAddress, raw.count, UInt32(FSOPT_NOFOLLOW))
+        }
+        guard status == 0 else { return nil }
+        return buffer.withUnsafeBytes { raw in
+            let end = Int(raw.loadUnaligned(as: UInt32.self))
+            let start = 4 + Int(raw.loadUnaligned(fromByteOffset: 4, as: Int32.self))
+            let length = Int(raw.loadUnaligned(fromByteOffset: 8, as: UInt32.self))
+            guard end <= raw.count, start >= recordSize, start <= end, length > 1, length <= end - start,
+                  raw[start + length - 1] == 0 else { return nil }
+            return String(bytes: raw[start..<(start + length - 1)], encoding: .utf8)
+        }
+    }
 
     /// Protège Téléchargements, ses ancêtres et les paquets, même via un lien.
     package func protectsSafariDownload(_ url: URL, resolved: URL, protectAncestors: Bool = true) -> Bool {
@@ -347,7 +419,8 @@ public struct PathGuard: Sendable {
         guard raw.hasPrefix("/"), !raw.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }),
               !raw.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return false }
         guard !CloudFile.isSafariDownload(url),
-              let real = Self.withResolvedParent(url), !protectsSafariDownload(url, resolved: real) else { return false }
+              let real = Self.withResolvedParent(url), !protectsPreferences(url, resolved: real),
+              !protectsSafariDownload(url, resolved: real) else { return false }
         let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
         let resolved = Self.normalize((parent as NSString).appendingPathComponent(url.lastPathComponent))
         let literal = Self.normalize(raw)

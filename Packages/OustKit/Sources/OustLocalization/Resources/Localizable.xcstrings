@@ -3928,6 +3928,23 @@
         }
       }
     },
+    "category.preferenceDiagnostics": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preferences diagnostics"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnostic des préférences"
+          }
+        }
+      }
+    },
     "category.projectArtifacts": {
       "extractionState": "manual",
       "localizations": {
@@ -21808,6 +21825,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Un simulateur dont le runtime a disparu : il ne peut plus démarrer."
+          }
+        }
+      }
+    },
+    "rule.preferences.format_invalid.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the app’s own settings or contact its developer for help."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilisez les réglages de l’application ou demandez conseil à son éditeur."
+          }
+        }
+      }
+    },
+    "rule.preferences.format_invalid.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid preferences format"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Format de préférences invalide"
+          }
+        }
+      }
+    },
+    "rule.preferences.format_invalid.what": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS could not decode this installed app’s preferences file. Oust shows the diagnostic for reference."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS n’a pas pu décoder le fichier de préférences de cette application installée. Oust affiche ce diagnostic pour information."
           }
         }
       }

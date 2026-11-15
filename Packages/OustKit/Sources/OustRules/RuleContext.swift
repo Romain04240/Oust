@@ -37,6 +37,7 @@ public struct RuleContext: Sendable {
     public var runningApps: Set<String>
     /// Le nom affiché d'une application d'après son identifiant de bundle.
     public var applicationName: @Sendable (String) -> String?
+    public var applicationURL: @Sendable (String) -> URL?
     /// Un autre disque que celui de démarrage : les chercheurs qui ont un sens
     /// sur un disque (artefacts, logiciels créatifs, bibliothèques de jeux,
     /// installeurs, corbeille du disque, traces de macOS) le parcourent au lieu
@@ -58,6 +59,7 @@ public struct RuleContext: Sendable {
         tools: ToolRunner = .system,
         runningApps: Set<String>? = nil,
         applicationName: (@Sendable (String) -> String?)? = nil,
+        applicationURL: (@Sendable (String) -> URL?)? = nil,
         tree: (@Sendable () async -> TreeNode?)? = nil,
         volume: VolumeScope? = nil
     ) {
@@ -78,6 +80,7 @@ public struct RuleContext: Sendable {
         self.temporaryDirectory = temporaryDirectory
         self.tools = tools
         self.runningApps = runningApps ?? Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        self.applicationURL = applicationURL ?? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
         self.applicationName = applicationName ?? { identifier in
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) else { return nil }
             return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
@@ -135,18 +138,19 @@ struct Candidate: Sendable {
     /// En dessous, l'élément n'est pas montré : cent caches d'applications de
     /// quelques kilo-octets noieraient les dix qui pèsent.
     var minimumAllocated: Int64 = 0
-    var safariDownload: SafariDownloadLocation?
+    var location: AnalyzedItemLocation?
 }
 
-struct SafariDownloadLocation: Sendable {
+package struct AnalyzedItemLocation: Sendable {
     let directory: FileFacts
-    let package: FileFacts
+    let entry: FileFacts
 
-    func isCurrent(at url: URL) -> Bool {
+    package func isCurrent(at url: URL) -> Bool {
         guard let parent = FileFacts.of(url.deletingLastPathComponent().path),
               parent.device == directory.device, parent.inode == directory.inode,
-              let current = FileFacts.of(url.path), current.device == package.device else { return false }
-        return current.isUnchanged(comparedTo: package)
+              let current = FileFacts.of(url.path), current.device == entry.device,
+              current.mode == entry.mode, current.isDataless == entry.isDataless else { return false }
+        return current.isUnchanged(comparedTo: entry)
     }
 }
 

@@ -89,7 +89,7 @@ struct UserContentFinder {
                         safety: .protected, protections: [.unknownState], method: .manual,
                         lastActivity: modified, rebuild: .irreversible,
                         fingerprint: Fingerprint(modificationDate: modified, fileID: facts.inode)
-                    ), safariDownload: SafariDownloadLocation(directory: safariDirectory, package: facts)))
+                    ), location: AnalyzedItemLocation(directory: safariDirectory, entry: facts)))
                 }
                 // Un .download non reconnu ne doit pas ressortir comme gros fichier ancien.
                 continue

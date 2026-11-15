@@ -118,10 +118,12 @@ public final class ApplicationsModel {
     /// Retire de la liste ce qui a quitté le disque depuis (désinstallé par la
     /// corbeille d'Oust!, ou à la main).
     public func pruneMissing() {
-        orphans = orphans.compactMap { group in
-            var group = group
-            group.leftovers.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
-            return group.leftovers.isEmpty ? nil : group
+        pruneMissingOrphans()
+        leftovers = LeftoverFinder.recheckingPreferenceVeto(leftovers)
+        if let selected {
+            let blocked = leftovers.map { $0.cleanupItem(for: selected) }.filter { !$0.isSelectable }.map(\.id)
+            chosen.subtract(blocked)
+            app?.remove(blocked)
         }
         let before = apps.count
         apps.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
@@ -182,11 +184,20 @@ public final class ApplicationsModel {
     // MARK: Restes d'applications disparues
 
     public func showOrphans() {
+        pruneMissingOrphans()
         selectedID = nil
         leftovers = []
         chosen = []
         trashedReviewID = nil
         showsOrphans = true
+    }
+
+    private func pruneMissingOrphans() {
+        updateOrphans(orphans.compactMap { group in
+            var group = group
+            group.leftovers.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
+            return group.leftovers.isEmpty ? nil : group
+        })
     }
 
     /// La revue d'une application mise à la corbeille du Mac.
@@ -221,13 +232,20 @@ public final class ApplicationsModel {
         }.value
         let measured = await OrphanFinder.measured(found, canReadContainers: canRead, recencyDays: recency)
         // Ce qu'on peut retirer d'abord ; ce qui est gardé par prudence ensuite.
-        orphans = measured.filter { !$0.isFullyProtected } + measured.filter(\.isFullyProtected)
+        updateOrphans(measured)
+        orphansReadContainers = canRead
+        orphanPhase = .done(Date())
+    }
+
+    func updateOrphans(_ groups: [OrphanGroup]) {
+        let checked = OrphanFinder.recheckingPreferenceVeto(groups)
+        orphans = checked.filter { !$0.isFullyProtected } + checked.filter(\.isFullyProtected)
         // Un reste jeté dans la corbeille d'Oust! que la nouvelle recherche ne
         // propose plus (l'application est revenue, quelque chose y écrit) en sort.
         let proposed = Set(orphans.flatMap(items(of:)).filter(canSelectForCleanup).map(\.id))
-        app.remove(app.cartItems.filter { $0.category == .appLeftovers && !proposed.contains($0.id) }.map(\.id))
-        orphansReadContainers = canRead
-        orphanPhase = .done(Date())
+        if let app {
+            app.remove(app.cartItems.filter { $0.category == .appLeftovers && !proposed.contains($0.id) }.map(\.id))
+        }
     }
 
     public func items(of group: OrphanGroup) -> [CleanupItem] {

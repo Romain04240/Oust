@@ -27,16 +27,18 @@ public enum Spotlight {
     /// Les fichiers d'au moins `minimumBytes` alloués sous `root`, du plus gros
     /// au plus petit.
     public static func largeFiles(minimumBytes: Int64, under root: URL,
+                                  readOnlyPreferencesDirectory: String? = nil,
                                   timeout: TimeInterval = 20) async -> [SpotlightFile] {
         // La requête est passée en argument, jamais interprétée par un shell ; le
         // seuil est un entier, rien d'autre n'y entre.
         let query = "kMDItemFSSize >= \(max(0, minimumBytes))"
         let result = await Command.run("/usr/bin/mdfind", ["-0", "-onlyin", root.path, query], timeout: timeout)
         guard result.succeeded else { return [] }
-        return parse(result.stdout, minimumBytes: minimumBytes)
+        return parse(result.stdout, minimumBytes: minimumBytes, readOnlyPreferencesDirectory: readOnlyPreferencesDirectory)
     }
 
-    static func parse(_ output: Data, minimumBytes: Int64) -> [SpotlightFile] {
+    static func parse(_ output: Data, minimumBytes: Int64, readOnlyPreferencesDirectory: String? = nil) -> [SpotlightFile] {
+        let readOnlyPreferences = PreferenceDirectory.capturingLocation(at: readOnlyPreferencesDirectory)
         var files: [SpotlightFile] = []
         var seen = Set<UInt64>()
         for chunk in output.split(separator: 0) where !chunk.isEmpty {
@@ -47,12 +49,16 @@ public enum Spotlight {
             guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { continue }
             let allocated = Int64(info.st_blocks) * 512
             guard allocated >= minimumBytes, seen.insert(UInt64(info.st_ino)).inserted else { continue }
-            let freeable = BulkReader.privateSize(path: path) ?? allocated
+            let url = path as NSString
+            let readOnly = PreferenceDirectory.isPlist(url.lastPathComponent)
+                && (readOnlyPreferences.isUncertain || readOnlyPreferences.matches(url.deletingLastPathComponent))
+            let freeable = readOnly ? 0 : BulkReader.privateSize(path: path) ?? allocated
             files.append(SpotlightFile(
                 path: path, sizes: Sizes(allocated: allocated, freeable: freeable), logicalSize: Int64(info.st_size),
                 modified: Date(timeIntervalSince1970: Double(info.st_mtimespec.tv_sec)), fileID: UInt64(info.st_ino)
             ))
         }
+        guard readOnlyPreferences == PreferenceDirectory.capturingLocation(at: readOnlyPreferencesDirectory) else { return [] }
         return files.sorted { $0.sizes.allocated > $1.sizes.allocated }
     }
 }
