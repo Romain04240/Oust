@@ -391,8 +391,9 @@ public enum SimilarImageFinder {
         }
         findings.examined = images.count
 
-        let pairs = candidatePairs(images, options: options)
-        let needed = Array(Set(pairs.flatMap { [$0.0, $0.1] })).sorted()
+        let stems = images.map { stem(of: $0.file.url) }
+        let pairs = candidatePairs(images, stems: stems, options: options)
+        let needed = pairedImageIndices(pairs, imageCount: images.count)
         progress.begin(.printing, total: needed.count)
         let prints = await featurePrints(of: needed.map { images[$0].file.url }, options: options,
                                          printer: printer, progress: progress)
@@ -403,7 +404,6 @@ public enum SimilarImageFinder {
         }
 
         progress.begin(.comparing, total: pairs.count)
-        let stems = images.map { stem(of: $0.file.url) }
         let clusters = cluster(pairs: pairs, prints: printed) { a, b in
             sameShot(images[a], images[b], stems: (stems[a], stems[b]), window: options.window)
                 ? options.threshold : options.strictThreshold
@@ -546,7 +546,8 @@ public enum SimilarImageFinder {
     /// - dans un même dossier, toutes (ou les voisines de date, s'il est très grand) ;
     /// - d'un dossier à l'autre, les images prises ou modifiées à moins de `window` ;
     /// - où qu'elles soient, celles qui portent le même nom au suffixe de copie près.
-    static func candidatePairs(_ images: [Candidate], options: SimilarImageOptions) -> [(Int, Int)] {
+    static func candidatePairs(_ images: [Candidate], stems: [String],
+                               options: SimilarImageOptions) -> [(Int, Int)] {
         var keys = Set<UInt64>()
         func add(_ a: Int, _ b: Int) {
             guard a != b else { return }
@@ -582,7 +583,7 @@ public enum SimilarImageFinder {
             }
         }
 
-        for (_, members) in Dictionary(grouping: images.indices, by: { stem(of: images[$0].file.url) })
+        for (_, members) in Dictionary(grouping: images.indices, by: { stems[$0] })
         where members.count > 1 && members.count <= 30 {
             for (position, a) in members.enumerated() {
                 for b in members[(position + 1)...] { add(a, b) }
@@ -590,6 +591,16 @@ public enum SimilarImageFinder {
         }
 
         return keys.sorted().map { (Int($0 >> 32), Int($0 & 0xFFFF_FFFF)) }
+    }
+
+    /// Marque les images à lire sans créer un tableau de deux éléments par paire.
+    static func pairedImageIndices(_ pairs: [(Int, Int)], imageCount: Int) -> [Int] {
+        var paired = Array(repeating: false, count: imageCount)
+        for (first, second) in pairs {
+            paired[first] = true
+            paired[second] = true
+        }
+        return paired.indices.filter { paired[$0] }
     }
 
     /// Le nom sans extension ni suffixe de copie : « IMG_1234 (1).jpg »,

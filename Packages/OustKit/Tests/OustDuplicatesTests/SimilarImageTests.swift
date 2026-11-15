@@ -504,6 +504,13 @@ struct SimilarImageTests {
         #expect(stem("(1).jpg") == "(1)")
     }
 
+    @Test("Empreintes : uniquement les images appariées, dans l’ordre de lecture")
+    func pairedImageIndices() {
+        let pairs = [(3, 6), (1, 4), (4, 6)]
+        #expect(SimilarImageFinder.pairedImageIndices(pairs, imageCount: 8) == [1, 3, 4, 6])
+        #expect(SimilarImageFinder.pairedImageIndices([], imageCount: 8).isEmpty)
+    }
+
     @Test("La distance est euclidienne, comme celle de Vision")
     func distance() throws {
         let a = ImagePrint([1, 0, 0]), b = ImagePrint([0, 1, 0])
