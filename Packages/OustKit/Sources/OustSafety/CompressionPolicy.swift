@@ -1,4 +1,5 @@
 import Foundation
+import OustCore
 
 /// Ce que la compression sur place laisse tel quel, partagé par l'estimation
 /// (`OustRules`) et la compression elle-même (`OustClean`) : un fichier que
@@ -48,12 +49,14 @@ public enum CompressionPolicy {
     /// Ce fichier est-il, d'après son nom, à laisser tel quel ?
     public static func skipsFile(named name: String) -> Bool {
         let fileExtension = (name as NSString).pathExtension.lowercased()
-        return incompressibleExtensions.contains(fileExtension) || liveDataExtensions.contains(fileExtension)
+        return SafariDownloadPath.hasPackageExtension(name)
+            || incompressibleExtensions.contains(fileExtension) || liveDataExtensions.contains(fileExtension)
             || name.hasPrefix(temporaryPrefix)
     }
 
     /// Ce dossier est-il à laisser tel quel, contenu compris ?
     public static func skipsFolder(named name: String) -> Bool {
-        skippedFolders.contains(name) || skippedPackageExtensions.contains((name as NSString).pathExtension.lowercased())
+        SafariDownloadPath.hasPackageExtension(name)
+            || skippedFolders.contains(name) || skippedPackageExtensions.contains((name as NSString).pathExtension.lowercased())
     }
 }

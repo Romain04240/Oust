@@ -28,4 +28,29 @@ struct SpotlightPreviewTests {
         #expect(result.files.last?.package == "Jeu.app")
         #expect(result.matchBytes == 3_900_000_000)
     }
+
+    @Test("Un paquet Safari compte en espace occupé seulement, dans l'arbre et dans les résultats")
+    func safariPackageHasNoGain() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("oust-large-safari-\(UUID())")
+        let bundle = home.appendingPathComponent("Downloads/Archive.DOWNLOAD", isDirectory: true)
+        let fm = FileManager.default
+        try fm.createDirectory(at: bundle, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        let payload = bundle.appendingPathComponent("partiel.txt")
+        try Data(repeating: 0x42, count: 2_000_000).write(to: payload)
+        let tree = try #require(await Scanner.scan([home]).root)
+        #expect(tree.total.allocated >= 2_000_000 && tree.total.freeable == 0)
+        let filter = LargeFileFilter(minimumSize: 1_000_000)
+        let scan = LargeFileFinder.find(in: tree, filter: filter)
+        let preview = LargeFileFinder.preview([
+            SpotlightFile(path: payload.path, sizes: Sizes(private: 2_000_000), logicalSize: 2_000_000,
+                          modified: nil, fileID: 1)
+        ], filter: filter)
+        for result in [scan, preview] {
+            let file = try #require(result.files.first)
+            #expect(result.matchCount == 1 && result.matchBytes == 0)
+            #expect(file.sizes.allocated >= 2_000_000 && file.sizes.freeable == 0)
+            #expect(file.package == "Archive.DOWNLOAD")
+        }
+    }
 }

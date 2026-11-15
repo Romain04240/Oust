@@ -1,8 +1,10 @@
+import Darwin
 import Foundation
 import Testing
 @testable import OustRules
 import OustCore
 import OustSafety
+import OustScan
 
 /// Un faux dossier personnel dans un dossier temporaire : les chercheurs n'y
 /// voient que du feu (RULES.md, règle 8).
@@ -123,6 +125,60 @@ struct ProjectArtifactsTests {
 @Suite("Les traces des agents")
 struct AgentTests {
 
+    @Test("Downloads redirigé protège le worktree avant la mesure ou pendant celle-ci", arguments: [false, true])
+    func worktreeWithDownloadsHasNoGain(redirectDuringMeasurement: Bool) async throws {
+        let home = try FakeHome()
+        let repo = home.root.appendingPathComponent("Depot", isDirectory: true)
+        try home.text("Depot/.gitignore", "/Entrants/\n")
+        try home.text("Depot/README", "Fichier suivi")
+        let env = ["GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": "/dev/null"]
+        func git(_ args: String...) async -> CommandResult {
+            await Command.run("/usr/bin/git", ["-C", repo.path] + args, environment: env)
+        }
+        try #require(await git("init", "-q", "-b", "main").succeeded)
+        try #require(await git("add", ".").succeeded)
+        try #require(await git("commit", "-q", "-m", "init").succeeded)
+        let worktrees = home.root.appendingPathComponent(".codex/worktrees", isDirectory: true)
+        let protected = worktrees.appendingPathComponent("Protege")
+        let ordinary = worktrees.appendingPathComponent("Ordinaire")
+        try FileManager.default.createDirectory(at: worktrees, withIntermediateDirectories: true)
+        try #require(await git("worktree", "add", "-q", "-b", "protege", protected.path).succeeded)
+        try #require(await git("worktree", "add", "-q", "-b", "ordinaire", ordinary.path).succeeded)
+        try home.file(".codex/worktrees/Protege/Entrants/Archive.download/partiel")
+        let downloads = home.root.appendingPathComponent("Downloads")
+        let replacement = home.root.appendingPathComponent("NouveauDownloads")
+        let destination = protected.appendingPathComponent("Entrants")
+        let fm = FileManager.default
+        if redirectDuringMeasurement {
+            let original = home.root.appendingPathComponent("DownloadsOriginal")
+            try fm.createDirectory(at: original, withIntermediateDirectories: true)
+            try fm.createSymbolicLink(at: downloads, withDestinationURL: original)
+            try fm.createSymbolicLink(at: replacement, withDestinationURL: destination)
+        } else {
+            try fm.createSymbolicLink(at: downloads, withDestinationURL: destination)
+        }
+        let context = home.context(now: Date().addingTimeInterval(2 * 86_400))
+        let items = await RuleEngine.collect(context, finders: [.agents], measurer: Measurer { urls in
+            let worktree = urls.first { $0.lastPathComponent == "Protege" }
+            if redirectDuringMeasurement {
+                #expect(worktree != nil)
+                #expect(rename(replacement.path, downloads.path) == 0)
+            } else {
+                #expect(worktree == nil)
+            }
+            let measured = await Scanner.measure(urls)
+            if let worktree { #expect((measured[worktree]?.sizes.freeable ?? 0) > 0) }
+            return measured
+        })
+        let locked = try #require(items.first { $0.title == "Protege" })
+        let available = try #require(items.first { $0.title == "Ordinaire" })
+        #expect(locked.protections == [.systemPath] && locked.sizes.freeable == 0)
+        #expect(!locked.isSelectable && !PreselectionPolicy().preselects(locked, now: context.now))
+        #expect(available.isSelectable && available.sizes.freeable > 0)
+        #expect(PreselectionPolicy().preselects(available, now: context.now))
+    }
+
     @Test("Les historiques Claude anciens sont proposés, les récents jamais")
     func claudeHistory() async throws {
         let home = try FakeHome()
@@ -211,6 +267,104 @@ struct ContentTests {
         #expect(items.contains { $0.ruleID == "downloads.installer" && $0.title == "Outil.dmg" })
         #expect(items.contains { $0.ruleID == "downloads.large" && $0.title == "film.mkv" })
         #expect(!items.contains { $0.title == "recent.mkv" })
+    }
+
+    @Test("Les paquets Safari récents et anciens restent visibles sans gain ni sélection", arguments: [false, true])
+    func incompleteSafariDownloads(safariRunning: Bool) async throws {
+        let home = try FakeHome()
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let old = now.addingTimeInterval(-60 * 86_400)
+        let recent = now.addingTimeInterval(-60)
+        let fm = FileManager.default
+        let active = home.root.appendingPathComponent("Downloads/En cours.zip.download", isDirectory: true)
+        let partial = active.appendingPathComponent("En cours.zip")
+        try home.file("Downloads/En cours.zip.download/En cours.zip", bytes: 220_000, modified: recent)
+        try home.file("Downloads/Interrompu.pdf.DOWNLOAD/Interrompu.pdf", bytes: 150_000, modified: old)
+        try home.setModified("Downloads/En cours.zip.download", recent)
+        try home.setModified("Downloads/Interrompu.pdf.DOWNLOAD", old)
+        try fm.createDirectory(at: home.root.appendingPathComponent("Downloads/Vide.download"), withIntermediateDirectories: true)
+        try home.file("Downloads/Rapport.download.pdf", bytes: 80_000, modified: old)
+        try home.file("Downloads/Ordinaire.download", bytes: 80_000, modified: old)
+        try home.file("Autre/Hors dossier.download/data", bytes: 80_000, modified: old)
+        try fm.createSymbolicLink(at: home.root.appendingPathComponent("Downloads/Lien.download"),
+                                  withDestinationURL: home.root.appendingPathComponent("Autre/Hors dossier.download"))
+        let activeFile = try FileHandle(forUpdating: partial)
+        defer { try? activeFile.close() }
+        var context = home.context(now: now, runningApps: safariRunning ? ["com.apple.Safari"] : [])
+        context.largeDownloadBytes = 10_000
+
+        let items = await RuleEngine.collect(context, finders: [.userContent])
+        let safari = items.filter(\.isIncompleteSafariDownload)
+        #expect(Set(safari.map(\.title)) == ["En cours.zip.download", "Interrompu.pdf.DOWNLOAD", "Vide.download"])
+        #expect(safari.allSatisfy { $0.category == .downloads && $0.safety == .protected && $0.method == .manual })
+        #expect(safari.allSatisfy { $0.sizes.freeable == 0 && !$0.isSelectable && !PreselectionPolicy().preselects($0, now: now) })
+        #expect(safari.allSatisfy { !$0.notes.contains(.partlyShared) })
+        let activeItem = try #require(safari.first { $0.title == "En cours.zip.download" })
+        let oldItem = try #require(safari.first { $0.title == "Interrompu.pdf.DOWNLOAD" })
+        #expect(activeItem.paths.map { PathNormalizer.normalize($0.path) } == [PathNormalizer.normalize(active.path)])
+        #expect(activeItem.lastActivity == recent && oldItem.lastActivity == old)
+        #expect(activeItem.sizes.allocated >= 220_000 && oldItem.sizes.allocated >= 150_000)
+        #expect(items.filter { !$0.isIncompleteSafariDownload }.map(\.title) == ["Rapport.download.pdf"])
+        #expect(try Data(contentsOf: partial) == Data(repeating: 0x42, count: 220_000))
+    }
+
+    @Test("Un dossier Téléchargements redirigé ne produit aucun paquet Safari")
+    func skipsRedirectedSafariDownloads() async throws {
+        let home = try FakeHome()
+        try home.file("Autre/Redirected.download/data")
+        try FileManager.default.createSymbolicLink(at: home.root.appendingPathComponent("Downloads"),
+                                                   withDestinationURL: home.root.appendingPathComponent("Autre"))
+
+        let items = await RuleEngine.collect(home.context(), finders: [.userContent])
+        #expect(items.allSatisfy { !$0.isIncompleteSafariDownload })
+    }
+
+    @Test("La mesure Safari ignore une redirection, même si le dossier d'origine revient", arguments: [false, true])
+    func safariMeasureAfterRedirect(restoreOriginal: Bool) async throws {
+        let home = try FakeHome()
+        try home.file("Downloads/Archive.download/original", bytes: 220_000)
+        try home.file("Autre/Archive.download/remplacement", bytes: 600_000)
+        let downloads = home.root.appendingPathComponent("Downloads")
+        let original = home.root.appendingPathComponent("Downloads-original")
+        let other = home.root.appendingPathComponent("Autre")
+        let items = await RuleEngine.collect(home.context(), finders: [.userContent], measurer: Measurer { urls in
+            let fm = FileManager.default
+            do {
+                try fm.moveItem(at: downloads, to: original)
+                try fm.createSymbolicLink(at: downloads, withDestinationURL: other)
+                let measured = await Scanner.measure(urls)
+                #expect(measured.values.first?.sizes.allocated ?? 0 >= 600_000)
+                if restoreOriginal {
+                    try fm.removeItem(at: downloads)
+                    try fm.moveItem(at: original, to: downloads)
+                }
+                return measured
+            } catch {
+                Issue.record("Redirection du dossier fictif impossible : \(error)")
+                return [:]
+            }
+        })
+        let safari = items.filter(\.isIncompleteSafariDownload)
+        if restoreOriginal {
+            #expect(safari.count == 1 && safari.first?.sizes == .zero)
+        } else {
+            #expect(safari.isEmpty)
+        }
+    }
+
+    @Test("La compression laisse les paquets Safari de côté, à la racine et dans un projet")
+    func compressionSkipsSafariDownloads() async throws {
+        let home = try FakeHome()
+        let old = Date().addingTimeInterval(-400 * 86_400)
+        try home.file("Downloads/Racine.DOWNLOAD/payload.txt", bytes: 14_000_000, modified: old)
+        try home.file("Downloads/Projet/Alias.download/payload.txt", bytes: 14_000_000, modified: old)
+        try home.setModified("Downloads/Projet/Alias.download", old)
+        try home.file("Downloads/Ordinaire/payload.txt", bytes: 14_000_000, modified: old)
+        var context = home.context()
+        context.projectRoots = [home.root.appendingPathComponent("Downloads")]
+        let items = await RuleEngine.collect(context, finders: [.compression])
+        #expect(items.map(\.title) == ["Ordinaire"])
+        #expect(items.first?.sizes.freeable ?? 0 > 10_000_000)
     }
 
     @Test("Les VM sont gérées à part, hors du total en titre")

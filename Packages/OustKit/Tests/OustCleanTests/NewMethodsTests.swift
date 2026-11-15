@@ -246,6 +246,35 @@ struct CompressorTests {
 @Suite("Éviction : rien n'est supprimé, seul le nuage est concerné")
 struct EvictorTests {
 
+    @Test("L'éviction d'un dossier épargne le paquet Safari et ses alias")
+    func safariDownloadEviction() throws {
+        let bench = try Bench()
+        let partial = try bench.file("Library/CloudStorage/Dropbox/Projets/Archive.DOWNLOAD/Fichier.partiel")
+        let package = partial.deletingLastPathComponent()
+        let project = package.deletingLastPathComponent()
+        let neighbour = try bench.file("Library/CloudStorage/Dropbox/Projets/Voisin.txt")
+        let alias = project.appendingPathComponent("Lien")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: package)
+        let guardPaths = PathGuard(home: bench.root)
+        #expect(guardPaths.allowsEviction(project))
+        for protected in [package, partial, alias] {
+            #expect(!guardPaths.allowsEviction(protected))
+            #expect(!guardPaths.allowsCloudTrash(protected))
+        }
+        var visitedRoots: [URL] = []
+        var evicted: [URL] = []
+        let result = Evictor.evict([package, alias, project], walk: { root, visit in
+            visitedRoots.append(root)
+            for protected in [package, partial, alias.appendingPathComponent(partial.lastPathComponent)] {
+                _ = visit(protected, 3_000_000, nil)
+            }
+            _ = visit(neighbour, 2_000_000, nil)
+        }, evict: { evicted.append($0) })
+        #expect(visitedRoots == [project] && evicted == [neighbour])
+        #expect(result.evicted == 1 && result.evictedBytes == 2_000_000 && result.failures.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: partial.path))
+    }
+
     @Test("Chaque fichier évinçable est évincé, et seul ce qui l'a été compte")
     func counts() {
         let root = URL(fileURLWithPath: "/nuage/Photos")

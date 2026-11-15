@@ -49,19 +49,32 @@ struct CloudCopiesFinder {
         return providers().flatMap { provider in
             // L'arbre de l'analyse connaît déjà les gros fichiers : pas besoin de relire le disque.
             let node = tree?.descendant(atPath: provider.root.path)
-            return candidates(for: provider, walk: node.map(Self.largeFiles(in:)) ?? { Self.largeFiles(under: $0, visit: $1) })
+            return candidates(for: provider, walk: node.map { Self.largeFiles(in: $0) } ?? { Self.largeFiles(under: $0, visit: $1) })
         }
     }
 
     /// Les gros fichiers évinçables d'après l'arbre de l'analyse.
-    static func largeFiles(in node: TreeNode) -> Walk {
+    static func largeFiles(in node: TreeNode, eligible: @escaping (URLResourceValues) -> Bool = CloudFile.isEvictable) -> Walk {
         { _, visit in
             var stack = [node]
             while let current = stack.popLast() {
+                let directory = current.url
+                guard !SafariDownloadPath.containsPackage(current.path),
+                      let local = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isSymbolicLinkKey]),
+                      local.isDirectory == true, local.isSymbolicLink != true else { continue }
+                if CloudPackage.isIndivisible(named: directory.lastPathComponent, reportedBySystem: local.isPackage == true) {
+                    var proceed = true
+                    CloudFile.walk(directory, minimumBytes: countedFileBytes, eligible: eligible) { url, bytes, modified in
+                        proceed = visit(url, bytes, modified)
+                        return proceed
+                    }
+                    if !proceed { return }
+                    continue
+                }
                 stack += current.children
                 for leaf in current.files where leaf.sizes.allocated >= countedFileBytes {
                     let url = current.url.appendingPathComponent(leaf.name)
-                    guard evictable(url) else { continue }
+                    guard let values = try? url.resourceValues(forKeys: CloudFile.keys), eligible(values) else { continue }
                     if !visit(url, leaf.sizes.allocated, leaf.modified) { return }
                 }
             }
@@ -70,20 +83,9 @@ struct CloudCopiesFinder {
 
     /// Les gros fichiers évinçables, en lisant le disque : les attributs locaux
     /// d'abord (rapides), l'état de synchronisation pour les seuls gros fichiers.
-    static func largeFiles(under root: URL, visit: (URL, Int64, Date?) -> Bool) {
-        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .totalFileAllocatedSizeKey, .contentModificationDateKey]
-        let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys, options: [])
-        while let url = enumerator?.nextObject() as? URL {
-            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true,
-                  values.isSymbolicLink != true else { continue }
-            let bytes = Int64(values.totalFileAllocatedSize ?? 0)
-            guard bytes >= countedFileBytes, evictable(url) else { continue }
-            if !visit(url, bytes, values.contentModificationDate) { return }
-        }
-    }
-
-    static func evictable(_ url: URL) -> Bool {
-        (try? URL(fileURLWithPath: url.path).resourceValues(forKeys: CloudFile.keys)).map(CloudFile.isEvictable) ?? false
+    static func largeFiles(under root: URL, eligible: (URLResourceValues) -> Bool = CloudFile.isEvictable,
+                           visit: (URL, Int64, Date?) -> Bool) {
+        CloudFile.walk(root, minimumBytes: countedFileBytes, eligible: eligible, visit: visit)
     }
 
     /// Un domaine vivant : la racine elle-même est dans le nuage. Les anciens
@@ -143,6 +145,7 @@ struct CloudCopiesFinder {
         // 18/10/2026 : tout iCloud Drive en un seul élément, sur un chemin inexistant).
         let base = PathNormalizer.normalize(provider.root.standardizedFileURL.path)
         walk(provider.root) { found, bytes, modified in
+            guard !CloudFile.isSafariDownload(found) else { return true }
             let path = PathNormalizer.normalize(found.standardizedFileURL.path)
             guard path.hasPrefix(base + "/") else { return true }
             let relative = path.dropFirst(base.count + 1).split(separator: "/").map(String.init)

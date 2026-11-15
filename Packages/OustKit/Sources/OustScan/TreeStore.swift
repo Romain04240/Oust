@@ -15,7 +15,8 @@ public struct TreeStore: Sendable {
 
     /// Changer ce numéro à chaque évolution du format : un ancien index est alors
     /// ignoré (et le disque reparcouru), jamais mal relu.
-    static let version: UInt64 = 1
+    // La version 1 comptait les paquets Safari dans les octets libérables.
+    static let version: UInt64 = 2
     static let magic = Array("OUSTIDX".utf8)
 
     public init(directory: URL) {

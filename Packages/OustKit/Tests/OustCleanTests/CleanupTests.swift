@@ -77,6 +77,79 @@ struct CleanupTests {
         }
     }
 
+    @Test("Le veto Safari interdit le paquet et son contenu, même via les actions génériques")
+    func incompleteSafariDownloadVeto() async throws {
+        let bench = try Bench()
+        let payload = try bench.file("Downloads/Installateur.dmg.DOWNLOAD/début.dmg")
+        let bundle = payload.deletingLastPathComponent()
+        let lookalike = try bench.file("Downloads/Installateur.download.dmg")
+        let alias = bench.root.appendingPathComponent("Lien")
+        let aliasToPayload = bench.root.appendingPathComponent("LienDirect")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: bundle)
+        try FileManager.default.createSymbolicLink(at: aliasToPayload, withDestinationURL: payload)
+        let differentlyCased = bench.root.appendingPathComponent("dOWNLOADS")
+        var paths = [bundle, payload, alias, aliasToPayload, alias.appendingPathComponent(payload.lastPathComponent), differentlyCased]
+        let apfsSpelling = bench.root.appendingPathComponent("Downloadſ")
+        if let equivalent = FileFacts.of(apfsSpelling.path),
+           equivalent.inode == FileFacts.of(differentlyCased.path)?.inode {
+            paths.append(apfsSpelling)
+        }
+        let pathGuard = PathGuard(home: bench.root)
+        #expect(paths.allSatisfy { pathGuard.check($0) == .refused("safari-incomplete-download") })
+        #expect(pathGuard.allows(lookalike))
+
+        // La fausse Corbeille est volontairement disponible : le test doit
+        // exercer le veto du chemin, en plus de l'interdiction de la fiche.
+        let engine = CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: nil, pathGuard: pathGuard,
+                                   processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil })
+        #expect(engine.supports(.trash))
+        let generic = paths.map { bench.item($0, method: .trash, safety: .review) }
+        var forged = bench.item(lookalike, method: .trash, safety: .review)
+        forged.ruleID = CleanupItem.incompleteSafariDownloadRuleID
+        #expect(!forged.isSelectable)
+
+        var report: CleanupReport?
+        for await event in engine.run(generic + [forged]) {
+            if case .finished(let final) = event { report = final }
+        }
+        #expect(report?.outcomes.count == generic.count)
+        #expect(report?.outcomes.allSatisfy { $0.result == .skipped(.refusedByGuard) && $0.trashedTo.isEmpty } == true)
+        #expect(report?.pendingInTrash == 0 && report?.expectedNow == 0)
+        #expect(try Data(contentsOf: payload) == Data(repeating: 1, count: 10_000))
+        #expect(try Data(contentsOf: lookalike) == Data(repeating: 1, count: 10_000))
+    }
+
+    @Test("Une redirection vers un paquet Safari après le premier contrôle bloque encore la Corbeille")
+    func incompleteSafariDownloadVetoAfterRedirect() async throws {
+        let bench = try Bench()
+        let ordinary = try bench.file("Ordinaire/fichier", byte: 1)
+        let partial = try bench.file("Downloads/Installateur.download/fichier", byte: 2)
+        let link = bench.root.appendingPathComponent("Lien")
+        let replacement = bench.root.appendingPathComponent("NouveauLien")
+        let fm = FileManager.default
+        try fm.createSymbolicLink(at: link, withDestinationURL: ordinary.deletingLastPathComponent())
+        try fm.createSymbolicLink(at: replacement, withDestinationURL: partial.deletingLastPathComponent())
+        let selected = link.appendingPathComponent("fichier")
+        let pathGuard = PathGuard(home: bench.root)
+        #expect(pathGuard.allows(selected))
+        let engine = CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: nil, pathGuard: pathGuard,
+                                   processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil },
+                                   runningApps: {
+            _ = rename(replacement.path, link.path)
+            return []
+        })
+
+        var report: CleanupReport?
+        for await event in engine.run([bench.item(selected, method: .trash, safety: .review)]) {
+            if case .finished(let final) = event { report = final }
+        }
+        #expect(pathGuard.check(selected) == .refused("safari-incomplete-download"))
+        #expect(report?.outcomes.map(\.result) == [.skipped(.refusedByGuard)])
+        #expect(report?.pendingInTrash == 0)
+        #expect(try Data(contentsOf: partial) == Data(repeating: 2, count: 10_000))
+        #expect(try Data(contentsOf: ordinary) == Data(repeating: 1, count: 10_000))
+    }
+
     @Test("Les actions génériques refusent la Corbeille avant d'appeler le système")
     func genericTrashUnavailable() async throws {
         let bench = try Bench()
@@ -275,6 +348,42 @@ struct CleanupTests {
         #expect(!FileManager.default.fileExists(atPath: worktree.path))
         let branches = await git("branch", "--list", "worktree-agent-x")
         #expect(branches.output.contains("worktree-agent-x"))
+    }
+
+    @Test("Le retrait par Git refuse un worktree qui contient Téléchargements redirigé")
+    func worktreeKeepsRedirectedDownloads() async throws {
+        let bench = try Bench()
+        let repo = bench.root.appendingPathComponent("depot")
+        try bench.file("depot/README.md")
+        try Data("/Entrants/\n".utf8).write(to: repo.appendingPathComponent(".gitignore"))
+        let env = ["GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": "/dev/null"]
+        func git(_ args: String...) async -> CommandResult {
+            await Command.run("/usr/bin/git", ["-C", repo.path] + args, environment: env)
+        }
+        try #require(await git("init", "-q", "-b", "main").succeeded)
+        try #require(await git("add", ".").succeeded)
+        try #require(await git("commit", "-q", "-m", "init").succeeded)
+        let worktree = bench.root.appendingPathComponent("Worktree", isDirectory: true)
+        try #require(await git("worktree", "add", "-q", "-b", "fixture-agent", worktree.path).succeeded)
+        let payload = try bench.file("Worktree/Entrants/Archive.download/partiel")
+        let home = bench.root.appendingPathComponent("maison", isDirectory: true)
+        let downloads = home.appendingPathComponent("Downloads")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: downloads, withDestinationURL: worktree.appendingPathComponent("Entrants"))
+        let guardPaths = PathGuard(home: home)
+        #expect(guardPaths.check(worktree) == .refused("safari-incomplete-download"))
+        let alternate = bench.root.appendingPathComponent("wORKTREE")
+        if FileFacts.of(alternate.path) != nil {
+            #expect(guardPaths.check(alternate) == .refused("safari-incomplete-download"))
+        }
+        let state = try #require(await GitInspector.state(ofWorktree: worktree))
+        #expect(state.uncommitted == 0 && state.uniqueSensitiveFiles.isEmpty)
+        let item = bench.item(worktree, method: .gitWorktreeRemove(repository: repo.path), safety: .review)
+        let (_, report) = await bench.run([item])
+        #expect(report?.outcomes.map(\.result) == [.skipped(.refusedByGuard)])
+        #expect(FileManager.default.fileExists(atPath: payload.path))
+        #expect(FileManager.default.fileExists(atPath: downloads.appendingPathComponent("Archive.download/partiel").path))
     }
 
     @Test("Une copie remplacée par un clone garde son contenu")

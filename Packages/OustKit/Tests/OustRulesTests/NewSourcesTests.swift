@@ -4,6 +4,7 @@ import Testing
 @testable import OustRules
 import OustCore
 import OustSafety
+import OustScan
 
 @Suite("Caches d'applications, une par une")
 struct AppCachesTests {
@@ -159,6 +160,69 @@ struct PersonalFilesTests {
 
 @Suite("Le nuage : libérer sans supprimer")
 struct CloudCopiesTests {
+
+    @Test("Inventaire, estimation et éviction reconnaissent les mêmes paquets cloud",
+          arguments: [false, true], ["app", "PAGES", "rtfd", "photoslibrary"])
+    func safariCloudIndivisibleGain(fromTree: Bool, ext: String) async throws {
+        let home = try FakeHome()
+        let relative = "Library/CloudStorage/Dropbox/"
+        let protectedName = "Indivisible.\(ext)"
+        try home.file(relative + "Projet/\(protectedName)/Ressources/Archive.download/partiel", bytes: 2_000_000)
+        try home.file(relative + "Projet/\(protectedName)/Ressources/interne.txt", bytes: 3_000_000)
+        try home.file(relative + "Projet/Voisin.txt", bytes: 1_500_000)
+        let ordinaryName = "Ordinaire.\(ext)"
+        try home.file(relative + "\(ordinaryName)/Fichier.txt", bytes: 2_000_000)
+        let root = home.root.appendingPathComponent(relative, isDirectory: true)
+        let finder = CloudCopiesFinder(context: home.context())
+        let provider = CloudCopiesFinder.Provider(root: root, name: "Dropbox", rule: "cloud.file_provider")
+        let walk: CloudCopiesFinder.Walk
+        if fromTree {
+            let tree = try #require(await Scanner.scan([root]).root)
+            walk = CloudCopiesFinder.largeFiles(in: tree, eligible: { _ in true })
+        } else {
+            walk = { url, visit in CloudCopiesFinder.largeFiles(under: url, eligible: { _ in true }, visit: visit) }
+        }
+        let items = finder.candidates(for: provider, walk: walk).map(\.item)
+        #expect(items.count == 2)
+        let project = try #require(items.first { $0.title == "Projet" })
+        #expect(project.sizes.freeable == FileFacts.of(root.appendingPathComponent("Projet/Voisin.txt").path)?.allocated)
+        let loose = try #require(items.first { $0.title == "Dropbox" })
+        #expect(loose.paths.map(\.lastPathComponent) == [ordinaryName])
+        #expect(loose.sizes.freeable == FileFacts.of(root.appendingPathComponent("\(ordinaryName)/Fichier.txt").path)?.allocated)
+
+        let listed = try #require(CloudLister.list(root).files.first { URL(fileURLWithPath: $0.path).lastPathComponent == protectedName })
+        #expect(listed.isPackage && listed.containsSafariDownload && listed.privateSize == 0)
+        var targets: [String] = []
+        CloudFile.walk(root, minimumBytes: 0, eligible: { _ in true }) { url, _, _ in
+            targets.append(url.lastPathComponent)
+            return true
+        }
+        #expect(targets.sorted() == [ordinaryName, "Voisin.txt"].sorted())
+    }
+
+    @Test("Le gain cloud ignore le paquet Safari, ses fichiers et un lien, avec un fichier voisin")
+    func safariDownloadCloudGain() throws {
+        let home = try FakeHome()
+        let relative = "Library/CloudStorage/Dropbox/Projets/"
+        try home.file(relative + "Archive.DOWNLOAD/Fichier.partiel")
+        try home.file(relative + "Voisin.txt")
+        let project = home.root.appendingPathComponent(relative)
+        let safari = project.appendingPathComponent("Archive.DOWNLOAD")
+        let neighbour = project.appendingPathComponent("Voisin.txt")
+        let link = project.appendingPathComponent("Alias")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: safari)
+        let finder = CloudCopiesFinder(context: home.context())
+        let provider = CloudCopiesFinder.Provider(root: project.deletingLastPathComponent(), name: "Dropbox",
+                                                 rule: "cloud.file_provider")
+        let candidates = finder.candidates(for: provider) { _, visit in
+            for entry in [safari, safari.appendingPathComponent("Fichier.partiel"), link.appendingPathComponent("Fichier.partiel")] {
+                _ = visit(entry, 3_000_000, nil)
+            }
+            _ = visit(neighbour, 2_000_000, nil)
+        }
+        let only = try #require(candidates.first?.item)
+        #expect(candidates.count == 1 && only.title == "Projets" && only.sizes.freeable == 2_000_000)
+    }
 
     @Test("Les copies évinçables sont regroupées par dossier, sous « Mon Drive » un cran plus bas")
     func grouping() throws {

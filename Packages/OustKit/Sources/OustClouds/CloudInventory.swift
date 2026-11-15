@@ -1,4 +1,5 @@
 import Foundation
+import OustCore
 import OustScan
 
 /// Un fichier d'un nuage, tel que ce Mac le voit.
@@ -20,15 +21,18 @@ public struct CloudEntry: Sendable, Hashable, Identifiable {
     /// Le contenu est resté dans le nuage : seul le fantôme est ici.
     public let isDataless: Bool
     public let isPackage: Bool
+    public let containsSafariDownload: Bool
 
     public init(url: URL, accountID: String, folder: [String], cloudSize: Int64, localSize: Int64, freeable: Int64,
-                modified: Date?, fileID: UInt64, isDataless: Bool, isPackage: Bool = false) {
+                modified: Date?, fileID: UInt64, isDataless: Bool, isPackage: Bool = false,
+                containsSafariDownload: Bool = false) {
         self.url = url
         self.accountID = accountID
         self.folder = folder
         self.cloudSize = cloudSize
         self.localSize = localSize
-        self.freeable = min(freeable, localSize)
+        self.containsSafariDownload = containsSafariDownload || SafariDownloadPath.containsPackage(url.path)
+        self.freeable = self.containsSafariDownload ? 0 : min(freeable, localSize)
         self.modified = modified
         self.fileID = fileID
         self.isDataless = isDataless
@@ -108,7 +112,7 @@ public struct CloudInventory: Sendable {
                     cloudSize: listed.logicalSize, localSize: listed.isDataless ? 0 : listed.allocatedSize,
                     freeable: listed.isDataless ? 0 : (listed.privateSize ?? listed.allocatedSize),
                     modified: listed.modified, fileID: listed.fileID, isDataless: listed.isDataless,
-                    isPackage: listed.isPackage
+                    isPackage: listed.isPackage, containsSafariDownload: listed.containsSafariDownload
                 )
                 files.append(file)
                 summary.files += 1
@@ -178,7 +182,7 @@ public struct CloudInventory: Sendable {
             let size: Int64
         }
         var groups: [Key: [CloudEntry]] = [:]
-        for file in files(in: accounts) where file.cloudSize >= max(1, minimumSize) {
+        for file in files(in: accounts) where !file.containsSafariDownload && file.cloudSize >= max(1, minimumSize) {
             groups[Key(name: Self.comparableName(file.name), size: file.cloudSize), default: []].append(file)
         }
         return groups.compactMap { key, files -> CloudDuplicateGroup? in

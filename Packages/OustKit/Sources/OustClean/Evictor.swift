@@ -28,8 +28,10 @@ enum Evictor {
         var summary = Summary()
         for path in paths {
             if isCancelled() { break }
+            guard !CloudFile.isSafariDownload(path) else { continue }
             walk(path) { url, bytes, _ in
                 if isCancelled() { return false }
+                guard !CloudFile.isSafariDownload(url) else { return true }
                 do {
                     try evict(url)
                     summary.evicted += 1

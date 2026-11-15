@@ -1,4 +1,5 @@
 import Foundation
+import OustCore
 import OustLocalization
 
 /// La sortie de `oust` pour qui la lit dans un terminal. Les agents, eux,
@@ -10,7 +11,8 @@ enum HumanText {
         var lines: [String] = []
         let width = report.items.map(\.safetyLabel.count).max() ?? 0
         for item in report.items {
-            let size = Formatters.compactBytes(item.sizes.freeableBytes)
+            let size = item.rule == CleanupItem.incompleteSafariDownloadRuleID
+                ? "" : Formatters.compactBytes(item.sizes.freeableBytes)
             let label = item.safetyLabel.padding(toLength: width, withPad: " ", startingAt: 0)
             let owner = item.owner.isEmpty || item.owner == item.title ? "" : " — " + item.owner
             lines.append("\(marker(item.agent.verdict)) \(label)  \(String(repeating: " ", count: max(0, 8 - size.count)))\(size)  \(item.title)\(owner)")
@@ -46,9 +48,16 @@ enum HumanText {
         if !report.protections.isEmpty { section("explain.protected", report.protections.joined(separator: "\n  ")) }
         if let item = report.item {
             section("explain.where", item.paths.joined(separator: "\n  "))
-            lines.append("")
-            lines.append(L10n.string("explain.sizes", Formatters.bytes(item.sizes.allocatedBytes),
-                                     Formatters.bytes(item.sizes.freeableBytes)))
+            if item.rule == CleanupItem.incompleteSafariDownloadRuleID {
+                if item.sizes.allocatedBytes > 0 {
+                    lines.append("")
+                    lines.append(L10n.string("system.safari_download_occupied", Formatters.bytes(item.sizes.allocatedBytes)))
+                }
+            } else {
+                lines.append("")
+                lines.append(L10n.string("explain.sizes", Formatters.bytes(item.sizes.allocatedBytes),
+                                         Formatters.bytes(item.sizes.freeableBytes)))
+            }
         }
         return lines
     }

@@ -43,7 +43,11 @@ public struct Measurer: Sendable {
             var measures: [URL: OustScan.Measurement] = [:]
             var unknown: [URL] = []
             for url in urls {
-                if let known = tree.measurement(of: url) { measures[url] = known } else { unknown.append(url) }
+                if !SafariDownloadPath.containsPackage(url.path), let known = tree.measurement(of: url) {
+                    measures[url] = known
+                } else {
+                    unknown.append(url)
+                }
             }
             if !unknown.isEmpty {
                 measures.merge(await Scanner.measure(unknown)) { first, _ in first }
@@ -61,11 +65,12 @@ public enum RuleEngine {
                            measurer: Measurer = .disk) -> AsyncStream<RuleBatch> {
         AsyncStream { continuation in
             let task = Task {
+                let pathGuard = PathGuard(home: context.home)
                 await withTaskGroup(of: RuleBatch.self) { group in
                     for kind in finders {
                         group.addTask {
                             let candidates = await find(kind, context: context)
-                            let items = await measure(candidates, using: measurer)
+                            let items = await measure(candidates, using: measurer, pathGuard: pathGuard)
                             return RuleBatch(finder: kind, items: items)
                         }
                     }
@@ -127,7 +132,11 @@ public enum RuleEngine {
 
     /// Mesure les candidats d'un seul passage du moteur d'analyse, et note leur
     /// empreinte pour la revalidation (RULES.md, règle 2).
-    static func measure(_ candidates: [Candidate], using measurer: Measurer = .disk) async -> [CleanupItem] {
+    static func measure(_ candidates: [Candidate], using measurer: Measurer, pathGuard: PathGuard) async -> [CleanupItem] {
+        let candidates = candidates.filter { candidate in
+            guard let location = candidate.safariDownload, let path = candidate.item.paths.first else { return true }
+            return location.isCurrent(at: path)
+        }
         let paths = candidates.filter(\.needsMeasure).flatMap(\.item.paths)
         let measures = await measurer.measure(Array(Set(paths)))
         return candidates.compactMap { candidate in
@@ -142,7 +151,16 @@ public enum RuleEngine {
                     if let date = measure.latestModification, date > (latest ?? .distantPast) { latest = date }
                     inaccessible = inaccessible || measure.inaccessible
                 }
-                item.sizes = sizes
+                if item.isIncompleteSafariDownload {
+                    guard let location = candidate.safariDownload, let path = item.paths.first,
+                          location.isCurrent(at: path) else { return nil }
+                    if let measure = measures[path], !inaccessible,
+                       measure.directoryDevice == location.package.device, measure.directoryFileID == location.package.inode {
+                        item.sizes = Sizes(allocated: sizes.allocated, freeable: 0)
+                    }
+                } else {
+                    item.sizes = sizes
+                }
                 if item.lastActivity == nil { item.lastActivity = latest }
                 if inaccessible && sizes.allocated == 0 { item.protect(.needsFullDiskAccess) }
             }
@@ -151,7 +169,12 @@ public enum RuleEngine {
                 item.fingerprint = Fingerprint(modificationDate: values?.contentModificationDate,
                                                fileID: Self.inode(of: first))
             }
-            if item.sizes.allocated > 0 && item.sizes.freeable < item.sizes.allocated * 9 / 10 {
+            // Téléchargements a pu être redirigé pendant l'attente de la mesure.
+            if case .gitWorktreeRemove = item.method, !item.paths.allSatisfy(pathGuard.allows) {
+                item.protect(.systemPath)
+                item.sizes = .zero
+            }
+            if !item.isIncompleteSafariDownload, item.sizes.allocated > 0, item.sizes.freeable < item.sizes.allocated * 9 / 10 {
                 item.notes.append(.partlyShared)
             }
             // Un élément vide n'apprend rien à personne.
@@ -190,7 +213,8 @@ public enum RuleCatalog {
         "agent.worktree", "agent.codex_worktree", "agent.claude_history", "agent.claude_history_orphan",
         "agent.codex_sessions", "agent.codex_workspace", "agent.codex_images", "agent.cache",
         "model.huggingface", "model.lmstudio", "model.ollama", "model.app_models",
-        "downloads.installer", "downloads.large", "trash.contents", "ios.backup", "vm.image", "vm.docker",
+        "downloads.installer", "downloads.large", CleanupItem.incompleteSafariDownloadRuleID, "trash.contents",
+        "ios.backup", "vm.image", "vm.docker",
         "snapshot.time_machine", "browser.cache", "browser.history", "browser.cookies",
         "duplicate.copy", "explorer.item",
         "cloud.icloud", "cloud.file_provider", "compress.project",

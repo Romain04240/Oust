@@ -63,6 +63,8 @@ public final class TreeNode: @unchecked Sendable, Identifiable {
     public let name: String
     public internal(set) weak var parent: TreeNode?
     public let fileID: UInt64
+    /// Renseigné quand le dossier est une racine de mesure fraîche.
+    var measurementDevice: Int32?
     public internal(set) var status: NodeStatus = .ok
 
     public internal(set) var children: [TreeNode] = []

@@ -19,7 +19,7 @@ extension CloudEntry {
             sizes: Sizes(allocated: localSize, freeable: freeable), lastActivity: modified, rebuild: .cloudTrash,
             fingerprint: Fingerprint(modificationDate: modified, fileID: fileID)
         )
-        if !pathGuard.allowsCloudTrash(url) { item.protect(.systemPath) }
+        if containsSafariDownload || !pathGuard.allowsCloudTrash(url) { item.protect(.systemPath) }
         // Listé, mais rien à cocher : le Finder refuserait, après une alerte qui
         // bloque le nettoyage (essai du 18/10/2026 ; Romain : carte « déconnecté »).
         switch account?.connection {

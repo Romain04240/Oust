@@ -135,6 +135,19 @@ struct Candidate: Sendable {
     /// En dessous, l'élément n'est pas montré : cent caches d'applications de
     /// quelques kilo-octets noieraient les dix qui pèsent.
     var minimumAllocated: Int64 = 0
+    var safariDownload: SafariDownloadLocation?
+}
+
+struct SafariDownloadLocation: Sendable {
+    let directory: FileFacts
+    let package: FileFacts
+
+    func isCurrent(at url: URL) -> Bool {
+        guard let parent = FileFacts.of(url.deletingLastPathComponent().path),
+              parent.device == directory.device, parent.inode == directory.inode,
+              let current = FileFacts.of(url.path), current.device == package.device else { return false }
+        return current.isUnchanged(comparedTo: package)
+    }
 }
 
 /// Lance les outils que les chercheurs interrogent.

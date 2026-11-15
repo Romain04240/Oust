@@ -78,6 +78,8 @@ struct CompressionSurvey: Sendable {
 
     /// Parcourt le projet ; `nil` si quelque chose y a bougé depuis `cutoff`.
     static func survey(_ project: URL, cutoff: Date) -> CompressionSurvey? {
+        guard !SafariDownloadPath.containsPackage(project.path),
+              !SafariDownloadPath.containsPackage(project.resolvingSymlinksInPath().path) else { return nil }
         var survey = CompressionSurvey()
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey, .contentModificationDateKey]
         guard let enumerator = FileManager.default.enumerator(at: project, includingPropertiesForKeys: keys, options: []) else {

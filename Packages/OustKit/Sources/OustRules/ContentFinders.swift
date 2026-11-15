@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OustCore
 import OustSafety
@@ -74,10 +75,25 @@ struct UserContentFinder {
         let fileManager = FileManager.default
         var candidates: [Candidate] = []
 
-        // Téléchargements : installeurs (déjà installés, en général) et gros fichiers anciens.
+        // Téléchargements : paquets Safari en lecture seule, installeurs et gros fichiers anciens.
         let downloads = context.path("Downloads")
         let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .contentModificationDateKey, .isDirectoryKey]
+        let safariDirectory = safariDownloadDirectory(at: downloads)
         for entry in (try? fileManager.contentsOfDirectory(at: downloads, includingPropertiesForKeys: Array(keys))) ?? [] {
+            if SafariDownloadPath.hasPackageExtension(entry.lastPathComponent) {
+                if let safariDirectory, let facts = localDirectory(entry), facts.device == safariDirectory.device {
+                    let modified = facts.modificationDate
+                    candidates.append(Candidate(item: CleanupItem(
+                        title: entry.lastPathComponent, detail: modified.formatted(date: .abbreviated, time: .omitted),
+                        paths: [entry], category: .downloads, owner: "Safari", ruleID: CleanupItem.incompleteSafariDownloadRuleID,
+                        safety: .protected, protections: [.unknownState], method: .manual,
+                        lastActivity: modified, rebuild: .irreversible,
+                        fingerprint: Fingerprint(modificationDate: modified, fileID: facts.inode)
+                    ), safariDownload: SafariDownloadLocation(directory: safariDirectory, package: facts)))
+                }
+                // Un .download non reconnu ne doit pas ressortir comme gros fichier ancien.
+                continue
+            }
             guard let values = try? entry.resourceValues(forKeys: keys) else { continue }
             let size = Int64(values.totalFileAllocatedSize ?? 0)
             let modified = values.contentModificationDate
@@ -155,6 +171,24 @@ struct UserContentFinder {
             )))
         }
         return candidates
+    }
+
+    private func safariDownloadDirectory(at downloads: URL) -> FileFacts? {
+        guard context.volume == nil,
+              let expected = PathGuard.withResolvedParent(downloads),
+              PathNormalizer.normalize(downloads.resolvingSymlinksInPath().path) == PathNormalizer.normalize(expected.path),
+              let directory = localDirectory(downloads),
+              let home = FileFacts.of(downloads.deletingLastPathComponent().resolvingSymlinksInPath().path),
+              directory.device == home.device,
+              (try? downloads.resourceValues(forKeys: [.volumeIsLocalKey]))?.volumeIsLocal == true else { return nil }
+        return directory
+    }
+
+    private func localDirectory(_ url: URL) -> FileFacts? {
+        guard let facts = FileFacts.of(url.path), (facts.mode & S_IFMT) == S_IFDIR, !facts.isDataless,
+              let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .isAliasFileKey]),
+              values.isUbiquitousItem != true, values.isAliasFile != true else { return nil }
+        return facts
     }
 
     /// Le nom de l'appareil, lu dans `Info.plist` de la sauvegarde.

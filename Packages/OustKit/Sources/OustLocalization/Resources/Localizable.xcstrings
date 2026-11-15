@@ -19551,6 +19551,57 @@
         }
       }
     },
+    "rule.downloads.safari_incomplete.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Safari’s downloads list to see whether you can resume it."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrez la liste des téléchargements de Safari pour voir si vous pouvez le reprendre."
+          }
+        }
+      }
+    },
+    "rule.downloads.safari_incomplete.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Incomplete Safari download"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement Safari incomplet"
+          }
+        }
+      }
+    },
+    "rule.downloads.safari_incomplete.what": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Safari uses this kind of package for downloads in progress or interrupted. Oust shows it for inspection."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Safari utilise ce type de paquet pour les téléchargements en cours ou interrompus. Oust l’affiche pour vérification."
+          }
+        }
+      }
+    },
     "rule.duplicate.copy.back": {
       "extractionState": "manual",
       "localizations": {
@@ -26857,6 +26908,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Montré pour savoir où est passé l’espace, jamais proposé : Time Machine gère ses sauvegardes, et Photos ne laisse voir à Oust! que la photothèque système."
+          }
+        }
+      }
+    },
+    "system.safari_download_occupied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ on disk"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ occupés"
+          }
+        }
+      }
+    },
+    "system.safari_download_review": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check in Safari"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À vérifier dans Safari"
           }
         }
       }

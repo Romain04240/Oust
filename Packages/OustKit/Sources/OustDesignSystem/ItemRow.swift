@@ -56,7 +56,9 @@ public struct ItemRow: View {
                 }
                 HStack(spacing: Spacing.tight) {
                     SafetyBadge(item.safety)
-                    if let reason = item.protections.first {
+                    if item.isIncompleteSafariDownload {
+                        Tag(L10n.string("system.safari_download_review"), symbol: "lock.fill", tint: Palette.vivid(for: .protected))
+                    } else if let reason = item.protections.first {
                         Tag(Describe.protection(reason), symbol: "lock.fill", tint: Palette.vivid(for: .protected))
                     }
                     ForEach(Array(item.notes.prefix(2).enumerated()), id: \.offset) { _, note in
@@ -64,9 +66,11 @@ public struct ItemRow: View {
                     }
                     // Le moins important de la ligne : c'est lui qui raccourcit
                     // en premier quand la place manque, pas les pastilles.
-                    Text(verbatim: item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild))
-                        .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1)
-                        .layoutPriority(-1)
+                    if !item.isIncompleteSafariDownload {
+                        Text(verbatim: item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild))
+                            .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .layoutPriority(-1)
+                    }
                 }
                 if let detail = item.detail, detail != item.title {
                     Text(verbatim: detail).font(Typography.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
@@ -78,7 +82,12 @@ public struct ItemRow: View {
             }
             Spacer(minLength: Spacing.medium)
             VStack(alignment: .trailing, spacing: Spacing.hair) {
-                if item.method.isSnapshot {
+                if item.isIncompleteSafariDownload {
+                    if item.sizes.allocated > 0 {
+                        Text(verbatim: L10n.string("system.safari_download_occupied", Formatters.compactBytes(item.sizes.allocated)))
+                            .font(Typography.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                } else if item.method.isSnapshot {
                     if let bytes = item.measuredSnapshotBytes {
                         Text(verbatim: L10n.string("snapshot.private_size", Formatters.bytes(bytes)))
                             .font(Typography.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -88,7 +97,7 @@ public struct ItemRow: View {
                 } else {
                     Text(verbatim: Formatters.compactBytes(item.sizes.freeable)).font(Typography.size)
                 }
-                if item.sizes.retained > 0 {
+                if !item.isIncompleteSafariDownload, item.sizes.retained > 0 {
                     Text(verbatim: L10n.string("row.retained", Formatters.compactBytes(item.sizes.retained)))
                         .font(Typography.caption).foregroundStyle(.secondary)
                 }
@@ -109,7 +118,7 @@ public struct ItemRow: View {
         .padding(.vertical, Spacing.tight)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { onToggle() }
+        .onTapGesture(count: 2) { if enabled { onToggle() } }
         .contextMenu {
             if let preview, let url = item.paths.first {
                 PreviewMenuItem(kind: PreviewKind.of(url), action: preview)
@@ -148,7 +157,11 @@ public struct Explanation: View {
                 SafetyBadge(item.safety)
             }
             section("explain.what", Describe.ruleWhat(item.ruleID))
-            section("explain.back", Describe.ruleBack(item.ruleID) + " " + (item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild)))
+            if item.isIncompleteSafariDownload {
+                section("explain.back", Describe.ruleBack(item.ruleID))
+            } else {
+                section("explain.back", Describe.ruleBack(item.ruleID) + " " + (item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild)))
+            }
             section("explain.method", Describe.method(item.method))
             if !item.protections.isEmpty {
                 section("explain.protected", item.protections.map(Describe.protection).joined(separator: "\n"))
@@ -164,7 +177,10 @@ public struct Explanation: View {
                     }
                 }
             }
-            HStack {
+            if item.isIncompleteSafariDownload, item.sizes.allocated > 0 {
+                Text(verbatim: L10n.string("system.safari_download_occupied", Formatters.bytes(item.sizes.allocated)))
+                    .font(Typography.caption).foregroundStyle(.secondary)
+            } else if !item.isIncompleteSafariDownload {
                 Text(verbatim: L10n.string("explain.sizes", Formatters.bytes(item.sizes.allocated), Formatters.bytes(item.sizes.freeable)))
                     .font(Typography.caption).foregroundStyle(.secondary)
             }

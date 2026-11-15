@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OustCore
 import Synchronization
 
 /// Un fichier d'un nuage tel que le Mac le connaît, sans que son contenu ait été lu.
@@ -24,9 +25,10 @@ public struct CloudListedFile: Sendable, Hashable {
     public let isDataless: Bool
     /// Un document en paquet (`.pages`, `.rtfd`, `.logicx`), compté comme un fichier.
     public let isPackage: Bool
+    public let containsSafariDownload: Bool
 
     public init(path: String, logicalSize: Int64, allocatedSize: Int64, privateSize: Int64? = nil, modified: Date?,
-                fileID: UInt64, isDataless: Bool, isPackage: Bool = false) {
+                fileID: UInt64, isDataless: Bool, isPackage: Bool = false, containsSafariDownload: Bool = false) {
         self.path = path
         self.logicalSize = logicalSize
         self.allocatedSize = allocatedSize
@@ -35,6 +37,7 @@ public struct CloudListedFile: Sendable, Hashable {
         self.fileID = fileID
         self.isDataless = isDataless
         self.isPackage = isPackage
+        self.containsSafariDownload = containsSafariDownload || SafariDownloadPath.containsPackage(path)
     }
 }
 
@@ -70,16 +73,7 @@ public enum CloudLister {
     /// Les documents en paquet : un seul fichier pour l'utilisateur, un dossier
     /// pour le disque. Les compter fichier par fichier ferait proposer d'en
     /// jeter un morceau.
-    public static let packageExtensions: Set<String> = [
-        "pages", "numbers", "key", "rtfd", "logicx", "band", "fcpbundle", "imovielibrary", "photoslibrary",
-        "musiclibrary", "tvlibrary", "aplibrary", "lrlibrary", "sparsebundle", "app", "bundle", "framework",
-        "xcodeproj", "xcworkspace", "playground", "scriv", "sketch", "graffle", "oo3", "mindnode", "ulysses",
-        "nb", "dtBase2", "dtSparse", "pkg", "mpkg", "dmgpart", "mlpackage", "xcarchive", "playgroundbook",
-        // Apple Books range ses livres en dossiers : 98 600 fichiers dans le nuage
-        // de Romain, quand sa bibliothèque compte quelques centaines de livres
-        // (vérification du 18/10/2026).
-        "epub", "ibooks",
-    ]
+    public static let packageExtensions = CloudPackage.extensions
 
     /// `UF_HIDDEN` : caché dans le Finder.
     static let hiddenFlag: UInt32 = 0x0000_8000
@@ -114,7 +108,13 @@ public enum CloudLister {
             }
             for entry in entries {
                 let path = directory + "/" + entry.name
-                switch classify(entry, device: device) {
+                var kind = classify(entry, device: device)
+                if kind == .folder {
+                    let url = URL(fileURLWithPath: path, isDirectory: true)
+                    let reported = (try? url.resourceValues(forKeys: [.isPackageKey]))?.isPackage == true
+                    if CloudPackage.isIndivisible(named: entry.name, reportedBySystem: reported) { kind = .package }
+                }
+                switch kind {
                 case .skip:
                     continue
                 case .unlisted:
@@ -160,8 +160,7 @@ public enum CloudLister {
             // Un autre volume, un firmlink : on ne le parcourt pas (règle 10).
             if entry.isMountPoint || entry.isFirmlink || entry.device != device { return .skip }
             if entry.isDataless { return .unlisted }
-            let ext = (entry.name as NSString).pathExtension
-            return packageExtensions.contains(ext) || packageExtensions.contains(ext.lowercased()) ? .package : .folder
+            return CloudPackage.isIndivisible(named: entry.name) ? .package : .folder
         case Attr.typeRegular:
             return entry.device == device ? .file : .skip
         default:
@@ -212,10 +211,13 @@ public enum CloudLister {
         var allocated: Int64 = 0
         var files = 0
         var ghosts = 0
+        var containsSafariDownload = SafariDownloadPath.containsPackage(path)
         var stack = [path]
         while let directory = stack.popLast() {
             guard let entries = read(directory, buffer: buffer) else { return nil }
-            for child in entries where child.error == 0 {
+            for child in entries {
+                guard child.error == 0 else { return nil }
+                if SafariDownloadPath.hasPackageExtension(child.name) { containsSafariDownload = true }
                 if child.type == Attr.typeDirectory {
                     if child.isMountPoint || child.device != device { continue }
                     if child.isDataless { return nil }
@@ -229,8 +231,10 @@ public enum CloudLister {
         }
         // La date du paquet lui-même : c'est elle que la revalidation relira
         // avant de le jeter (RULES.md, règle 2).
-        return CloudListedFile(path: path, logicalSize: logical, allocatedSize: allocated, modified: entry.modified,
-                               fileID: entry.fileID, isDataless: files > 0 && ghosts == files, isPackage: true)
+        return CloudListedFile(path: path, logicalSize: logical, allocatedSize: allocated,
+                               privateSize: containsSafariDownload ? 0 : nil, modified: entry.modified,
+                               fileID: entry.fileID, isDataless: files > 0 && ghosts == files, isPackage: true,
+                               containsSafariDownload: containsSafariDownload)
     }
 }
 

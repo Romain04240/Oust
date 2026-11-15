@@ -400,7 +400,9 @@ public struct CleanupEngine: Sendable {
         var resolvedPaths: [URL] = []
         for path in item.paths {
             guard !pathGuard.protectsUserLogs(path), let resolved = PathGuard.withResolvedParent(path),
-                  !pathGuard.protectsUserLogs(resolved) else { return outcome(.skipped(.refusedByGuard)) }
+                  !pathGuard.protectsUserLogs(resolved),
+                  !pathGuard.protectsSafariDownload(path, resolved: resolved, protectAncestors: item.method != .evictLocalCopy)
+            else { return outcome(.skipped(.refusedByGuard)) }
             resolvedPaths.append(resolved)
         }
         let freeable = item.sizes.freeable

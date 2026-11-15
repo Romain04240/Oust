@@ -1,4 +1,5 @@
 import Foundation
+import OustCore
 
 /// Ce qui peut quitter le disque tout en restant dans le nuage (iCloud Drive,
 /// Google Drive, Dropbox, OneDrive… : tout File Provider répond aux mêmes clés).
@@ -51,6 +52,11 @@ public enum CloudFile {
 
     public static func isEvictable(_ values: URLResourceValues) -> Bool { Status(values).isEvictable }
 
+    public static func isSafariDownload(_ url: URL) -> Bool {
+        SafariDownloadPath.containsPackage(url.path)
+            || SafariDownloadPath.containsPackage(url.resolvingSymlinksInPath().path)
+    }
+
     /// Ce que l'éviction rendrait : la place des fichiers évinçables sous `url`,
     /// un paquet (`.pages`, `.photoslibrary`) comptant pour un.
     ///
@@ -58,30 +64,56 @@ public enum CloudFile {
     /// Lire ces attributs ne télécharge rien : on ne descend jamais dans un
     /// dossier resté dans le nuage.
     public static func walk(_ url: URL, visit: (URL, Int64, Date?) -> Bool) {
+        walk(url, minimumBytes: 0, visit: visit)
+    }
+
+    package static func walk(_ url: URL, minimumBytes: Int64,
+                             eligible: (URLResourceValues) -> Bool = isEvictable,
+                             readValues: (URL, Set<URLResourceKey>) throws -> URLResourceValues = {
+                                 try $0.resourceValues(forKeys: $1)
+                             },
+                             visit: (URL, Int64, Date?) -> Bool) {
         let fresh = URL(fileURLWithPath: url.path)
-        guard let values = try? fresh.resourceValues(forKeys: keys) else { return }
+        guard !isSafariDownload(fresh), let values = try? readValues(fresh, keys) else { return }
         if values.isDirectory != true {
-            if isEvictable(values) { _ = visit(fresh, Int64(values.totalFileAllocatedSize ?? 0), values.contentModificationDate) }
+            let bytes = Int64(values.totalFileAllocatedSize ?? 0)
+            if bytes >= minimumBytes, eligible(values) { _ = visit(fresh, bytes, values.contentModificationDate) }
             return
         }
-        if values.isPackage == true {
-            if let bytes = evictablePackage(fresh, values) { _ = visit(fresh, bytes, values.contentModificationDate) }
+        if CloudPackage.isIndivisible(named: fresh.lastPathComponent, reportedBySystem: values.isPackage == true) {
+            if let bytes = evictablePackage(fresh, values, eligible: eligible), bytes >= minimumBytes {
+                _ = visit(fresh, bytes, values.contentModificationDate)
+            }
             return
         }
-        let enumerator = FileManager.default.enumerator(at: fresh, includingPropertiesForKeys: Array(keys), options: [])
+        let localKeys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .totalFileAllocatedSizeKey]
+        let prefetched = minimumBytes > 0 ? localKeys : keys
+        let enumerator = FileManager.default.enumerator(at: fresh, includingPropertiesForKeys: Array(prefetched), options: [])
         while let entry = enumerator?.nextObject() as? URL {
-            guard let values = try? entry.resourceValues(forKeys: keys) else { continue }
+            if SafariDownloadPath.hasPackageExtension(entry.lastPathComponent) {
+                enumerator?.skipDescendants()
+                continue
+            }
+            guard let local = try? readValues(entry, localKeys), local.isSymbolicLink != true,
+                  local.isDirectory == true || (local.isRegularFile == true && Int64(local.totalFileAllocatedSize ?? 0) >= minimumBytes),
+                  let values = try? readValues(entry, keys), values.isDirectory == local.isDirectory else {
+                // Sans métadonnées fiables, l'entrée pourrait être un paquet.
+                enumerator?.skipDescendants()
+                continue
+            }
             if values.isDirectory == true {
-                if values.isPackage == true {
+                if CloudPackage.isIndivisible(named: entry.lastPathComponent, reportedBySystem: values.isPackage == true) {
                     enumerator?.skipDescendants()
-                    if let bytes = evictablePackage(entry, values), !visit(entry, bytes, values.contentModificationDate) { return }
+                    if let bytes = evictablePackage(entry, values, eligible: eligible), bytes >= minimumBytes,
+                       !visit(entry, bytes, values.contentModificationDate) { return }
                 } else if values.ubiquitousItemDownloadingStatus == .notDownloaded {
                     enumerator?.skipDescendants()
                 }
                 continue
             }
-            guard values.isRegularFile == true, isEvictable(values) else { continue }
-            if !visit(entry, Int64(values.totalFileAllocatedSize ?? 0), values.contentModificationDate) { return }
+            let bytes = Int64(values.totalFileAllocatedSize ?? 0)
+            guard values.isRegularFile == true, bytes >= minimumBytes, eligible(values) else { continue }
+            if !visit(entry, bytes, values.contentModificationDate) { return }
         }
     }
 
@@ -91,16 +123,24 @@ public enum CloudFile {
     /// Pour un File Provider, un paquet n'est qu'un dossier : il se dit envoyé
     /// alors qu'un fichier dedans attend encore son envoi. On exige donc que
     /// chaque fichier du paquet soit évinçable lui aussi.
-    static func evictablePackage(_ url: URL, _ values: URLResourceValues) -> Int64? {
-        guard isEvictable(values) else { return nil }
+    static func evictablePackage(_ url: URL, _ values: URLResourceValues,
+                                 eligible: (URLResourceValues) -> Bool = isEvictable) -> Int64? {
+        guard !isSafariDownload(url), eligible(values) else { return nil }
         var total: Int64 = 0
-        let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: Array(keys), options: [])
-        while let entry = enumerator?.nextObject() as? URL {
+        var readFailed = false
+        guard let enumerator = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: Array(keys), options: [], errorHandler: { _, _ in
+                readFailed = true
+                return false
+            }
+        ) else { return nil }
+        while let entry = enumerator.nextObject() as? URL {
+            if SafariDownloadPath.hasPackageExtension(entry.lastPathComponent) { return nil }
             guard let child = try? entry.resourceValues(forKeys: keys) else { return nil }
             guard child.isRegularFile == true else { continue }
-            guard isEvictable(child) else { return nil }
+            guard eligible(child) else { return nil }
             total += Int64(child.totalFileAllocatedSize ?? 0)
         }
-        return total
+        return readFailed ? nil : total
     }
 }

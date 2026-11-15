@@ -101,6 +101,10 @@ struct AgentFinder {
             rebuild: .command("git worktree add", minutes: 1),
             activityScope: folder
         )
+        guard PathGuard(home: context.home).allows(folder) else {
+            item.protect(.systemPath)
+            return Candidate(item: item, needsMeasure: false)
+        }
         guard let state else {
             item.protect(.unknownState)
             return Candidate(item: item)

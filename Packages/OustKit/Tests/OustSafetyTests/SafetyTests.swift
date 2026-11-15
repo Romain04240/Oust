@@ -62,6 +62,43 @@ struct PathGuardTests {
     }
 }
 
+@Test("Un paquet cloud indivisible contenant un téléchargement Safari ne peut pas être évincé")
+func cloudPackageWithSafariDownload() throws {
+    let scratch = try Scratch()
+    try scratch.write("Document.pages/Fichier.txt", "copie locale")
+    let package = scratch.root.appendingPathComponent("Document.pages")
+    let values = try package.resourceValues(forKeys: CloudFile.keys)
+    #expect(CloudFile.evictablePackage(package, values, eligible: { _ in true }) != nil)
+
+    try scratch.write("Document.pages/Ressources/Partiel.DOWNLOAD/Données")
+    #expect(CloudFile.evictablePackage(package, values, eligible: { _ in true }) == nil)
+}
+
+@Test("Les parcours cloud sautent un paquet dont les métadonnées sont illisibles",
+      arguments: [Int64(0), 1_000_000], [false, true])
+func cloudPackageWithUnreadableMetadata(minimumBytes: Int64, failCloudRead: Bool) throws {
+    let scratch = try Scratch()
+    try scratch.write("Projet/Archive.pages/Interne.txt")
+    try scratch.write("Projet/Voisin.txt")
+    let root = scratch.root.appendingPathComponent("Projet", isDirectory: true)
+    for relative in ["Archive.pages/Interne.txt", "Voisin.txt"] {
+        try Data(repeating: 0x42, count: 1_500_000).write(to: root.appendingPathComponent(relative))
+    }
+    var failures = 0
+    var targets: [String] = []
+    CloudFile.walk(root, minimumBytes: minimumBytes, eligible: { _ in true }, readValues: { url, keys in
+        if url.lastPathComponent == "Archive.pages", keys.contains(.isPackageKey) == failCloudRead {
+            failures += 1
+            throw CocoaError(.fileReadNoPermission)
+        }
+        return try url.resourceValues(forKeys: keys)
+    }) { url, _, _ in
+        targets.append(url.lastPathComponent)
+        return true
+    }
+    #expect(failures == 1 && targets == ["Voisin.txt"])
+}
+
 @Suite("Les processus actifs protègent leur dossier")
 struct ProcessTests {
     @Test("Le test lui-même travaille quelque part")

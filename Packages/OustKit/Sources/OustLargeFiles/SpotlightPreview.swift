@@ -1,4 +1,5 @@
 import Foundation
+import OustCore
 import OustSafety
 import OustScan
 
@@ -16,9 +17,12 @@ extension LargeFileFinder {
             let url = URL(fileURLWithPath: PathNormalizer.normalize(file.path))
             // Le premier paquet (application, bibliothèque) qui contient le fichier.
             let package = url.pathComponents.dropLast().first { component in
-                packageExtensions.contains((component as NSString).pathExtension.lowercased())
+                SafariDownloadPath.hasPackageExtension(component)
+                    || packageExtensions.contains((component as NSString).pathExtension.lowercased())
             }
-            let match = LargeFileMatch(url: url, sizes: file.sizes, modified: file.modified, accessed: nil,
+            let sizes = SafariDownloadPath.containsPackage(url.path)
+                ? Sizes(allocated: file.sizes.allocated, freeable: 0) : file.sizes
+            let match = LargeFileMatch(url: url, sizes: sizes, modified: file.modified, accessed: nil,
                                        kind: FileKind.of(file.name), fileID: file.fileID, isClone: false,
                                        package: package)
             guard filter.accepts(match) else { continue }

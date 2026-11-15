@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OustCore
 
 /// La dernière barrière avant une suppression (SPEC §5).
 ///
@@ -93,6 +94,7 @@ public struct PathGuard: Sendable {
         let candidates = Set([resolved, literal])
         if !exact.isDisjoint(with: candidates) { return .refused("protected-root") }
         if protectUserLogs && protectsUserLogs(url, resolved: resolvedURL) { return .refused("user-logs") }
+        if protectsSafariDownload(url, resolved: resolvedURL) { return .refused("safari-incomplete-download") }
 
         for candidate in candidates {
             if prefixes.contains(where: { candidate.hasPrefix($0) }), !isAttachment(candidate) {
@@ -184,6 +186,9 @@ public struct PathGuard: Sendable {
         guard raw.hasPrefix("/"), !raw.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }) else {
             return false
         }
+        guard !CloudFile.isSafariDownload(url),
+              let resolved = Self.withResolvedParent(url),
+              !protectsSafariDownload(url, resolved: resolved, protectAncestors: false) else { return false }
         let path = Self.normalize(raw)
         return cloudRoots.contains { root in
             path.hasPrefix(root) && !path.dropFirst(root.count).split(separator: "/").isEmpty
@@ -191,6 +196,45 @@ public struct PathGuard: Sendable {
     }
 
     public func allows(_ url: URL) -> Bool { check(url) == .allowed }
+
+    /// Protège Téléchargements, ses ancêtres et les paquets, même via un lien.
+    package func protectsSafariDownload(_ url: URL, resolved: URL, protectAncestors: Bool = true) -> Bool {
+        let downloads = URL(fileURLWithPath: home).appendingPathComponent("Downloads")
+        let physicalDownloads = downloads.resolvingSymlinksInPath()
+        let roots = [downloads.path, physicalDownloads.path].map { Self.normalize($0).lowercased() }
+        func isDownload(_ raw: String) -> Bool {
+            let path = Self.normalize(raw).lowercased()
+            return roots.contains { root in
+                if path == root || (protectAncestors && PathNormalizer.isWithin(root, path)) { return true }
+                let prefix = root + "/"
+                return path.hasPrefix(prefix) && SafariDownloadPath.containsPackage(String(path.dropFirst(prefix.count)))
+            }
+        }
+        if isDownload(url.path) || isDownload(resolved.path) { return true }
+        // APFS accepte des équivalences de casse qui ne survivent pas à lowercased().
+        guard let facts = FileFacts.of(resolved.path) else { return false }
+        func matchesIdentity(_ candidate: FileFacts, _ url: URL) -> Bool {
+            guard let facts = FileFacts.of(url.path) else { return false }
+            return candidate.device == facts.device && candidate.inode == facts.inode
+        }
+        func identifiesDownloads(_ candidate: FileFacts) -> Bool {
+            if matchesIdentity(candidate, downloads) || matchesIdentity(candidate, physicalDownloads) { return true }
+            // Un ancêtre de la destination redirigée peut aussi avoir un autre
+            // nom accepté par APFS (p. ex. un worktree écrit avec une autre casse).
+            guard protectAncestors, roots[0] != roots[1] else { return false }
+            var ancestor = physicalDownloads.deletingLastPathComponent()
+            while ancestor.path.count > 1 {
+                if matchesIdentity(candidate, ancestor) { return true }
+                ancestor.deleteLastPathComponent()
+            }
+            return false
+        }
+        if (facts.mode & S_IFMT) == S_IFDIR { return identifiesDownloads(facts) }
+        guard (facts.mode & S_IFMT) == S_IFLNK else { return false }
+        if identifiesDownloads(facts) { return true }
+        let target = resolved.resolvingSymlinksInPath()
+        return isDownload(target.path) || FileFacts.of(target.path).map(identifiesDownloads) == true
+    }
 
     /// Résout le plus proche ancêtre existant, puis rattache les composants absents.
     /// Le dernier composant reste le nom de l'entrée que l'appelant va déplacer.
@@ -302,6 +346,8 @@ public struct PathGuard: Sendable {
         let raw = url.path
         guard raw.hasPrefix("/"), !raw.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }),
               !raw.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return false }
+        guard !CloudFile.isSafariDownload(url),
+              let real = Self.withResolvedParent(url), !protectsSafariDownload(url, resolved: real) else { return false }
         let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
         let resolved = Self.normalize((parent as NSString).appendingPathComponent(url.lastPathComponent))
         let literal = Self.normalize(raw)

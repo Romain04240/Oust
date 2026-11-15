@@ -112,7 +112,7 @@ public enum LargeFileFinder {
                 let ext = (child.name as NSString).pathExtension.lowercased()
                 // Un dépôt se nomme par son projet : « Meteo/.git » dit plus que « .git ».
                 let own = repositoryFolders.contains(child.name) ? "\(node.name)/\(child.name)"
-                    : (packageExtensions.contains(ext) ? child.name : nil)
+                    : (SafariDownloadPath.hasPackageExtension(child.name) || packageExtensions.contains(ext) ? child.name : nil)
                 stack.append((child, package ?? own))
             }
         }

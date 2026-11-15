@@ -58,6 +58,30 @@ private enum Sample {
 @Suite("Les listes des nuages : gros, vieux, sur ce Mac, doublons évidents")
 struct CloudInventoryTests {
 
+    @Test("Doublons exclut les téléchargements Safari et les paquets qui en contiennent")
+    func safariDownloadsDoNotOfferCloudSavings() throws {
+        let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent("oust-cloud-safari-\(UUID())")
+        let fm = FileManager.default
+        try fm.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: rootURL) }
+        for location in ["A", "B"] {
+            for relative in ["Archive.DOWNLOAD/Partiel.png", "Document.app/Ressources/Embarqué.download/Données", "Normal.txt"] {
+                let file = rootURL.appendingPathComponent("\(location)/\(relative)")
+                try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data(repeating: 0x42, count: 1_500_000).write(to: file)
+            }
+        }
+        let root = CloudRoot(url: rootURL)
+        let account = CloudAccount(id: "fixture", service: .iCloudDrive, account: nil, roots: [root])
+        let inventory = CloudInventory(accounts: [account], listings: [
+            .init(account: account, root: root, listing: CloudLister.list(rootURL))
+        ])
+        let protected = inventory.files.filter(\.containsSafariDownload)
+        #expect(protected.count == 4 && protected.allSatisfy { $0.localSize > 0 && $0.freeable == 0 })
+        #expect(inventory.duplicates().map(\.name) == ["Normal.txt"])
+        #expect(inventory.duplicates().map(\.cloudSavings) == [1_500_000])
+    }
+
     @Test("Les plus gros d'après le nuage, un compte à la fois si on le demande")
     func largest() {
         let inventory = Sample.inventory()

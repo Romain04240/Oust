@@ -52,7 +52,9 @@ enum Compressor {
     /// projet garde l'air de n'avoir pas bougé, ce qui est vrai.
     static func compressTree(_ root: URL, notAfter: Date?, isCancelled: () -> Bool = { false }) -> Summary {
         var summary = Summary()
-        guard let rootFacts = FileFacts.of(root.path) else { return summary }
+        guard !SafariDownloadPath.containsPackage(root.path),
+              !SafariDownloadPath.containsPackage(root.resolvingSymlinksInPath().path),
+              let rootFacts = FileFacts.of(root.path) else { return summary }
         let open = OpenFiles.paths(under: root.path)
         var folderTimes: [(String, timespec, timespec)] = []
         if let facts = times(of: root.path) { folderTimes.append((root.path, facts.0, facts.1)) }

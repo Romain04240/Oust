@@ -82,12 +82,17 @@ public struct Measurement: Sendable, Hashable {
     public var fileCount: Int
     public var latestModification: Date?
     public var inaccessible: Bool
+    public var directoryDevice: Int32?
+    public var directoryFileID: UInt64?
 
-    public init(sizes: Sizes, fileCount: Int, latestModification: Date?, inaccessible: Bool) {
+    public init(sizes: Sizes, fileCount: Int, latestModification: Date?, inaccessible: Bool,
+                directoryDevice: Int32? = nil, directoryFileID: UInt64? = nil) {
         self.sizes = sizes
         self.fileCount = fileCount
         self.latestModification = latestModification
         self.inaccessible = inaccessible
+        self.directoryDevice = directoryDevice
+        self.directoryFileID = directoryFileID
     }
 
     public static let empty = Measurement(sizes: .zero, fileCount: 0, latestModification: nil, inaccessible: false)
@@ -126,6 +131,9 @@ public enum Scanner {
                 fileCount: node.fileCount,
                 latestModification: node.latestModification,
                 inaccessible: node.status.isInaccessible
+                    || (SafariDownloadPath.containsPackage(url.path) && node.inaccessibleCount > 0),
+                directoryDevice: node.measurementDevice,
+                directoryFileID: node.measurementDevice.map { _ in node.fileID }
             )
         }
         return measures
@@ -231,6 +239,7 @@ final class Walk: @unchecked Sendable {
                 continue
             }
             if info.st_mode & S_IFMT == S_IFDIR {
+                node.measurementDevice = info.st_dev
                 node.ownLatestModification = Self.date(info.st_mtimespec)
                 jobs.append(Job(node: node, path: path, device: info.st_dev))
             } else {
@@ -242,6 +251,7 @@ final class Walk: @unchecked Sendable {
                 if options.measurePrivateSizes, let privateSize = BulkReader.privateSize(path: path) {
                     node.ownFiles = Sizes(allocated: allocated, freeable: privateSize)
                 }
+                if SafariDownloadPath.containsPackage(path) { node.ownFiles.freeable = 0 }
                 node.recomputeTotals()
             }
         }
@@ -336,16 +346,27 @@ final class Walk: @unchecked Sendable {
     private func process(_ job: Job, buffer: UnsafeMutableRawBufferPointer, abandoned: inout [TreeNode]) -> [Job] {
         progress.addDirectory()
         let node = job.node
+        let insideSafariDownload = SafariDownloadPath.containsPackage(job.path)
         let fd = open(job.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else {
-            let code = errno
+        let openError: Int32
+        if fd < 0 {
+            openError = errno
+        } else if insideSafariDownload {
+            var info = stat()
+            openError = fstat(fd, &info) == 0 && info.st_dev == job.device && UInt64(info.st_ino) == node.fileID
+                && info.st_flags & Attr.sfDataless == 0 ? 0 : ESTALE
+        } else {
+            openError = 0
+        }
+        defer { if fd >= 0 { close(fd) } }
+        guard openError == 0 else {
+            let code = openError
             node.status = .inaccessible(code: code)
             if let known = job.shallow { abandoned.append(contentsOf: known.values.map(\.node)) }
             node.children = []
             node.resetOwnContent()
             return []
         }
-        defer { close(fd) }
         // Relu avec succès : un dossier refusé hier peut être lisible aujourd'hui.
         node.status = .ok
         if job.shallow != nil {
@@ -408,7 +429,8 @@ final class Walk: @unchecked Sendable {
                       let privateSize = BulkReader.privateSize(directoryFD: fd, name: entry.name) {
                 freeable = privateSize
             }
-            let sizes = Sizes(allocated: allocated, freeable: freeable)
+            let protected = insideSafariDownload || SafariDownloadPath.hasPackageExtension(entry.name)
+            let sizes = Sizes(allocated: allocated, freeable: protected ? 0 : freeable)
             node.ownFiles += sizes
             node.ownFileCount += 1
             if let date = entry.modified, date > (node.ownLatestModification ?? .distantPast) {
