@@ -393,7 +393,9 @@ private struct SimilarTile: View {
     var body: some View {
         let inCart = similar.isInCart(image, paths: paths)
         let item = similar.item(for: image, in: group)
-        let enabled = similar.canToggle(image, in: group, paths: paths)
+        let restriction = similar.selectionRestriction(for: image, in: group, paths: paths)
+        let enabled = restriction == nil
+        let selectionLabel = restriction?.localizationKey ?? (inCart ? "row.remove_from_cart" : "row.add_to_cart")
         let isBest = group.best == image
         VStack(alignment: .leading, spacing: Spacing.tight) {
             // Un bouton : l'ouvrir choisit aussi la tuile (la barre d'espace et
@@ -421,9 +423,8 @@ private struct SimilarTile: View {
                 .padding(Spacing.tight)
                 .background(.black.opacity(0.35), in: Circle())
                 .padding(Spacing.tight)
-                .help(Text(inCart ? "row.remove_from_cart" : (enabled ? "row.add_to_cart"
-                    : (model.canMoveFiles ? "similar.last_kept" : "agent.refusal.unavailable")), bundle: .oust))
-                .accessibilityLabel(Text(inCart ? "row.remove_from_cart" : "row.add_to_cart", bundle: .oust))
+                .help(Text(verbatim: L10n.string(selectionLabel)))
+                .accessibilityLabel(Text(verbatim: L10n.string(selectionLabel)))
             }
             .overlay(alignment: .topTrailing) {
                 if isBest {
@@ -471,9 +472,8 @@ private struct SimilarTile: View {
             }
             if isBest {
                 Tag(L10n.string("similar.best"), symbol: "star.fill", tint: Palette.vivid(for: .safe))
-            } else if !inCart, !enabled {
-                // La dernière image d'un groupe reste (SPEC §7).
-                Tag(L10n.string("similar.last_kept"), symbol: "lock.fill", tint: Palette.vivid(for: .review))
+            } else if let restriction {
+                Tag(L10n.string(restriction.localizationKey), symbol: "lock.fill", tint: Palette.vivid(for: .review))
             }
         }
         .contextMenu {

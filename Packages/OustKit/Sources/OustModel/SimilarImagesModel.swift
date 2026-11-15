@@ -127,6 +127,18 @@ public final class SimilarImagesModel {
 
     // MARK: Corbeille
 
+    public enum SelectionRestriction: Equatable, Sendable {
+        case trashUnavailable
+        case lastKept
+
+        public var localizationKey: String {
+            switch self {
+            case .trashUnavailable: "similar.trash_unavailable"
+            case .lastKept: "similar.last_kept"
+            }
+        }
+    }
+
     /// Les chemins dans la corbeille, sous quelque élément que ce soit : une
     /// image déjà jetée depuis « Identiques » est cochée ici aussi, et n'est
     /// comptée qu'une fois (RULES.md, règle 9).
@@ -151,10 +163,21 @@ public final class SimilarImagesModel {
     /// Cocher une image n'est possible que s'il en reste au moins une autre du
     /// groupe à garder. Décocher l'est toujours.
     public func canToggle(_ image: SimilarImage, in group: SimilarImageGroup, paths: Set<String>? = nil) -> Bool {
-        guard app != nil else { return false }
-        let checked = paths ?? cartPaths()
-        return group.canToggle(image, checked: checked)
-            && (checked.contains(image.url.path) || item(for: image, in: group).isSelectable)
+        selectionRestriction(for: image, in: group, paths: paths) == nil
+    }
+
+    public func selectionRestriction(for image: SimilarImage, in group: SimilarImageGroup,
+                                     paths: Set<String>? = nil) -> SelectionRestriction? {
+        guard let app else { return .trashUnavailable }
+        return Self.selectionRestriction(for: image, in: group, checked: paths ?? cartPaths(),
+                                         canAdd: app.canSelectForCleanup(group.cleanupItem(for: image)))
+    }
+
+    static func selectionRestriction(for image: SimilarImage, in group: SimilarImageGroup,
+                                     checked: Set<String>, canAdd: Bool) -> SelectionRestriction? {
+        if checked.contains(image.url.path) { return nil }
+        guard canAdd else { return .trashUnavailable }
+        return group.canToggle(image, checked: checked) ? nil : .lastKept
     }
 
     public func toggle(_ image: SimilarImage, in group: SimilarImageGroup) {

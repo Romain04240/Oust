@@ -26368,6 +26368,23 @@
         }
       }
     },
+    "similar.trash_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to Trash unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mise à la Corbeille indisponible"
+          }
+        }
+      }
+    },
     "similar.unreadable": {
       "extractionState": "manual",
       "localizations": {
