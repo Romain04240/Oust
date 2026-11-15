@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Observation
 import OustCore
@@ -41,7 +42,8 @@ public final class DiskIndexModel {
     /// retenus même petits (chercheur d'artefacts).
     static func options(for home: URL) -> ScanOptions {
         ScanOptions(leafThreshold: 100_000, notableNames: RuleEngine.notableNames,
-                    readOnlyPreferencesDirectory: preferencesDirectory(for: home))
+                    readOnlyPreferencesDirectory: preferencesDirectory(for: home),
+                           accountArchivesDirectory: AccountArchivePath.root.path)
     }
 
     nonisolated static func preferencesDirectory(for home: URL) -> String {
@@ -123,7 +125,7 @@ public final class DiskIndexModel {
         guard let app, let boot = app.bootVolume, app.treeVolume == nil || app.treeVolume?.isBoot == true else { return }
         if let index, index.canReuse(for: Self.options(for: app.home))
             || (index.hasWithheldGains && runningProgress == nil) {
-            app.showSharedTree(index, volume: boot)
+            app.showExplorerIndex(index, volume: boot)
         } else if let runningProgress {
             app.showSharedScan(volume: boot, progress: runningProgress)
         }
@@ -144,7 +146,8 @@ public final class DiskIndexModel {
         spotlightTask?.cancel()
         spotlightTask = Task {
             let files = await Spotlight.largeFiles(minimumBytes: Self.spotlightMinimum, under: boot.scanRoot,
-                                                   readOnlyPreferencesDirectory: preferencesDirectory)
+                                                   readOnlyPreferencesDirectory: preferencesDirectory,
+                                                   accountArchivesDirectory: AccountArchivePath.root.path)
             guard !Task.isCancelled, self.index == nil else { return }
             self.spotlightFiles = files
         }
@@ -152,20 +155,145 @@ public final class DiskIndexModel {
 }
 
 extension AppModel {
-    /// Montre l'arbre partagé dans l'Explorateur.
-    func showSharedTree(_ index: ScanIndex, volume: VolumeDescriptor) {
-        displayedBootIndex = index
+    /// Publie l’arbre du volume ou du dossier affiché dans l’Explorateur.
+    func showExplorerIndex(_ index: ScanIndex, volume: VolumeDescriptor) {
+        let displayed = index.checkedForDisplay()
+        displayedExplorerIndex = displayed
         treeVolume = volume
-        tree = index.root
-        explorer = .done(index.scannedAt)
+        tree = displayed.root
+        explorer = .done(displayed.scannedAt)
+    }
+
+    /// Écarte les gains de l'arbre affiché dès que les dossiers protégés changent.
+    @discardableResult
+    public func revalidateExplorerGains() -> Bool {
+        guard let index = displayedExplorerIndex, let volume = treeVolume, tree === index.root else { return true }
+        let checked = index.checkedForDisplay()
+        guard checked.root !== index.root else { return true }
+        showExplorerIndex(checked, volume: volume)
+        return false
+    }
+
+    @discardableResult
+    package func exportExplorerCSV(
+        to destination: URL,
+        for root: TreeNode,
+        render: () -> String?,
+        stage: (String, URL) throws -> Void = { try $0.write(to: $1, atomically: false, encoding: .utf8) }
+    ) throws -> Bool {
+        guard tree === root, revalidateExplorerGains() else { return false }
+        let original = try ExplorerCSVPermissions(at: destination)
+        guard let csv = render() else { return false }
+        let manager = FileManager.default
+        let directory = try manager.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                        appropriateFor: destination.deletingLastPathComponent(), create: true)
+        defer { try? manager.removeItem(at: directory) }
+        let temporary = directory.appendingPathComponent("export.csv")
+        try stage(csv, temporary)
+        if let original { try original.copy(from: destination, to: temporary) }
+        guard revalidateExplorerGains(), tree === root else { return false }
+        // Une destination nouvelle ne peut pas écraser un fichier apparu pendant l'export.
+        if let original, try ExplorerCSVPermissions(at: destination) != original { return false }
+        let flags: UInt32 = original == nil ? UInt32(RENAME_EXCL) : 0
+        guard renamex_np(temporary.path, destination.path, flags) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return true
     }
 
     /// Le premier parcours du disque de démarrage, suivi par l'Explorateur.
     func showSharedScan(volume: VolumeDescriptor, progress: ScanProgress) {
-        displayedBootIndex = nil
+        displayedExplorerIndex = nil
         treeVolume = volume
         scanProgress = progress
         tree = nil
         explorer = .running
+    }
+}
+
+private struct ExplorerCSVPermissions: Equatable {
+    private let device: dev_t
+    private let inode: ino_t
+    private let owner: uid_t
+    private let group: gid_t
+    private let mode: mode_t
+    // Les changements de mode, de propriétaire et d'ACL modifient ce champ.
+    private let changedSeconds: Int
+    private let changedNanoseconds: Int
+
+    init?(at url: URL) throws {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else {
+            if errno == ENOENT { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        guard info.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EINVAL) }
+        self.init(info)
+    }
+
+    private init(_ info: stat) {
+        device = info.st_dev
+        inode = info.st_ino
+        owner = info.st_uid
+        group = info.st_gid
+        mode = info.st_mode & 0o7777
+        changedSeconds = info.st_ctimespec.tv_sec
+        changedNanoseconds = info.st_ctimespec.tv_nsec
+    }
+
+    func copy(from original: URL, to temporary: URL) throws {
+        let input = open(original.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard input >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(input) }
+        var info = stat()
+        guard fstat(input, &info) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard info.st_mode & S_IFMT == S_IFREG, Self(info) == self else { throw POSIXError(.ESTALE) }
+
+        let output = open(temporary.path, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+        guard output >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(output) }
+        guard fstat(output, &info) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        if info.st_uid != owner || info.st_gid != group {
+            guard fchown(output, owner, group) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        }
+        let sourceACL = try Self.readACL(input)
+        defer { if let sourceACL { acl_free(UnsafeMutableRawPointer(sourceACL)) } }
+        if let sourceACL {
+            guard acl_set_fd_np(output, sourceACL, ACL_TYPE_EXTENDED) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        } else if let temporaryACL = try Self.readACL(output) {
+            acl_free(UnsafeMutableRawPointer(temporaryACL))
+            guard let empty = acl_init(0) else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            defer { acl_free(UnsafeMutableRawPointer(empty)) }
+            guard acl_set_fd_np(output, empty, ACL_TYPE_EXTENDED) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        }
+        guard fchmod(output, mode) == 0, fstat(output, &info) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        let actualACL = try Self.readACL(output)
+        defer { if let actualACL { acl_free(UnsafeMutableRawPointer(actualACL)) } }
+        guard info.st_uid == owner, info.st_gid == group, info.st_mode & 0o7777 == mode,
+              try Self.serializedACL(sourceACL) == Self.serializedACL(actualACL) else {
+            throw POSIXError(.EPERM)
+        }
+    }
+
+    private static func readACL(_ descriptor: Int32) throws -> acl_t? {
+        if let acl = acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED) { return acl }
+        if errno == ENOENT { return nil }
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+
+    private static func serializedACL(_ acl: acl_t?) throws -> Data? {
+        guard let acl else { return nil }
+        let size = acl_size(acl)
+        guard size > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var contents = Data(count: size)
+        let copied = contents.withUnsafeMutableBytes { acl_copy_ext($0.baseAddress, acl, size) }
+        guard copied == size else { throw POSIXError(.EIO) }
+        return contents
     }
 }

@@ -19,7 +19,7 @@ struct StorageAdviceTests {
         model.recordAnalyzedItem(item, preselect: true, policy: policy)
         #expect(model.items[item.id] != nil && model.cart.isEmpty)
         var supported = item
-        supported.method = .evictLocalCopy
+        supported.method = .brewCleanup(executable: "/fictif/brew")
         model.recordAnalyzedItem(supported, preselect: true, policy: policy)
         #expect(model.isInCart(item.id))
         model.recordAnalyzedItem(item, preselect: false, policy: policy)
@@ -75,7 +75,7 @@ struct StorageAdviceTests {
     func matchingItems() {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("oust-model-\(UUID().uuidString)")
         let model = AppModel(home: home)
-        func item(_ name: String, method: CleanupMethod = .evictLocalCopy) -> CleanupItem {
+        func item(_ name: String, method: CleanupMethod = .brewCleanup(executable: "/fictif/brew")) -> CleanupItem {
             CleanupItem(title: name, paths: [home.appendingPathComponent(name)], category: .projectArtifacts,
                         owner: "fixture", ruleID: "fixture", safety: .rebuilds, method: method,
                         sizes: Sizes(private: 500), rebuild: .automatic)

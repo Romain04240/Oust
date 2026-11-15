@@ -120,6 +120,7 @@ public struct Fingerprint: Sendable, Hashable, Codable {
 public struct CleanupItem: Identifiable, Sendable, Hashable {
     public static let incompleteSafariDownloadRuleID = "downloads.safari_incomplete"
     public static let invalidPreferenceRuleID = "preferences.format_invalid"
+    public static let accountArchiveRuleID = "accounts.archive"
 
     /// Stable d'une analyse à l'autre : la règle et le premier chemin.
     public let id: String
@@ -187,11 +188,14 @@ public struct CleanupItem: Identifiable, Sendable, Hashable {
 
     /// Peut entrer dans le panier.
     public var isSelectable: Bool {
-        !isIncompleteSafariDownload && !isInvalidPreference && safety < .protected && method != .manual
+        !isIncompleteSafariDownload && !requiresLiveAnalysisLocation && safety < .protected && method != .manual
     }
 
     public var isIncompleteSafariDownload: Bool { ruleID == Self.incompleteSafariDownloadRuleID }
     public var isInvalidPreference: Bool { category == .preferenceDiagnostics || ruleID == Self.invalidPreferenceRuleID }
+
+    public var isAccountArchive: Bool { category == .accountArchives || ruleID == Self.accountArchiveRuleID }
+    package var requiresLiveAnalysisLocation: Bool { isInvalidPreference || isAccountArchive }
 
     /// Compte dans le total affiché en titre : une VM n'est pas du « vide à faire ».
     public var countsInHeadline: Bool {

@@ -16,7 +16,7 @@ public struct TreeStore: Sendable {
     /// Changer ce numéro à chaque évolution du format : un ancien index est alors
     /// ignoré (et le disque reparcouru), jamais mal relu.
     // Les anciennes versions comptaient des fichiers protégés dans les gains.
-    static let version: UInt64 = 6
+    static let version: UInt64 = 7
     static let magic = Array("OUSTIDX".utf8)
 
     public init(directory: URL) {
@@ -40,7 +40,7 @@ public struct TreeStore: Sendable {
     }
 
     public func save(_ index: ScanIndex) throws {
-        guard let preferences = index.preferenceDirectory, index.hasCurrentPreferenceDirectory else { return }
+        guard let preferences = index.preferenceDirectory, index.hasCurrentProtectionRoots else { return }
         var writer = BinaryWriter()
         index.encode(into: &writer, preferences: preferences)
         let raw = writer.bytes
@@ -76,7 +76,7 @@ public struct TreeStore: Sendable {
         guard decoded == raw.count else { return nil }
         var reader = BinaryReader(raw)
         guard let index = ScanIndex.decode(from: &reader), index.rootPath == rootPath, reader.isAtEnd,
-              index.hasCurrentPreferenceDirectory else {
+              index.hasCurrentProtectionRoots else {
             return nil
         }
         return index
@@ -98,15 +98,9 @@ extension ScanIndex {
         writer.strings(options.excludedPaths.sorted())
         writer.strings(options.notableNames.sorted())
         writer.string(options.readOnlyPreferencesDirectory ?? "")
-        writer.string(preferences.resolvedPath ?? "")
-        writer.bool(preferences.isUncertain)
-        writer.bool(preferences.identity != nil)
-        if let identity = preferences.identity {
-            writer.signed(Int64(identity.device))
-            writer.unsigned(identity.inode)
-            writer.signed(identity.birthSeconds)
-            writer.signed(identity.birthNanoseconds)
-        }
+        writer.string(options.accountArchivesDirectory ?? "")
+        Self.encodeProtectionRoot(preferences, into: &writer)
+        Self.encodeProtectionRoot(accountArchiveDirectory, into: &writer)
         writer.unsigned(eventID)
         writer.string(eventDatabase ?? "")
         writer.date(scannedAt)
@@ -151,15 +145,20 @@ extension ScanIndex {
         }
     }
 
-    static func decode(from reader: inout BinaryReader) -> ScanIndex? {
-        guard let rootPath = reader.string(),
-              let threads = reader.unsigned(),
-              let leafThreshold = reader.signed(),
-              let measurePrivateSizes = reader.bool(),
-              let excluded = reader.strings(),
-              let notable = reader.strings(),
-              let readOnlyPreferencesDirectory = reader.string(),
-              let resolvedPreferencesDirectory = reader.string(),
+    private static func encodeProtectionRoot(_ preferences: PreferenceDirectory, into writer: inout BinaryWriter) {
+        writer.string(preferences.resolvedPath ?? "")
+        writer.bool(preferences.isUncertain)
+        writer.bool(preferences.identity != nil)
+        if let identity = preferences.identity {
+            writer.signed(Int64(identity.device))
+            writer.unsigned(identity.inode)
+            writer.signed(identity.birthSeconds)
+            writer.signed(identity.birthNanoseconds)
+        }
+    }
+
+    private static func decodeProtectionRoot(from reader: inout BinaryReader) -> PreferenceDirectory? {
+        guard let resolvedPreferencesDirectory = reader.string(),
               let uncertain = reader.bool(),
               let hasIdentity = reader.bool()
         else { return nil }
@@ -170,8 +169,22 @@ extension ScanIndex {
             else { return nil }
             identity = PreferenceDirectory.Identity(device: device, inode: inode, birthSeconds: birth, birthNanoseconds: nanos)
         }
-        let preferences = PreferenceDirectory(identity: identity, isUncertain: uncertain,
+        return PreferenceDirectory(identity: identity, isUncertain: uncertain,
                                               resolvedPath: resolvedPreferencesDirectory.isEmpty ? nil : resolvedPreferencesDirectory)
+    }
+
+    static func decode(from reader: inout BinaryReader) -> ScanIndex? {
+        guard let rootPath = reader.string(),
+              let threads = reader.unsigned(),
+              let leafThreshold = reader.signed(),
+              let measurePrivateSizes = reader.bool(),
+              let excluded = reader.strings(),
+              let notable = reader.strings(),
+              let readOnlyPreferencesDirectory = reader.string(),
+              let accountArchivesDirectory = reader.string(),
+              let preferences = decodeProtectionRoot(from: &reader),
+              let archives = decodeProtectionRoot(from: &reader)
+        else { return nil }
         guard let eventID = reader.unsigned(),
               let database = reader.string(),
               let scannedAt = reader.date() ?? nil,
@@ -181,7 +194,8 @@ extension ScanIndex {
         let options = ScanOptions(threads: Int(threads), leafThreshold: leafThreshold,
                                   measurePrivateSizes: measurePrivateSizes, excludedPaths: Set(excluded),
                                   notableNames: Set(notable),
-                                  readOnlyPreferencesDirectory: readOnlyPreferencesDirectory.isEmpty ? nil : readOnlyPreferencesDirectory)
+                                  readOnlyPreferencesDirectory: readOnlyPreferencesDirectory.isEmpty ? nil : readOnlyPreferencesDirectory,
+                                  accountArchivesDirectory: accountArchivesDirectory.isEmpty ? nil : accountArchivesDirectory)
 
         var root: TreeNode?
         // Les dossiers dont on attend encore des enfants.
@@ -252,7 +266,7 @@ extension ScanIndex {
         return ScanIndex(root: root, options: options, ownership: Ownership(links: maps[0], clones: maps[1]),
                          eventID: eventID, eventDatabase: database.isEmpty ? nil : database,
                          scannedAt: scannedAt, fullScanAt: fullScanAt, skippedVolumes: skipped,
-                         preferenceDirectory: preferences)
+                         preferenceDirectory: preferences, accountArchiveDirectory: archives)
     }
 }
 

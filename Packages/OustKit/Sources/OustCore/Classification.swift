@@ -55,6 +55,7 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
     case appCaches
     case userLogs
     case preferenceDiagnostics
+    case accountArchives
     /// Installeurs de macOS et mises à jour iOS téléchargées.
     case systemDownloads
     /// Pièces jointes de Mail et de Messages.
@@ -110,7 +111,7 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
              .toolVersions, .containers, .compressibleProjects:
             .developer
         case .downloads, .trash, .iosBackups, .virtualMachines,
-             .appCaches, .userLogs, .preferenceDiagnostics, .systemDownloads, .attachments, .screenshots, .cloudFiles, .creative, .games,
+             .appCaches, .userLogs, .preferenceDiagnostics, .accountArchives, .systemDownloads, .attachments, .screenshots, .cloudFiles, .creative, .games,
              .diskTraces, .protectedOnDisk:
             .system
         case .browsers: .browsers
@@ -145,6 +146,7 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
         case .appCaches: "app.badge"
         case .userLogs: "doc.text"
         case .preferenceDiagnostics: "doc.badge.gearshape"
+        case .accountArchives: "archivebox"
         case .systemDownloads: "arrow.down.app"
         case .attachments: "paperclip"
         case .screenshots: "camera.viewfinder"

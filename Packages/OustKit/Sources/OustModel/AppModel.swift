@@ -92,8 +92,8 @@ public final class AppModel {
 
     public internal(set) var analysis: Phase = .idle
     public internal(set) var items: [String: CleanupItem] = [:]
-    @ObservationIgnored private var preferenceLocations: [String: AnalyzedItemLocation] = [:]
-    @ObservationIgnored private var preferenceRevalidationTask: Task<Void, Never>?
+    @ObservationIgnored private var analysisLocations: [String: AnalyzedItemLocation] = [:]
+    @ObservationIgnored private var readOnlyRevalidationTask: Task<Void, Never>?
     public internal(set) var finishedFinders: Set<FinderKind> = []
 
     // MARK: Explorateur
@@ -101,7 +101,7 @@ public final class AppModel {
     public internal(set) var explorer: Phase = .idle
     public internal(set) var tree: TreeNode?
     public internal(set) var treeVolume: VolumeDescriptor?
-    @ObservationIgnored var displayedBootIndex: ScanIndex?
+    @ObservationIgnored var displayedExplorerIndex: ScanIndex?
     public internal(set) var scanProgress = ScanProgress()
     var scanTask: Task<Void, Never>?
     /// L'analyse gardée de chaque autre disque, par son point de montage : relue
@@ -373,8 +373,8 @@ public final class AppModel {
         items = items.filter { $0.value.category == .snapshots || $0.value.category.section == .duplicates
             || $0.value.category.section == .photos || $0.value.category.section == .clouds
             || !isOnBootVolume($0.value) }
-        preferenceLocations = preferenceLocations.filter { items[$0.key] != nil }
-        stopPreferenceRevalidationIfEmpty()
+        analysisLocations = analysisLocations.filter { items[$0.key] != nil }
+        stopReadOnlyRevalidationIfEmpty()
         // Les sections qui suivent l'arbre de l'Explorateur (gros fichiers)
         // reviennent au disque de démarrage.
         if let boot = bootVolume, treeVolume?.isBoot == false, !explorer.isRunning { explore(boot) }
@@ -503,6 +503,7 @@ public final class AppModel {
             if treeVolume?.isBoot != true {
                 scanTask?.cancel()
                 scanProgress.cancel()
+                displayedExplorerIndex = nil
                 treeVolume = nil
                 tree = nil
             }
@@ -517,7 +518,7 @@ public final class AppModel {
         }
         let progress = ScanProgress()
         scanProgress = progress
-        displayedBootIndex = nil
+        displayedExplorerIndex = nil
         treeVolume = volume
         tree = nil
         explorer = .running
@@ -528,8 +529,7 @@ public final class AppModel {
         scanTask = Task {
             if !rescan, let known = await self.storedAnalysis(for: volume) {
                 guard !progress.isCancelled, self.treeVolume?.id == volume.id else { return }
-                self.tree = known.root
-                self.explorer = .done(known.scannedAt)
+                self.showExplorerIndex(known, volume: volume)
                 return
             }
             // Les fichiers de 100 Ko et plus sont gardés un à un : assez pour que
@@ -550,8 +550,7 @@ public final class AppModel {
                 self.volumeIndexes[volume.id] = fresh
                 self.liveVolumeScans.insert(volume.id)
             }
-            self.tree = fresh.root
-            self.explorer = .done(fresh.scannedAt)
+            self.showExplorerIndex(fresh, volume: volume)
             if let store { Task.detached(priority: .utility) { try? store.save(fresh) } }
         }
     }
@@ -575,7 +574,7 @@ public final class AppModel {
         let path = PathNormalizer.normalize(node.path)
         if let known = items.values.first(where: {
             $0.paths.count == 1 && PathNormalizer.normalize($0.paths[0].path) == path
-                && (!$0.isInvalidPreference || $0.fingerprint?.fileID == node.fileID)
+                && (!$0.requiresLiveAnalysisLocation || $0.fingerprint?.fileID == node.fileID)
                 && isCurrentAnalyzedItem($0)
         }) {
             return known
@@ -691,14 +690,14 @@ public final class AppModel {
 
     public func isInCart(_ id: String) -> Bool { cart.contains(id) }
 
-    func recordAnalyzedItem(_ item: CleanupItem, preferenceLocation: AnalyzedItemLocation? = nil,
+    func recordAnalyzedItem(_ item: CleanupItem, analysisLocation: AnalyzedItemLocation? = nil,
                             preselect: Bool, policy: PreselectionPolicy) {
-        if item.isInvalidPreference {
-            guard let url = item.paths.first, let preferenceLocation, preferenceLocation.isCurrent(at: url) else { return }
-            preferenceLocations[item.id] = preferenceLocation
+        if item.requiresLiveAnalysisLocation {
+            guard let url = item.paths.first, let analysisLocation, analysisLocation.isCurrent(at: url) else { return }
+            analysisLocations[item.id] = analysisLocation
         }
         items[item.id] = item
-        if item.isInvalidPreference { startPreferenceRevalidation() }
+        if item.requiresLiveAnalysisLocation { startReadOnlyRevalidation() }
         if !canSelectForCleanup(item) {
             cart.remove(item.id)
         } else if preselect, policy.preselects(item) {
@@ -708,48 +707,48 @@ public final class AppModel {
 
     func recordAnalyzedBatch(_ batch: RuleBatch, preselect: Bool, policy: PreselectionPolicy) {
         for item in batch.items {
-            recordAnalyzedItem(item, preferenceLocation: batch.preferenceLocation(for: item),
+            recordAnalyzedItem(item, analysisLocation: batch.analysisLocation(for: item),
                                preselect: preselect, policy: policy)
         }
     }
 
     private func isCurrentAnalyzedItem(_ item: CleanupItem) -> Bool {
-        guard item.isInvalidPreference else { return true }
+        guard item.requiresLiveAnalysisLocation else { return true }
         guard let url = item.paths.first else { return false }
-        return preferenceLocations[item.id]?.isCurrent(at: url) == true
+        return analysisLocations[item.id]?.isCurrent(at: url) == true
     }
 
-    /// Un plist peut changer sans modifier l'état observé par la vue. Revérifie
+    /// Un fichier peut changer sans modifier l'état observé par la vue. Revérifie
     /// uniquement les fiches affichables, y compris après remplacement de leur
     /// dossier, sans garder de descripteur ni suivre toute la bibliothèque.
-    private func startPreferenceRevalidation() {
-        guard preferenceRevalidationTask == nil else { return }
-        preferenceRevalidationTask = Task { [weak self] in
+    private func startReadOnlyRevalidation() {
+        guard readOnlyRevalidationTask == nil else { return }
+        readOnlyRevalidationTask = Task { [weak self] in
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(1)) }
                 catch { return }
                 guard !Task.isCancelled, let self else { return }
-                self.removeStalePreferenceDiagnostics()
+                self.removeStaleReadOnlyFindings()
             }
         }
     }
 
-    private func removeStalePreferenceDiagnostics() {
-        let obsolete = Set(preferenceLocations.keys.filter { id in
-            guard let item = items[id], item.isInvalidPreference else { return true }
+    private func removeStaleReadOnlyFindings() {
+        let obsolete = Set(analysisLocations.keys.filter { id in
+            guard let item = items[id], item.requiresLiveAnalysisLocation else { return true }
             return !isCurrentAnalyzedItem(item)
         })
         guard !obsolete.isEmpty else { return }
-        for id in obsolete { preferenceLocations[id] = nil }
-        items = items.filter { !$0.value.isInvalidPreference || !obsolete.contains($0.key) }
+        for id in obsolete { analysisLocations[id] = nil }
+        items = items.filter { !$0.value.requiresLiveAnalysisLocation || !obsolete.contains($0.key) }
         cart.subtract(obsolete)
-        stopPreferenceRevalidationIfEmpty()
+        stopReadOnlyRevalidationIfEmpty()
     }
 
-    private func stopPreferenceRevalidationIfEmpty() {
-        guard preferenceLocations.isEmpty else { return }
-        preferenceRevalidationTask?.cancel()
-        preferenceRevalidationTask = nil
+    private func stopReadOnlyRevalidationIfEmpty() {
+        guard analysisLocations.isEmpty else { return }
+        readOnlyRevalidationTask?.cancel()
+        readOnlyRevalidationTask = nil
     }
 
     public var canMoveFiles: Bool { engine.supports(.trash) }

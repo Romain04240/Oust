@@ -14,6 +14,7 @@ public struct PathGuard: Sendable {
     }
 
     private let home: String
+    private let accountArchivesRoot: URL
     private let exact: Set<String>
     private let userLogRoots: Set<String>
     private let prefixes: [String]
@@ -28,8 +29,13 @@ public struct PathGuard: Sendable {
     private let otherVolumeRoots: [String]?
 
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, otherVolumeRoots: [URL]? = nil) {
+        self.init(home: home, otherVolumeRoots: otherVolumeRoots, accountArchivesRoot: AccountArchivePath.root)
+    }
+
+    package init(home: URL, otherVolumeRoots: [URL]? = nil, accountArchivesRoot: URL) {
         let home = home.standardizedFileURL.path
         self.home = home
+        self.accountArchivesRoot = accountArchivesRoot
         let logs = URL(fileURLWithPath: home).appendingPathComponent("Library/Logs")
         self.userLogRoots = Set([logs.path, logs.resolvingSymlinksInPath().path].map(PathNormalizer.normalize))
         self.otherVolumeRoots = otherVolumeRoots.map { $0.map { PathNormalizer.normalize($0.standardizedFileURL.path) } }
@@ -100,6 +106,7 @@ public struct PathGuard: Sendable {
         if !exact.isDisjoint(with: candidates) { return .refused("protected-root") }
         if protectUserLogs && protectsUserLogs(url, resolved: resolvedURL) { return .refused("user-logs") }
         if protectPreferences && protectsPreferences(url, resolved: resolvedURL) { return .refused("user-preferences") }
+        if protectsAccountArchives(url, resolved: resolvedURL) { return .refused("account-archives") }
         if protectsSafariDownload(url, resolved: resolvedURL) { return .refused("safari-incomplete-download") }
 
         for candidate in candidates {
@@ -195,6 +202,7 @@ public struct PathGuard: Sendable {
         guard !CloudFile.isSafariDownload(url),
               let resolved = Self.withResolvedParent(url),
               !protectsPreferences(url, resolved: resolved),
+              !protectsAccountArchives(url, resolved: resolved),
               !protectsSafariDownload(url, resolved: resolved, protectAncestors: false) else { return false }
         let path = Self.normalize(raw)
         return cloudRoots.contains { root in
@@ -203,6 +211,41 @@ public struct PathGuard: Sendable {
     }
 
     public func allows(_ url: URL) -> Bool { check(url) == .allowed }
+
+    package var accountArchiveLocation: PreferenceDirectory {
+        PreferenceDirectory.capturingLocation(at: accountArchivesRoot.path)
+    }
+
+    package func protectsAccountArchives(_ url: URL) -> Bool {
+        guard let resolved = Self.withResolvedParent(url) else { return true }
+        return protectsAccountArchives(url, resolved: resolved)
+    }
+
+    package func protectsAccountArchives(_ url: URL, resolved: URL) -> Bool {
+        let archive = accountArchiveLocation
+        guard !archive.isUncertain else { return true }
+        func normalized(_ path: String) -> String {
+            Self.normalize(path).folding(options: .caseInsensitive, locale: nil)
+        }
+        let roots = [accountArchivesRoot.path, archive.resolvedPath].compactMap { $0 }.map(normalized)
+        func related(_ candidate: URL) -> Bool {
+            let path = normalized(candidate.path)
+            return roots.contains { PathNormalizer.isWithin(path, $0) || PathNormalizer.isWithin($0, path) }
+        }
+        if related(url) || related(resolved) { return true }
+        guard let canonical = archive.resolvedPath else { return false }
+        let target = resolved.resolvingSymlinksInPath()
+        if related(target) { return true }
+        // APFS peut accepter une autre graphie pour le dossier ou un de ses parents.
+        if archive.matches(resolved.deletingLastPathComponent().path) { return true }
+        guard let entry = FileFacts.of(target.path), entry.mode & S_IFMT == S_IFDIR else { return false }
+        var ancestor = URL(fileURLWithPath: canonical, isDirectory: true)
+        while ancestor.path != "/" {
+            if let facts = FileFacts.of(ancestor.path), facts.device == entry.device, facts.inode == entry.inode { return true }
+            ancestor.deleteLastPathComponent()
+        }
+        return false
+    }
 
     package func protectsUserPreferences(_ url: URL) -> Bool {
         guard let resolved = Self.withResolvedParent(url) else { return true }
@@ -420,6 +463,7 @@ public struct PathGuard: Sendable {
               !raw.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return false }
         guard !CloudFile.isSafariDownload(url),
               let real = Self.withResolvedParent(url), !protectsPreferences(url, resolved: real),
+              !protectsAccountArchives(url, resolved: real),
               !protectsSafariDownload(url, resolved: real) else { return false }
         let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
         let resolved = Self.normalize((parent as NSString).appendingPathComponent(url.lastPathComponent))

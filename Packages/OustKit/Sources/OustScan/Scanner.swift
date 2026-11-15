@@ -21,6 +21,7 @@ public struct ScanOptions: Sendable, Hashable {
     public var notableNames: Set<String>
     /// Les plist directs de ce dossier comptent uniquement comme espace occupé.
     public var readOnlyPreferencesDirectory: String?
+    public var accountArchivesDirectory: String?
 
     public init(
         threads: Int = min(12, max(4, ProcessInfo.processInfo.activeProcessorCount)),
@@ -28,7 +29,8 @@ public struct ScanOptions: Sendable, Hashable {
         measurePrivateSizes: Bool = true,
         excludedPaths: Set<String> = [],
         notableNames: Set<String> = [],
-        readOnlyPreferencesDirectory: String? = nil
+        readOnlyPreferencesDirectory: String? = nil,
+        accountArchivesDirectory: String? = nil
     ) {
         self.threads = threads
         self.leafThreshold = leafThreshold
@@ -36,11 +38,12 @@ public struct ScanOptions: Sendable, Hashable {
         self.excludedPaths = excludedPaths
         self.notableNames = notableNames
         self.readOnlyPreferencesDirectory = readOnlyPreferencesDirectory
+        self.accountArchivesDirectory = accountArchivesDirectory
     }
 
     /// Pour mesurer des éléments : pas de feuilles, juste des totaux.
     public static var measuring: ScanOptions {
-        ScanOptions(leafThreshold: .max)
+        ScanOptions(leafThreshold: .max, accountArchivesDirectory: AccountArchivePath.root.path)
     }
 }
 
@@ -78,6 +81,7 @@ public struct ScanResult: Sendable {
     let ownership: Ownership
     /// Absent quand la cible a changé pendant la mesure et que les gains ont été écartés.
     let preferenceDirectory: PreferenceDirectory?
+    let accountArchiveDirectory: PreferenceDirectory
 
     public var root: TreeNode? { roots.first }
 }
@@ -118,11 +122,12 @@ public enum Scanner {
         let ownership = Ownership()
         let walk = Walk(options: options, progress: progress, ownership: ownership)
         let nodes = await walk.run(roots: roots.map { $0.standardizedFileURL.path })
-        let stablePreferences = walk.hasCurrentPreferenceDirectory
+        let stablePreferences = walk.hasCurrentProtectionRoots
         if !stablePreferences { for node in nodes { node.suppressFreeable() } }
         return ScanResult(roots: nodes, duration: Date().timeIntervalSince(started),
                           skippedVolumes: walk.skippedVolumes, ownership: ownership,
-                          preferenceDirectory: stablePreferences ? walk.preferenceDirectory : nil)
+                          preferenceDirectory: stablePreferences ? walk.preferenceDirectory : nil,
+                          accountArchiveDirectory: walk.accountArchiveDirectory)
     }
 
     /// Mesure des éléments sans garder leur arborescence.
@@ -211,6 +216,7 @@ final class Walk: @unchecked Sendable {
     /// Les motifs `préfixe*` de `notableNames`, sans l'étoile.
     private let notablePrefixes: [String]
     let preferenceDirectory: PreferenceDirectory
+    let accountArchiveDirectory: PreferenceDirectory
     private let extendedSupported = Atomic<Bool>(true)
     private let skipped = Mutex<[String]>([])
     /// Les nœuds relus, pour ne recalculer que leurs totaux et ceux de leurs
@@ -232,16 +238,24 @@ final class Walk: @unchecked Sendable {
         self.notablePrefixes = options.notableNames.filter { $0.hasSuffix("*") && !$0.hasPrefix("*") }
             .map { String($0.dropLast()) }.sorted()
         self.preferenceDirectory = PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
+        self.accountArchiveDirectory = PreferenceDirectory.capturingLocation(at: options.accountArchivesDirectory)
     }
 
-    var hasCurrentPreferenceDirectory: Bool {
+    var hasCurrentProtectionRoots: Bool {
         preferenceDirectory == PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
+            && accountArchiveDirectory == PreferenceDirectory.capturingLocation(at: options.accountArchivesDirectory)
     }
 
     private func protectsPreferences(_ matches: (PreferenceDirectory) -> Bool) -> Bool {
         if preferenceDirectory.isUncertain || matches(preferenceDirectory) { return true }
         let current = PreferenceDirectory(options.readOnlyPreferencesDirectory)
         return current.isUncertain || (current.identity != preferenceDirectory.identity && matches(current))
+    }
+
+    private func protectsAccountArchives(_ matches: (PreferenceDirectory) -> Bool) -> Bool {
+        if accountArchiveDirectory.isUncertain || matches(accountArchiveDirectory) { return true }
+        let current = PreferenceDirectory(options.accountArchivesDirectory)
+        return current.isUncertain || (current.identity != accountArchiveDirectory.identity && matches(current))
     }
 
     /// Un parcours complet de chaque racine.
@@ -274,7 +288,9 @@ final class Walk: @unchecked Sendable {
                 }
                 if SafariDownloadPath.containsPackage(path)
                     || (options.readOnlyPreferencesDirectory != nil && PreferenceDirectory.isPlist(node.name)
-                        && protectsPreferences({ $0.matches((path as NSString).deletingLastPathComponent) })) {
+                        && protectsPreferences({ $0.matches((path as NSString).deletingLastPathComponent) }))
+                    || (options.accountArchivesDirectory != nil && AccountArchivePath.isDiskImage(node.name)
+                        && protectsAccountArchives({ $0.matches((path as NSString).deletingLastPathComponent) })) {
                     node.ownFiles.freeable = 0
                 }
                 node.recomputeTotals()
@@ -393,6 +409,7 @@ final class Walk: @unchecked Sendable {
             return []
         }
         var insideReadOnlyPreferences: Bool?
+        var insideAccountArchives: Bool?
         // Relu avec succès : un dossier refusé hier peut être lisible aujourd'hui.
         node.status = .ok
         if job.shallow != nil {
@@ -459,8 +476,13 @@ final class Walk: @unchecked Sendable {
             if isPlist, insideReadOnlyPreferences == nil {
                 insideReadOnlyPreferences = protectsPreferences { $0.matches(openDirectory: fd) }
             }
+            let looksLikeArchive = options.accountArchivesDirectory != nil && AccountArchivePath.isDiskImage(entry.name)
+            if looksLikeArchive, insideAccountArchives == nil {
+                insideAccountArchives = protectsAccountArchives { $0.matches(openDirectory: fd) }
+            }
             let protected = insideSafariDownload || SafariDownloadPath.hasPackageExtension(entry.name)
                 || (isPlist && insideReadOnlyPreferences == true)
+                || (looksLikeArchive && insideAccountArchives == true)
             let sizes = Sizes(allocated: allocated, freeable: protected ? 0 : freeable)
             node.ownFiles += sizes
             node.ownFileCount += 1

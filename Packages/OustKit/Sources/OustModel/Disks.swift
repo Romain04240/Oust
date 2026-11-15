@@ -33,14 +33,9 @@ extension AppModel {
 
     public var cloudFootprints: [CloudFootprint] {
         let tree = disk.currentTree
-        let cloudItems = items(in: [.cloudFiles])
         return CloudProviders.installed(home: home).map { provider in
-            let root = PathNormalizer.normalize(provider.root.path)
-            let evictable = cloudItems
-                .filter { $0.paths.contains { PathNormalizer.isWithin($0.path, root) } }
-                .reduce(0) { $0 + $1.sizes.freeable }
-            return CloudFootprint(provider: provider, onThisMac: tree?.measurement(of: provider.root)?.sizes.allocated,
-                                  evictable: evictable)
+            CloudFootprint(provider: provider, onThisMac: tree?.measurement(of: provider.root)?.sizes.allocated,
+                           evictable: 0)
         }
     }
 

@@ -34,7 +34,7 @@ struct PreferencePresentationTests {
         #expect(priorGain > 0)
         let app = AppModel(home: home, defaults: MemoryDefaults())
         if isBoot {
-            app.showSharedTree(index, volume: volume)
+            app.showExplorerIndex(index, volume: volume)
             try fm.removeItem(at: fixture.preferences)
             try fm.createSymbolicLink(at: fixture.preferences, withDestinationURL: b)
         } else {
@@ -46,7 +46,7 @@ struct PreferencePresentationTests {
             try fm.removeItem(at: home)
             try fm.createSymbolicLink(at: home, withDestinationURL: otherHome)
         }
-        #expect(!index.hasCurrentPreferenceDirectory)
+        #expect(!index.hasCurrentProtectionRoots)
         app.selectAnalysisVolume(volume)
         #expect(app.treeVolume?.id == volume.id)
         #expect(app.tree?.descendant(atPath: b.path)?.total.freeable == 0)

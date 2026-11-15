@@ -130,7 +130,6 @@ private struct Results: View {
             }
             Groups(model: model, groups: clouds.duplicates, emptyTitle: clouds.isSearching ? "clouds.search_none" : "clouds.duplicates_none")
         case .onThisMac:
-            EvictHint(model: model)
             FileList(model: model, files: clouds.onThisMac, emptyTitle: clouds.isSearching ? "clouds.search_none" : "clouds.on_mac_none")
         }
     }
@@ -454,31 +453,6 @@ private struct AgeFilter: View {
             Text("clouds.unchanged_since", bundle: .oust).foregroundStyle(Palette.onGradient)
         }
         .fixedSize()
-    }
-}
-
-/// Pour gagner de la place ici sans rien supprimer, l'éviction existe déjà.
-private struct EvictHint: View {
-    let model: AppModel
-
-    var body: some View {
-        GlassCard {
-            HStack(alignment: .center, spacing: Spacing.medium) {
-                Label {
-                    Text("clouds.on_mac_note", bundle: .oust).fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: "icloud.and.arrow.up")
-                }
-                .font(Typography.body)
-                .foregroundStyle(Palette.onGradient)
-                Spacer(minLength: Spacing.small)
-                Button {
-                    model.searchText = ""
-                    model.section = .system
-                } label: { Text("clouds.evict_instead", bundle: .oust) }
-                    .buttonStyle(OnGradientButtonStyle())
-            }
-        }
     }
 }
 

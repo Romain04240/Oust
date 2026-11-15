@@ -19,7 +19,7 @@ struct DuplicateExclusionModelTests {
         let app = AppModel(home: fixture, defaults: defaults)
         func sample(_ category: ItemCategory, id: String) -> CleanupItem {
             CleanupItem(id: id, title: id, detail: "", paths: [fixture.appendingPathComponent(id)],
-                        category: category, owner: "", ruleID: "", safety: .review, method: .evictLocalCopy,
+                        category: category, owner: "", ruleID: "", safety: .review, method: .brewCleanup(executable: "/fictif/brew"),
                         sizes: Sizes(allocated: 1, freeable: 1), lastActivity: nil, rebuild: .irreversible)
         }
         let duplicate = sample(.duplicates, id: "copie")
@@ -61,7 +61,7 @@ struct DuplicateExclusionModelTests {
                                  modified: nil, captured: nil, pixelWidth: 10, pixelHeight: 10)
         let stale = SimilarImageGroup(images: [image])
         let item = CleanupItem(id: "autre", title: "photo", detail: "", paths: [file], category: .cloudFiles,
-                               owner: "", ruleID: "", safety: .review, method: .evictLocalCopy,
+                               owner: "", ruleID: "", safety: .review, method: .brewCleanup(executable: "/fictif/brew"),
                                sizes: Sizes(allocated: 4096, freeable: 4096), lastActivity: nil, rebuild: .irreversible)
         app.add([item])
         #expect(await app.excludeDuplicateFolder(folder))

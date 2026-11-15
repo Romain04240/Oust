@@ -36,7 +36,7 @@ public struct SystemView: View {
     }
 
     static let categories: [ItemCategory] = [
-        .downloads, .systemDownloads, .appCaches, .userLogs, .preferenceDiagnostics, .creative, .games, .cloudFiles, .attachments, .screenshots, .trash,
+        .downloads, .systemDownloads, .appCaches, .userLogs, .preferenceDiagnostics, .accountArchives, .creative, .games, .cloudFiles, .attachments, .screenshots, .trash,
         .iosBackups, .virtualMachines, .diskTraces, .protectedOnDisk,
     ]
 }

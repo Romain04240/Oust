@@ -10,6 +10,36 @@ import Testing
 struct IncrementalTests {
     let options = ScanOptions(threads: 4, leafThreshold: 100_000)
 
+    @Test("Une archive de compte ne compte que comme espace occupé dans l’Explorateur et Spotlight")
+    func accountArchivesAreNotFreeable() async throws {
+        let fixture = try Fixture()
+        let archives = try fixture.directory("Users/Deleted Users")
+        let protected = try fixture.file("Users/Deleted Users/Compte.DMG", bytes: 180_000)
+        _ = try fixture.file("Users/Deleted Users/Petit.dmg", bytes: 100)
+        let ordinary = try fixture.file("Ordinaire.dmg", bytes: 180_000)
+        let options = ScanOptions(threads: 2, leafThreshold: 100_000, accountArchivesDirectory: archives.path)
+        let (index, _) = await ScanIndex.refresh(nil, root: fixture.root, options: options)
+        let node = try #require(index.root.descendant(atPath: archives.path))
+        #expect(node.files.first?.sizes.freeable == 0)
+        #expect(node.smallFiles.allocated > 0 && node.smallFiles.freeable == 0)
+        #expect(node.total.freeable == 0 && node.total.allocated > 0)
+        #expect(index.root.total.freeable == index.root.files.first?.sizes.allocated)
+        let store = TreeStore(directory: fixture.root.appendingPathComponent("CacheFictif"))
+        try store.save(index)
+        #expect(store.load(rootPath: index.rootPath)?.root.descendant(atPath: archives.path)?.total == node.total)
+
+        let alias = fixture.root.appendingPathComponent("AliasUsers")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: archives.deletingLastPathComponent())
+        let redirected = alias.appendingPathComponent("Deleted Users")
+        let (selected, _) = await ScanIndex.refresh(nil, root: redirected, options: options)
+        #expect(selected.root.total == node.total)
+        let paths = [redirected.appendingPathComponent(protected.lastPathComponent).path, ordinary.path]
+        let spotlight = Spotlight.parse(Data(paths.joined(separator: "\0").utf8), minimumBytes: 1,
+                                         accountArchivesDirectory: archives.path)
+        #expect(spotlight.first { $0.name == protected.lastPathComponent }?.sizes.freeable == 0)
+        #expect((spotlight.first { $0.name == ordinary.lastPathComponent }?.sizes.freeable ?? 0) > 0)
+    }
+
     @Test("Le parcours protège le dossier Preferences remplacé avant l'ouverture")
     func replacedPreferenceDirectory() async throws {
         let fixture = try Fixture()
@@ -21,7 +51,7 @@ struct IncrementalTests {
         _ = try fixture.file("Library/Preferences/Petit.plist", bytes: 200)
         let roots = await walk.run(roots: [preferences.path])
         let tree = try #require(roots.first)
-        #expect(!walk.hasCurrentPreferenceDirectory)
+        #expect(!walk.hasCurrentProtectionRoots)
         #expect(tree.total.allocated >= Fixture.allocated(plist))
         #expect(tree.total.freeable == 0)
         #expect(tree.files.first?.sizes.freeable == 0)
@@ -45,7 +75,7 @@ struct IncrementalTests {
         #expect((old.root.descendant(atPath: b.path)?.total.freeable ?? 0) > 0)
         let store = TreeStore(directory: fixture.root.appendingPathComponent("CacheFictif"))
         try store.save(old)
-        #expect(store.load(rootPath: old.rootPath)?.hasCurrentPreferenceDirectory == true)
+        #expect(store.load(rootPath: old.rootPath)?.hasCurrentProtectionRoots == true)
 
         try fm.removeItem(at: preferences)
         try fm.createSymbolicLink(at: preferences, withDestinationURL: b)
@@ -235,14 +265,16 @@ struct IncrementalTests {
         let forged = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
                                eventID: previous.eventID, eventDatabase: "base-effacée",
                                scannedAt: previous.scannedAt, fullScanAt: previous.fullScanAt,
-                               skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory)
+                               skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory,
+                               accountArchiveDirectory: previous.accountArchiveDirectory)
         let refreshed = await ScanIndex.refresh(forged, root: fixture.root, options: options)
         #expect(refreshed.how == .full(.historyLost))
 
         let old = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
                             eventID: previous.eventID, eventDatabase: previous.eventDatabase,
                             scannedAt: previous.scannedAt, fullScanAt: Date(timeIntervalSinceNow: -30 * 86_400),
-                            skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory)
+                            skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory,
+                               accountArchiveDirectory: previous.accountArchiveDirectory)
         #expect(await ScanIndex.refresh(old, root: fixture.root, options: options).how == .full(.tooOld))
     }
 

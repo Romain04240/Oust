@@ -243,16 +243,14 @@ struct CompressorTests {
     }
 }
 
-@Suite("Éviction : rien n'est supprimé, seul le nuage est concerné")
+@Suite("Les chemins cloud et le veto d’éviction")
 struct EvictorTests {
-
-    @Test("L'éviction d'un dossier épargne le paquet Safari et ses alias")
+    @Test("La garde protège le paquet Safari et ses alias dans le cloud")
     func safariDownloadEviction() throws {
         let bench = try Bench()
         let partial = try bench.file("Library/CloudStorage/Dropbox/Projets/Archive.DOWNLOAD/Fichier.partiel")
         let package = partial.deletingLastPathComponent()
         let project = package.deletingLastPathComponent()
-        let neighbour = try bench.file("Library/CloudStorage/Dropbox/Projets/Voisin.txt")
         let alias = project.appendingPathComponent("Lien")
         try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: package)
         let guardPaths = PathGuard(home: bench.root)
@@ -261,35 +259,33 @@ struct EvictorTests {
             #expect(!guardPaths.allowsEviction(protected))
             #expect(!guardPaths.allowsCloudTrash(protected))
         }
-        var visitedRoots: [URL] = []
-        var evicted: [URL] = []
-        let result = Evictor.evict([package, alias, project], walk: { root, visit in
-            visitedRoots.append(root)
-            for protected in [package, partial, alias.appendingPathComponent(partial.lastPathComponent)] {
-                _ = visit(protected, 3_000_000, nil)
-            }
-            _ = visit(neighbour, 2_000_000, nil)
-        }, evict: { evicted.append($0) })
-        #expect(visitedRoots == [project] && evicted == [neighbour])
-        #expect(result.evicted == 1 && result.evictedBytes == 2_000_000 && result.failures.isEmpty)
-        #expect(FileManager.default.fileExists(atPath: partial.path))
     }
 
-    @Test("Chaque fichier évinçable est évincé, et seul ce qui l'a été compte")
-    func counts() {
-        let root = URL(fileURLWithPath: "/nuage/Photos")
-        var evicted: [String] = []
-        let summary = Evictor.evict([root], walk: { _, visit in
-            _ = visit(root.appendingPathComponent("a.jpg"), 2_000, nil)
-            _ = visit(root.appendingPathComponent("b.jpg"), 3_000, nil)
-        }, evict: { url in
-            if url.lastPathComponent == "b.jpg" { throw CocoaError(.fileWriteNoPermission) }
-            evicted.append(url.lastPathComponent)
-        })
+    @Test("Le moteur refuse une éviction même sous une racine cloud autorisée", arguments: [false, true])
+    func evictionRefusedWithoutIdentity(redirected: Bool) async throws {
+        let bench = try Bench()
+        let file = try bench.file("Library/CloudStorage/Fictif/Lot/Compte.dmg")
+        let archives = bench.root.appendingPathComponent("Users/Deleted Users")
+        let fm = FileManager.default
+        try fm.createDirectory(at: archives.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if redirected {
+            try fm.createSymbolicLink(at: archives, withDestinationURL: file.deletingLastPathComponent())
+        }
 
-        #expect(evicted == ["a.jpg"])
-        #expect(summary.evictedBytes == 2_000)
-        #expect(summary.failures.count == 1)
+        let guardPaths = PathGuard(home: bench.root, accountArchivesRoot: archives)
+        #expect(guardPaths.allowsEviction(file) != redirected)
+        let engine = CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: nil, pathGuard: guardPaths,
+                                   processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil },
+                                   allowsPathBasedRemoval: true)
+        let item = bench.item(file, method: .evictLocalCopy, safety: .review)
+        #expect(!engine.supports(item.method))
+        var outcomes: [CleanupOutcome] = []
+        for await event in engine.run([item]) {
+            if case .itemFinished(let outcome) = event { outcomes.append(outcome) }
+        }
+        #expect(outcomes.map(\.result) == [.skipped(.refusedByGuard)])
+        #expect(outcomes.first?.bytes == 0)
+        #expect(try Data(contentsOf: file) == Data(repeating: 1, count: 10_000))
     }
 
     @Test("La garde n'autorise l'éviction que dans le nuage")

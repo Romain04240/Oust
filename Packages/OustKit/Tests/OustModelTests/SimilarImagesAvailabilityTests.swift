@@ -37,7 +37,7 @@ struct SimilarImagesAvailabilityTests {
         #expect(await similar.thumbnail(for: copy.url, side: 16) != nil)
 
         var alreadySelected = group.cleanupItem(for: copy)
-        alreadySelected.method = .evictLocalCopy
+        alreadySelected.method = .brewCleanup(executable: "/fictif/brew")
         app.add([alreadySelected])
         #expect(similar.isInCart(copy) && similar.canToggle(copy, in: group))
         similar.toggle(copy, in: group)

@@ -10,6 +10,202 @@ import Testing
 
 @MainActor
 struct ExplorerPreferencesTests {
+    @Test("Le remplacement d’un CSV préserve le mode du fichier", arguments: [0o600, 0o640])
+    func csvReplacementPreservesPermissions(mode: Int) async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-csv-permissions-\(UUID())")
+        try fm.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        let destination = home.appendingPathComponent("Fictif.csv")
+        try "ancien".write(to: destination, atomically: false, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: destination.path)
+
+        let (index, _) = await ScanIndex.refresh(nil, root: home, options: ScanOptions())
+        let volume = VolumeDescriptor(name: "Fictif", mountURL: home, scanRoot: home, isBoot: false,
+                                      isInternal: true, isRemovable: false,
+                                      capacity: Capacity(total: 1_000_000, available: 500_000,
+                                                         availableForImportantUsage: 500_000))
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        app.showExplorerIndex(index, volume: volume)
+        #expect(try app.exportExplorerCSV(to: destination, for: index.root, render: { "nouveau" }))
+        #expect(try String(contentsOf: destination, encoding: .utf8) == "nouveau")
+        let actual = try fm.attributesOfItem(atPath: destination.path)[.posixPermissions] as? NSNumber
+        #expect(actual?.intValue == mode)
+    }
+
+    enum CSVACLFixture: String, Sendable {
+        case explicit, inherited, absent
+    }
+
+    @Test("Le CSV publié conserve l’ACL complète, y compris les entrées héritées",
+          arguments: [CSVACLFixture.explicit, .inherited, .absent])
+    func csvReplacementPreservesCompleteACL(fixture: CSVACLFixture) async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-csv-acl-\(UUID())")
+        try fm.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        if fixture == .inherited {
+            try addACL("everyone deny execute,file_inherit,only_inherit", at: home)
+        }
+        let destination = home.appendingPathComponent("Fictif.csv")
+        try "ancien".write(to: destination, atomically: false, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+        if fixture != .absent {
+            try addACL("everyone deny writeextattr", at: destination)
+        }
+        let originalACL = try #require(FileFacts.accessControlList(destination.path))
+        if fixture == .absent {
+            #expect(originalACL.isEmpty)
+        } else {
+            #expect(originalACL.contains("writeextattr"))
+            if fixture == .inherited { #expect(originalACL.contains("inherited:execute")) }
+        }
+
+        let (index, _) = await ScanIndex.refresh(nil, root: home, options: ScanOptions())
+        let volume = VolumeDescriptor(name: "Fictif", mountURL: home, scanRoot: home, isBoot: false,
+                                      isInternal: true, isRemovable: false,
+                                      capacity: Capacity(total: 1_000_000, available: 500_000,
+                                                         availableForImportantUsage: 500_000))
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        app.showExplorerIndex(index, volume: volume)
+        let published = try app.exportExplorerCSV(to: destination, for: index.root, render: { "nouveau" }, stage: { text, temporary in
+            try text.write(to: temporary, atomically: false, encoding: .utf8)
+            if fixture == .absent {
+                try addACL("everyone deny execute", at: temporary)
+                #expect(FileFacts.accessControlList(temporary.path)?.contains("execute") == true)
+            }
+        })
+        #expect(published)
+        #expect(try String(contentsOf: destination, encoding: .utf8) == "nouveau")
+        #expect(FileFacts.accessControlList(destination.path) == originalACL)
+        let mode = try fm.attributesOfItem(atPath: destination.path)[.posixPermissions] as? NSNumber
+        #expect(mode?.intValue == 0o600)
+    }
+
+    private func addACL(_ entry: String, at url: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+        process.arguments = ["+a", entry, url.path]
+        try process.run()
+        process.waitUntilExit()
+        try #require(process.terminationStatus == 0)
+    }
+
+    @Test("Une redirection avant la publication du CSV préserve le fichier existant",
+          arguments: [false, true])
+    func csvRejectsGainAfterRedirection(afterStaging: Bool) async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-archive-csv-\(UUID())")
+        let root = home.appendingPathComponent("Fichiers")
+        let target = root.appendingPathComponent("Ordinaire")
+        let archives = home.appendingPathComponent("Users/Deleted Users")
+        try fm.createDirectory(at: archives.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        try Self.invalidPlist.write(to: target.appendingPathComponent("Compte.dmg"))
+        let (index, _) = await ScanIndex.refresh(nil, root: root, options: ScanOptions(
+            leafThreshold: 1, accountArchivesDirectory: archives.path))
+        let volume = VolumeDescriptor(name: "Fictif", mountURL: root, scanRoot: root, isBoot: false,
+                                      isInternal: true, isRemovable: false,
+                                      capacity: Capacity(total: 1_000_000, available: 500_000,
+                                                         availableForImportantUsage: 500_000))
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        app.showExplorerIndex(index, volume: volume)
+        let destination = home.appendingPathComponent("Fictif.csv")
+        let csv = TreeAnalytics.compute(index.root).csv(for: index.root)
+        #expect(index.root.total.freeable > 0)
+        #expect(try app.exportExplorerCSV(to: destination, for: index.root, render: { csv }))
+        #expect(try String(contentsOf: destination, encoding: .utf8) == csv)
+
+        let old = "Vérification d’un CSV préexistant"
+        try old.write(to: destination, atomically: false, encoding: .utf8)
+        var staged: URL?
+        let changed = try app.exportExplorerCSV(to: destination, for: index.root, render: {
+            if !afterStaging {
+                do { try fm.createSymbolicLink(at: archives, withDestinationURL: target) }
+                catch { Issue.record("Redirection fictive impossible : \(error)") }
+            }
+            return csv
+        }, stage: { contents, url in
+            try contents.write(to: url, atomically: false, encoding: .utf8)
+            staged = url
+            #expect(try String(contentsOf: url, encoding: .utf8) == csv)
+            #expect(try String(contentsOf: destination, encoding: .utf8) == old)
+            if afterStaging { try fm.createSymbolicLink(at: archives, withDestinationURL: target) }
+        })
+        #expect(!changed)
+        #expect(try String(contentsOf: destination, encoding: .utf8) == old)
+        let temporary = try #require(staged)
+        #expect(!fm.fileExists(atPath: temporary.deletingLastPathComponent().path))
+
+        let safe = try #require(app.tree)
+        #expect(safe.total.allocated == index.root.total.allocated && safe.total.freeable == 0)
+        let safeCSV = TreeAnalytics.compute(safe).csv(for: safe)
+        #expect(safeCSV != csv)
+        #expect(try app.exportExplorerCSV(to: destination, for: safe, render: { safeCSV }))
+        #expect(try String(contentsOf: destination, encoding: .utf8) == safeCSV)
+    }
+
+    @Test("Le panneau cloud ignore les gains déjà publiés après redirection des archives")
+    func cloudPanelRejectsPreviousEstimate() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-archive-panel-\(UUID())")
+        let provider = home.appendingPathComponent("Library/CloudStorage/Fictif")
+        let target = provider.appendingPathComponent("Archives")
+        let archives = home.appendingPathComponent("Users/Deleted Users")
+        try fm.createDirectory(at: archives.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        let file = target.appendingPathComponent("Compte.dmg")
+        try Self.invalidPlist.write(to: file)
+
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        let old = CleanupItem(title: "Fictif", paths: [file], category: .cloudFiles, owner: "Fictif",
+                              ruleID: "cloud.file_provider", safety: .safe, method: .evictLocalCopy,
+                              sizes: Sizes(private: 200_000), rebuild: .download)
+        app.items[old.id] = old
+        try fm.createSymbolicLink(at: archives, withDestinationURL: target)
+        let footprint = try #require(app.cloudFootprints.first)
+        #expect(footprint.provider.name == "Fictif" && footprint.evictable == 0)
+        #expect(!app.canSelectForCleanup(old))
+    }
+
+    @Test("Un Explorateur déjà ouvert retire le gain si le dossier des archives est redirigé",
+          arguments: [true, false])
+    func displayedExplorerAfterAccountArchivesRedirect(isBoot: Bool) async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-archive-explorer-\(UUID())")
+        let root = home.appendingPathComponent("Fichiers")
+        let target = root.appendingPathComponent("Ordinaire")
+        let archives = home.appendingPathComponent("Users/Deleted Users")
+        try fm.createDirectory(at: archives, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        try Self.invalidPlist.write(to: target.appendingPathComponent("Compte.dmg"))
+        let (index, _) = await ScanIndex.refresh(nil, root: root, options: ScanOptions(
+            leafThreshold: 1, accountArchivesDirectory: archives.path))
+        let original = try #require(index.root.descendant(atPath: target.path))
+        #expect(original.total.freeable > 0)
+
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        let volume = VolumeDescriptor(name: "Fictif", mountURL: root, scanRoot: root, isBoot: isBoot,
+                                      isInternal: isBoot, isRemovable: !isBoot,
+                                      capacity: Capacity(total: 1_000_000, available: 500_000,
+                                                         availableForImportantUsage: 500_000))
+        app.showExplorerIndex(index, volume: volume)
+        #expect(app.revalidateExplorerGains() && app.tree === index.root)
+        try fm.removeItem(at: archives)
+        try fm.createSymbolicLink(at: archives, withDestinationURL: target)
+
+        #expect(!app.revalidateExplorerGains())
+        let displayed = try #require(app.tree?.descendant(atPath: target.path))
+        #expect(displayed.total.allocated == original.total.allocated)
+        #expect(displayed.total.freeable == 0 && displayed.files.first?.sizes.freeable == 0)
+        #expect(app.tree?.total.freeable == 0)
+        #expect(original.total.freeable > 0)
+        #expect(app.revalidateExplorerGains() && app.treeVolume?.id == volume.id)
+    }
+
     @Test("Sélectionner un volume ne republie pas le gain de l'ancienne cible", arguments: [true, false])
     func selectingVolumeAfterPreferencesRedirect(wasSelected: Bool) async throws {
         let fm = FileManager.default
@@ -43,7 +239,7 @@ struct ExplorerPreferencesTests {
 
         try fm.removeItem(at: preferences)
         try fm.createSymbolicLink(at: preferences, withDestinationURL: second)
-        #expect(!old.hasCurrentPreferenceDirectory)
+        #expect(!old.hasCurrentProtectionRoots)
         app.selectAnalysisVolume(volume)
         #expect(app.treeVolume?.id == volume.id)
         #expect(app.tree?.descendant(atPath: second.path)?.total.freeable == 0)

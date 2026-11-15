@@ -28,17 +28,21 @@ public enum Spotlight {
     /// au plus petit.
     public static func largeFiles(minimumBytes: Int64, under root: URL,
                                   readOnlyPreferencesDirectory: String? = nil,
+                                  accountArchivesDirectory: String? = nil,
                                   timeout: TimeInterval = 20) async -> [SpotlightFile] {
         // La requête est passée en argument, jamais interprétée par un shell ; le
         // seuil est un entier, rien d'autre n'y entre.
         let query = "kMDItemFSSize >= \(max(0, minimumBytes))"
         let result = await Command.run("/usr/bin/mdfind", ["-0", "-onlyin", root.path, query], timeout: timeout)
         guard result.succeeded else { return [] }
-        return parse(result.stdout, minimumBytes: minimumBytes, readOnlyPreferencesDirectory: readOnlyPreferencesDirectory)
+        return parse(result.stdout, minimumBytes: minimumBytes, readOnlyPreferencesDirectory: readOnlyPreferencesDirectory,
+                     accountArchivesDirectory: accountArchivesDirectory)
     }
 
-    static func parse(_ output: Data, minimumBytes: Int64, readOnlyPreferencesDirectory: String? = nil) -> [SpotlightFile] {
+    static func parse(_ output: Data, minimumBytes: Int64, readOnlyPreferencesDirectory: String? = nil,
+                      accountArchivesDirectory: String? = nil) -> [SpotlightFile] {
         let readOnlyPreferences = PreferenceDirectory.capturingLocation(at: readOnlyPreferencesDirectory)
+        let archives = PreferenceDirectory.capturingLocation(at: accountArchivesDirectory)
         var files: [SpotlightFile] = []
         var seen = Set<UInt64>()
         for chunk in output.split(separator: 0) where !chunk.isEmpty {
@@ -52,13 +56,16 @@ public enum Spotlight {
             let url = path as NSString
             let readOnly = PreferenceDirectory.isPlist(url.lastPathComponent)
                 && (readOnlyPreferences.isUncertain || readOnlyPreferences.matches(url.deletingLastPathComponent))
-            let freeable = readOnly ? 0 : BulkReader.privateSize(path: path) ?? allocated
+            let protectedArchive = AccountArchivePath.isDiskImage(url.lastPathComponent)
+                && (archives.isUncertain || archives.matches(url.deletingLastPathComponent))
+            let freeable = readOnly || protectedArchive ? 0 : BulkReader.privateSize(path: path) ?? allocated
             files.append(SpotlightFile(
                 path: path, sizes: Sizes(allocated: allocated, freeable: freeable), logicalSize: Int64(info.st_size),
                 modified: Date(timeIntervalSince1970: Double(info.st_mtimespec.tv_sec)), fileID: UInt64(info.st_ino)
             ))
         }
-        guard readOnlyPreferences == PreferenceDirectory.capturingLocation(at: readOnlyPreferencesDirectory) else { return [] }
+        guard readOnlyPreferences == PreferenceDirectory.capturingLocation(at: readOnlyPreferencesDirectory),
+              archives == PreferenceDirectory.capturingLocation(at: accountArchivesDirectory) else { return [] }
         return files.sorted { $0.sizes.allocated > $1.sizes.allocated }
     }
 }

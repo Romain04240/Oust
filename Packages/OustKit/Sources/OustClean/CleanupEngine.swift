@@ -104,6 +104,8 @@ public struct CleanupEngine: Sendable {
                                 allowsPathBasedRemoval: Bool) -> Bool {
         switch method {
         case .trash, .archive, .trashFromCloud: trasher.isAvailable
+        // L'éviction par URL ne peut pas être liée à l'identité validée.
+        case .evictLocalCopy: false
         // Le transit et la suppression sur place résolvent des chemins après
         // le contrôle. Seuls les bancs isolés activent cette implémentation.
         case .removeNow, .cloneOf, .compressInPlace: allowsPathBasedRemoval
@@ -315,7 +317,6 @@ public struct CleanupEngine: Sendable {
             // l'utilisateur (jamais la racine d'un compte) ; tout le reste passe
             // la garde ordinaire.
             let allowed = switch item.method {
-            case .evictLocalCopy: pathGuard.allowsEviction(path)
             case .trashFromCloud: pathGuard.allowsCloudTrash(path)
             default: pathGuard.allows(path)
             }
@@ -402,7 +403,8 @@ public struct CleanupEngine: Sendable {
             guard !pathGuard.protectsUserLogs(path), let resolved = PathGuard.withResolvedParent(path),
                   !pathGuard.protectsUserLogs(resolved),
                   !pathGuard.protectsPreferences(path, resolved: resolved),
-                  !pathGuard.protectsSafariDownload(path, resolved: resolved, protectAncestors: item.method != .evictLocalCopy)
+                  !pathGuard.protectsAccountArchives(path, resolved: resolved),
+                  !pathGuard.protectsSafariDownload(path, resolved: resolved)
             else { return outcome(.skipped(.refusedByGuard)) }
             resolvedPaths.append(resolved)
         }
@@ -458,12 +460,6 @@ public struct CleanupEngine: Sendable {
             }
             return outcome(.cloned, bytes: freeable)
 
-        case .evictLocalCopy:
-            // Ce qui compte est ce qui a été évincé, mesuré fichier par fichier.
-            let summary = Evictor.evict(item.paths, isCancelled: { Task.isCancelled })
-            if summary.evicted == 0, let first = summary.failures.first { return outcome(.failed(message: first)) }
-            return outcome(.evicted, bytes: summary.evictedBytes)
-
         case .compressInPlace:
             var summary = Compressor.Summary()
             for path in item.paths {
@@ -497,7 +493,7 @@ public struct CleanupEngine: Sendable {
         // demande à Photos ferait paraître une invite. Les sauvegardes Time
         // Machine n'entrent jamais dans la corbeille : `BackupPruner`, depuis
         // le panneau du disque, et lui seul.
-        case .localSnapshot, .manual, .photoAsset, .timeMachineBackup:
+        case .evictLocalCopy, .localSnapshot, .manual, .photoAsset, .timeMachineBackup:
             return outcome(.skipped(.refusedByGuard))
         }
     }

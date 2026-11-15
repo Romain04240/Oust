@@ -53,18 +53,15 @@ extension AppModel {
         if volume.isBoot {
             if treeVolume?.isBoot == false {
                 explore(volume)
-            } else if let index = displayedBootIndex, tree === index.root {
+            } else if let index = displayedExplorerIndex, tree === index.root {
                 let displayed = index.checkedForDisplay(for: DiskIndexModel.options(for: home))
-                if displayed.root !== tree { showSharedTree(displayed, volume: volume) }
+                if displayed.root !== tree { showExplorerIndex(displayed, volume: volume) }
             }
         } else if let index = volumeIndexes[volume.id] {
             let options = Self.volumeScanOptions(for: volume, home: home)
             guard tree !== index.root || treeVolume?.id != volume.id || !index.canReuse(for: options) else { return }
             let displayed = index.checkedForDisplay(for: options)
-            displayedBootIndex = nil
-            treeVolume = volume
-            tree = displayed.root
-            explorer = .done(displayed.scannedAt)
+            showExplorerIndex(displayed, volume: volume)
         }
     }
 
@@ -197,7 +194,8 @@ extension AppModel {
         let excluded: Set<String> = FileManager.default.fileExists(atPath: backups) ? [backups] : []
         return ScanOptions(leafThreshold: 100_000, excludedPaths: excluded,
                            notableNames: RuleEngine.notableNames(fileSystem: fileSystem),
-                           readOnlyPreferencesDirectory: DiskIndexModel.preferencesDirectory(for: home))
+                           readOnlyPreferencesDirectory: DiskIndexModel.preferencesDirectory(for: home),
+                           accountArchivesDirectory: AccountArchivePath.root.path)
     }
 
     // MARK: Doublons d'un autre disque

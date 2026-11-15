@@ -7,18 +7,18 @@ import OustSafety
 public struct RuleBatch: Sendable {
     public let finder: FinderKind
     fileprivate let measuredItems: [CleanupItem]
-    fileprivate let preferenceLocations: [String: AnalyzedItemLocation]
+    fileprivate let analysisLocations: [String: AnalyzedItemLocation]
 
     public var items: [CleanupItem] {
         measuredItems.filter { item in
-            guard item.isInvalidPreference else { return true }
+            guard item.requiresLiveAnalysisLocation else { return true }
             guard let url = item.paths.first else { return false }
-            return preferenceLocation(for: item)?.isCurrent(at: url) == true
+            return analysisLocation(for: item)?.isCurrent(at: url) == true
         }
     }
 
-    package func preferenceLocation(for item: CleanupItem) -> AnalyzedItemLocation? {
-        preferenceLocations[item.id]
+    package func analysisLocation(for item: CleanupItem) -> AnalyzedItemLocation? {
+        analysisLocations[item.id]
     }
 }
 
@@ -27,7 +27,7 @@ public enum FinderKind: String, Sendable, CaseIterable {
     case packageCaches, xcode, simulators, agents, models, userContent, projectArtifacts
     case toolVersions, toolCleanups, appCaches, personalFiles, cloud, compression
     case creative, games, appData, pro
-    case userLogs, preferenceDiagnostics
+    case userLogs, preferenceDiagnostics, accountArchives
     /// Sur un autre disque seulement (`RuleContext.volume`) : rien ailleurs.
     case volumeInstallers, volumeTrash, volumeTraces, volumeKept
 }
@@ -85,10 +85,10 @@ public enum RuleEngine {
                             let candidates = await find(kind, context: context)
                             let items = await measure(candidates, using: measurer, pathGuard: pathGuard)
                             var locations: [String: AnalyzedItemLocation] = [:]
-                            for candidate in candidates where candidate.item.isInvalidPreference {
+                            for candidate in candidates where candidate.item.requiresLiveAnalysisLocation {
                                 locations[candidate.item.id] = candidate.location
                             }
-                            return RuleBatch(finder: kind, measuredItems: items, preferenceLocations: locations)
+                            return RuleBatch(finder: kind, measuredItems: items, analysisLocations: locations)
                         }
                     }
                     for await batch in group {
@@ -134,6 +134,7 @@ public enum RuleEngine {
         case .appCaches: await AppCachesFinder(context: context).find()
         case .userLogs: UserLogsFinder(context: context).find()
         case .preferenceDiagnostics: PreferenceDiagnosticsFinder(context: context).find()
+        case .accountArchives: AccountArchivesFinder(context: context).find()
         case .personalFiles: await PersonalFilesFinder(context: context).find()
         case .cloud: await CloudCopiesFinder(context: context).find()
         case .compression: await CompressionFinder(context: context).find()
@@ -194,7 +195,7 @@ public enum RuleEngine {
                 item.protect(.systemPath)
                 item.sizes = .zero
             }
-            if !item.isIncompleteSafariDownload, item.sizes.allocated > 0, item.sizes.freeable < item.sizes.allocated * 9 / 10 {
+            if !item.isIncompleteSafariDownload, !item.isAccountArchive, item.category != .cloudFiles, item.sizes.allocated > 0, item.sizes.freeable < item.sizes.allocated * 9 / 10 {
                 item.notes.append(.partlyShared)
             }
             // Un élément vide n'apprend rien à personne.
@@ -234,7 +235,7 @@ public enum RuleCatalog {
         "agent.codex_sessions", "agent.codex_workspace", "agent.codex_images", "agent.cache",
         "model.huggingface", "model.lmstudio", "model.ollama", "model.app_models",
         "downloads.installer", "downloads.large", CleanupItem.incompleteSafariDownloadRuleID,
-        CleanupItem.invalidPreferenceRuleID, "trash.contents",
+        CleanupItem.invalidPreferenceRuleID, CleanupItem.accountArchiveRuleID, "trash.contents",
         "ios.backup", "vm.image", "vm.docker",
         "snapshot.time_machine", "browser.cache", "browser.history", "browser.cookies",
         "duplicate.copy", "explorer.item",

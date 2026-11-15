@@ -3520,6 +3520,23 @@
         }
       }
     },
+    "category.accountArchives": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS account archives"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archives de comptes macOS"
+          }
+        }
+      }
+    },
     "category.appCaches": {
       "extractionState": "manual",
       "localizations": {
@@ -4778,23 +4795,6 @@
         }
       }
     },
-    "clouds.evict_instead": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Free without deleting"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Libérer sans supprimer"
-          }
-        }
-      }
-    },
     "clouds.group_detail": {
       "extractionState": "manual",
       "localizations": {
@@ -5012,23 +5012,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rien de votre cloud ne prend de place ici"
-          }
-        }
-      }
-    },
-    "clouds.on_mac_note": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "These files take space here as well as in the cloud. To free this Mac without deleting anything, remove the local copy instead: the file stays online."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ces fichiers prennent de la place ici en plus du cloud. Pour libérer ce Mac sans rien supprimer, retirez plutôt la copie locale : le fichier reste en ligne."
           }
         }
       }
@@ -15437,6 +15420,57 @@
         }
       }
     },
+    "rule.accounts.archive.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep the image if you may need to restore the former account or its files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conservez l’image si vous devez restaurer l’ancien compte ou récupérer ses fichiers."
+          }
+        }
+      }
+    },
+    "rule.accounts.archive.what": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS uses this folder for disk images of deleted accounts. Oust shows the space occupied by this image for information."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS utilise ce dossier pour les images disque des comptes supprimés. Oust indique l’espace occupé par cette image à titre informatif."
+          }
+        }
+      }
+    },
+    "rule.accounts.archive.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS account archive"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Archive de compte macOS"
+          }
+        }
+      }
+    },
     "rule.agent.cache.back": {
       "extractionState": "manual",
       "localizations": {
@@ -17687,13 +17721,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nothing is deleted. Offline, evicted files are out of reach until you reconnect. A file not yet uploaded, or in conflict, is never evicted."
+            "value": "Oust displays these copies for information. Eviction is unavailable."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rien n’est supprimé. Hors connexion, les fichiers évincés sont hors de portée jusqu’au retour du réseau. Un fichier pas encore envoyé, ou en conflit, n’est jamais évincé."
+            "value": "Oust affiche ces copies à titre informatif. L’éviction est indisponible."
           }
         }
       }
@@ -17721,13 +17755,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Files from Google Drive, Dropbox, OneDrive or another cloud drive that are kept downloaded on this Mac. Oust! removes only the local copy: the file stays in the cloud and downloads again when you open it."
+            "value": "Synced files from Google Drive, Dropbox, OneDrive or another cloud drive that take up space on this Mac."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Des fichiers de Google Drive, Dropbox, OneDrive ou d’un autre disque en ligne, gardés téléchargés sur ce Mac. Oust! ne retire que la copie locale : le fichier reste dans le nuage et se retélécharge quand vous l’ouvrez."
+            "value": "Des fichiers synchronisés depuis Google Drive, Dropbox, OneDrive ou un autre disque en ligne qui occupent de la place sur ce Mac."
           }
         }
       }
@@ -17738,13 +17772,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nothing is deleted. Offline, evicted files are out of reach until you reconnect: keep at hand what you need on the road. A file not yet uploaded is never evicted."
+            "value": "Oust displays these copies for information. Eviction is unavailable."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rien n’est supprimé. Hors connexion, les fichiers évincés sont hors de portée jusqu’au retour du réseau : gardez sous la main ce qu’il vous faut en déplacement. Un fichier pas encore envoyé n’est jamais évincé."
+            "value": "Oust affiche ces copies à titre informatif. L’éviction est indisponible."
           }
         }
       }
@@ -17772,13 +17806,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Files already stored in iCloud Drive that also take room on this Mac. Oust! removes only the local copy: the file stays in iCloud, visible in the Finder, and downloads again when you open it."
+            "value": "Files already synced to iCloud Drive that also take up space on this Mac."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Des fichiers déjà rangés dans iCloud Drive qui occupent aussi ce Mac. Oust! ne retire que la copie locale : le fichier reste dans iCloud, visible dans le Finder, et se retélécharge quand vous l’ouvrez."
+            "value": "Des fichiers déjà synchronisés avec iCloud Drive qui occupent aussi de la place sur ce Mac."
           }
         }
       }
@@ -26952,13 +26986,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Evicting deletes nothing: the file stays in the cloud, visible in the Finder, and downloads again when you open it. Only what is already uploaded is evicted."
+            "value": "Oust shows the space these local cloud copies occupy. Eviction is unavailable."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Évincer ne supprime rien : le fichier reste dans le nuage, visible dans le Finder, et se retélécharge quand vous l’ouvrez. Seul ce qui est déjà envoyé est évincé."
+            "value": "Oust indique l’espace occupé par ces copies locales du cloud. L’éviction est indisponible."
           }
         }
       }

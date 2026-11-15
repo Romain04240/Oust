@@ -183,12 +183,13 @@ struct CloudCopiesTests {
             walk = { url, visit in CloudCopiesFinder.largeFiles(under: url, eligible: { _ in true }, visit: visit) }
         }
         let items = finder.candidates(for: provider, walk: walk).map(\.item)
+        #expect(items.allSatisfy { $0.sizes.freeable == 0 })
         #expect(items.count == 2)
         let project = try #require(items.first { $0.title == "Projet" })
-        #expect(project.sizes.freeable == FileFacts.of(root.appendingPathComponent("Projet/Voisin.txt").path)?.allocated)
+        #expect(project.sizes.allocated == FileFacts.of(root.appendingPathComponent("Projet/Voisin.txt").path)?.allocated)
         let loose = try #require(items.first { $0.title == "Dropbox" })
         #expect(loose.paths.map(\.lastPathComponent) == [ordinaryName])
-        #expect(loose.sizes.freeable == FileFacts.of(root.appendingPathComponent("\(ordinaryName)/Fichier.txt").path)?.allocated)
+        #expect(loose.sizes.allocated == FileFacts.of(root.appendingPathComponent("\(ordinaryName)/Fichier.txt").path)?.allocated)
 
         let listed = try #require(CloudLister.list(root).files.first { URL(fileURLWithPath: $0.path).lastPathComponent == protectedName })
         #expect(listed.isPackage && listed.containsSafariDownload && listed.privateSize == 0)
@@ -221,7 +222,7 @@ struct CloudCopiesTests {
             _ = visit(neighbour, 2_000_000, nil)
         }
         let only = try #require(candidates.first?.item)
-        #expect(candidates.count == 1 && only.title == "Projets" && only.sizes.freeable == 2_000_000)
+        #expect(candidates.count == 1 && only.title == "Projets" && only.sizes.allocated == 2_000_000)
     }
 
     @Test("Les copies évinçables sont regroupées par dossier, sous « Mon Drive » un cran plus bas")
@@ -241,8 +242,8 @@ struct CloudCopiesTests {
         let items = candidates.filter { $0.item.sizes.allocated >= $0.minimumAllocated }.map(\.item)
 
         let photos = try #require(items.first { $0.title == "Photos" })
-        #expect(photos.sizes.freeable == 5_000_000)
-        #expect(photos.method == .evictLocalCopy && photos.safety == .review)
+        #expect(photos.sizes.allocated == 5_000_000)
+        #expect(photos.method == .manual && photos.safety == .protected && !photos.isSelectable)
         #expect(photos.paths == [root.appendingPathComponent("Mon Drive/Photos", isDirectory: true)])
         #expect(items.contains { $0.title == "Google Drive" && $0.paths.map(\.lastPathComponent) == ["lâche.txt"] })
     }
@@ -262,7 +263,7 @@ struct CloudCopiesTests {
 
         // Le fichier lui-même, pas le dossier « Mon Drive » (qui contient « Photos »).
         #expect(drive.paths == [root.appendingPathComponent("Mon Drive/rapport.pdf")])
-        #expect(drive.sizes.freeable == 2_000_000)
+        #expect(drive.sizes.allocated == 2_000_000)
     }
 
     @Test("Des chemins reçus sous /System/Volumes/Data sont rangés comme les autres")

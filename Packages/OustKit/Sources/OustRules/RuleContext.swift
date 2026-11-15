@@ -11,6 +11,7 @@ import OustScan
 /// chercheurs n'y voient que du feu (RULES.md, règle 8).
 public struct RuleContext: Sendable {
     public var home: URL
+    var accountArchivesRoot = AccountArchivePath.root
     public var projectRoots: [URL]
     public var processes: ProcessSnapshot
     public var now: Date

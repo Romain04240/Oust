@@ -202,6 +202,12 @@ private struct ExplorerContent: View {
             if let state { content(state) } else { Color.clear }
         }
         .task(id: ObjectIdentifier(root)) {
+            while model.revalidateExplorerGains() {
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
+            }
+        }
+        .task(id: ObjectIdentifier(root)) {
             let state = ExplorerState(root: root, volumeName: volumeName)
             self.state = state
             await state.prepare()
@@ -415,12 +421,12 @@ private struct Toolbar: View {
 
     /// Le contenu du dossier ouvert, en CSV.
     private func export() {
-        guard let csv = state.csv() else { return }
+        guard model.revalidateExplorerGains() else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
         panel.nameFieldStringValue = "Oust - \(state.focus.name).csv"
         if panel.runModal() == .OK, let url = panel.url {
-            try? csv.write(to: url, atomically: true, encoding: .utf8)
+            _ = try? model.exportExplorerCSV(to: url, for: state.root, render: state.csv)
         }
     }
 }

@@ -8,10 +8,7 @@ import OustScan
 /// locales d'iCloud Drive et des File Providers (Google Drive, Dropbox,
 /// OneDrive, Box…).
 ///
-/// Libérer sans supprimer : l'éviction retire la copie locale, le fichier reste
-/// dans le nuage et revient à l'ouverture. « À examiner » quand même : hors
-/// connexion, ce qui a été évincé n'est plus là, et c'est à l'utilisateur de
-/// dire ce qu'il veut garder sous la main.
+/// Inventaire en lecture seule des copies locales synchronisées.
 struct CloudCopiesFinder {
     let context: RuleContext
 
@@ -138,6 +135,9 @@ struct CloudCopiesFinder {
             var latest: Date?
             var loose: [URL] = []
         }
+        let pathGuard = PathGuard(home: context.home, accountArchivesRoot: context.accountArchivesRoot)
+        let archiveLocation = pathGuard.accountArchiveLocation
+        guard !archiveLocation.isUncertain else { return [] }
         var groups: [String: Group] = [:]
         // Un même dossier a deux noms : l'arbre de l'analyse rend
         // `/System/Volumes/Data/Users/…`, le dossier personnel `/Users/…`. Comparés
@@ -152,6 +152,7 @@ struct CloudCopiesFinder {
             guard !relative.isEmpty else { return true }
             // Toujours sous la racine du fournisseur, quel que soit le nom reçu.
             let url = relative.reduce(provider.root) { $0.appendingPathComponent($1) }
+            guard !pathGuard.protectsAccountArchives(url) else { return true }
             let key: String
             // Un fichier posé à la racine, ou directement dans « Mon Drive » : l'élément
             // liste ces fichiers-là, un par un. Désigner le dossier entier ferait évincer
@@ -171,17 +172,19 @@ struct CloudCopiesFinder {
             groups[key] = group
             return true
         }
-        return groups.map { key, group in
+        let candidates: [Candidate] = groups.compactMap { key, group in
             let isLoose = key.isEmpty || Self.containerFolders.contains(key)
             let paths = isLoose ? group.loose : [provider.root.appendingPathComponent(key, isDirectory: true)]
+            guard !paths.contains(where: { pathGuard.protectsAccountArchives($0) }) else { return nil }
             return Candidate(item: CleanupItem(
                 id: "cloud|\(provider.root.path)|\(key)",
                 title: key.isEmpty ? provider.name : (key as NSString).lastPathComponent,
                 detail: paths.count == 1 ? paths[0].abbreviated(home: context.home) : provider.root.abbreviated(home: context.home),
-                paths: paths, category: .cloudFiles, owner: provider.name, ruleID: provider.rule, safety: .review,
-                method: .evictLocalCopy, sizes: Sizes(private: group.bytes), lastActivity: group.latest,
+                paths: paths, category: .cloudFiles, owner: provider.name, ruleID: provider.rule, safety: .protected,
+                method: .manual, sizes: Sizes(allocated: group.bytes, freeable: 0), lastActivity: group.latest,
                 rebuild: .download
             ), needsMeasure: false, minimumAllocated: 1_000_000)
         }
+        return archiveLocation == pathGuard.accountArchiveLocation ? candidates : []
     }
 }
