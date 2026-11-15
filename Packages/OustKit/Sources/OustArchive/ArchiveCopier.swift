@@ -32,6 +32,7 @@ public struct ArchiveCopy: Sendable {
 /// Pourquoi une copie a échoué. Dans tous les cas, l'original n'a pas bougé.
 public enum ArchiveError: Error, Sendable, Hashable {
     case cancelled
+    case trashUnavailable
     /// Un socket, un tube nommé, un périphérique : rien qu'une archive puisse garder.
     case unsupportedFile(path: String)
     /// Un autre volume est monté dans le projet.
@@ -46,6 +47,7 @@ public enum ArchiveError: Error, Sendable, Hashable {
     public var localizationKey: String {
         switch self {
         case .cancelled: "archive.error.cancelled"
+        case .trashUnavailable: "archive.error.trashUnavailable"
         case .unsupportedFile: "archive.error.unsupportedFile"
         case .crossesVolume: "archive.error.crossesVolume"
         case .readFailed: "archive.error.readFailed"
@@ -58,7 +60,7 @@ public enum ArchiveError: Error, Sendable, Hashable {
     /// Le chemin concerné, relatif au projet.
     public var path: String? {
         switch self {
-        case .cancelled: nil
+        case .cancelled, .trashUnavailable: nil
         case .unsupportedFile(let path), .crossesVolume(let path), .readFailed(let path, _), .copyFailed(let path, _),
              .verificationFailed(let path), .sourceChanged(let path): path
         }

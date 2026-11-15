@@ -6,6 +6,52 @@ import OustSafety
 
 @Suite("L'Historique sait qui a nettoyé")
 struct HistoryOriginTests {
+    @Test("La reprise ne crée ni dossier d'historique ni fichier JSONL", arguments: [false, true])
+    func recoveryRequiresExistingHistory(directoryExists: Bool) async throws {
+        let bench = try Bench()
+        let source = try bench.file("maison/Library/Logs/example.log")
+        let original = try Data(contentsOf: source)
+        let fm = FileManager.default
+        if directoryExists {
+            try fm.createDirectory(at: bench.historyFolder, withIntermediateDirectories: true)
+        }
+        let history = HistoryStore(directory: bench.historyFolder)
+        let outcome = CleanupOutcome(sessionID: UUID(), date: Date(), item: bench.item(source),
+                                     result: .skipped(.refusedByGuard), bytes: 0)
+        await #expect(throws: POSIXError.self) { try await history.appendRecoveredUserLog(outcome) }
+        #expect(fm.fileExists(atPath: bench.historyFolder.path) == directoryExists)
+        #expect(!fm.fileExists(atPath: bench.historyFolder.appendingPathComponent("history.jsonl").path))
+        #expect(try Data(contentsOf: source) == original)
+    }
+
+    enum HistoryAlias: CaseIterable {
+        case parent, symbolicFile, hardLinkedFile
+    }
+
+    @Test("L'écriture d'historique refuse un dossier redirigé et les fichiers liés", arguments: HistoryAlias.allCases)
+    func refusesHistoryAliases(_ alias: HistoryAlias) async throws {
+        let bench = try Bench()
+        let target = try bench.file("maison/Library/Logs/history.jsonl", bytes: 128)
+        let original = try Data(contentsOf: target)
+        let fm = FileManager.default
+        let entry = bench.historyFolder.appendingPathComponent("history.jsonl")
+        switch alias {
+        case .parent:
+            try fm.createSymbolicLink(at: bench.historyFolder, withDestinationURL: target.deletingLastPathComponent())
+        case .symbolicFile, .hardLinkedFile:
+            try fm.createDirectory(at: bench.historyFolder, withIntermediateDirectories: true)
+            if alias == .symbolicFile {
+                try fm.createSymbolicLink(at: entry, withDestinationURL: target)
+            } else {
+                try fm.linkItem(at: target, to: entry)
+            }
+        }
+        let history = HistoryStore(directory: bench.historyFolder)
+        let outcome = CleanupOutcome(sessionID: UUID(), date: Date(), item: bench.item(target),
+                                     result: .skipped(.refusedByGuard), bytes: 0)
+        await #expect(throws: POSIXError.self) { try await history.appendRecoveredUserLog(outcome) }
+        #expect(try Data(contentsOf: target) == original)
+    }
 
     /// Une ligne telle que l'app l'écrivait avant que l'origine existe.
     static let lineWithoutOrigin = #"{"bytes":3169165312,"category":"packageCaches","date":"2026-10-18T08:50:08Z","itemID":"cache.npm","method":{"removeNow":{}},"owner":"npm","paths":["/tmp/oust/.npm"],"result":{"removed":{}},"sessionID":"6F1C2B9E-3D4A-4F5B-8C7D-1E2F3A4B5C6D","title":"Cache npm","trashedTo":[]}"#
@@ -65,7 +111,8 @@ struct HistoryOriginTests {
             processes: { ProcessSnapshot(processes: []) },
             capacity: { _ in nil },
             deleteSnapshots: { _ in false },
-            origin: .agent(name: "codex")
+            origin: .agent(name: "codex"),
+            allowsPathBasedRemoval: true
         )
 
         var finished: [CleanupOutcome] = []

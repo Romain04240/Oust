@@ -333,7 +333,7 @@ private struct Detail: View {
                 .lineLimit(1)
         }
         .fixedSize()
-        .disabled(!item.isSelectable)
+        .disabled(!model.canSelectForCleanup(item))
         Button { NSWorkspace.shared.activateFileViewerSelecting(item.paths) } label: {
             Label { Text("row.reveal", bundle: .oust) } icon: { Image(systemName: "folder") }
                 .lineLimit(1)

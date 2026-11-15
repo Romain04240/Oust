@@ -32,6 +32,7 @@ public enum AgentRefusal: String, Sendable, Hashable, Codable, CaseIterable {
     case administrator
     /// Un parcours de l'app, qui ne se délègue pas (archivage vérifié).
     case notForAgents
+    case unavailable
 
     public var localizationKey: String { "agent.refusal.\(rawValue)" }
 }

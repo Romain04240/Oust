@@ -266,36 +266,40 @@ public final class TrashedAppsModel {
             return
         }
         let previous = chosen[id] ?? []
-        let selectable = Set(fresh.items.filter(\.isSelectable).map(\.id))
+        let selectable = Set(fresh.items.filter(canSelectForCleanup).map(\.id))
         if let index = reports.firstIndex(where: { $0.id == id }) { reports[index] = fresh }
         chosen[id] = previous.intersection(selectable)
     }
 
     public func items(of report: TrashedApp) -> [CleanupItem] { report.items }
 
+    public func canSelectForCleanup(_ item: CleanupItem) -> Bool {
+        app?.canSelectForCleanup(item) == true
+    }
+
     public func isChosen(_ item: CleanupItem, in report: TrashedApp) -> Bool {
         chosen[report.id]?.contains(item.id) == true
     }
 
     public func toggle(_ item: CleanupItem, in report: TrashedApp) {
-        guard item.isSelectable else { return }
+        guard canSelectForCleanup(item) else { return }
         var set = chosen[report.id] ?? []
         if set.contains(item.id) { set.remove(item.id) } else { set.insert(item.id) }
         chosen[report.id] = set
     }
 
     public func allChosen(_ report: TrashedApp) -> Bool {
-        let selectable = report.items.filter(\.isSelectable)
+        let selectable = report.items.filter(canSelectForCleanup)
         return !selectable.isEmpty && selectable.allSatisfy { isChosen($0, in: report) }
     }
 
     /// Tout cocher, ou tout décocher si tout l'est déjà.
     public func toggleAll(_ report: TrashedApp) {
-        chosen[report.id] = allChosen(report) ? [] : Set(report.items.filter(\.isSelectable).map(\.id))
+        chosen[report.id] = allChosen(report) ? [] : Set(report.items.filter(canSelectForCleanup).map(\.id))
     }
 
     public func chosenItems(_ report: TrashedApp) -> [CleanupItem] {
-        report.items.filter { $0.isSelectable && isChosen($0, in: report) }
+        report.items.filter { canSelectForCleanup($0) && isChosen($0, in: report) }
     }
 
     public func chosenBytes(_ report: TrashedApp) -> Int64 {

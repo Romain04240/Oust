@@ -115,7 +115,7 @@ private struct AdviceActionCard: View {
         Text(verbatim: url.path).font(Typography.caption).textSelection(.enabled)
         if !current { Text("advice.stale", bundle: .oust).font(Typography.caption) }
         HStack(spacing: Spacing.medium) {
-            if advice.destination == .archive {
+            if model.canMoveFiles && advice.destination == .archive {
                 Button {
                     model.searchText = ""
                     model.archive.dismissReport()
@@ -125,7 +125,7 @@ private struct AdviceActionCard: View {
                 } label: { Text("advice.prepare_archive", bundle: .oust) }
                 .buttonStyle(PrimaryButtonStyle(section: .archive))
                 .disabled(!current || model.archive.running == .running)
-            } else {
+            } else if model.canMoveFiles {
                 Button {
                     model.transfer.present(sources: [url])
                     model.searchText = ""
@@ -147,7 +147,7 @@ private struct AdviceActionCard: View {
             Text("advice.choose_items", bundle: .oust).font(Typography.caption)
             VStack(spacing: 0) {
                 ForEach(Array(items.prefix(showAll ? items.count : 5))) { item in
-                    ItemRow(item, isSelected: model.isInCart(item.id), showOwner: true) { model.toggle(item) }
+                    ItemRow(item, enabled: model.canSelectForCleanup(item), isSelected: model.isInCart(item.id), showOwner: true) { model.toggle(item) }
                         .padding(.vertical, Spacing.small)
                     Divider().opacity(0.2)
                 }

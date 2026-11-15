@@ -179,6 +179,36 @@ struct AgentCleanTests {
         #expect(await bench.history().isEmpty)
     }
 
+    @Test("Une Corbeille indisponible fait refuser un lot mixte avant toute suppression")
+    func unavailableTrashRefusesMixedBatch() async throws {
+        let bench = try AgentBench()
+        try bench.nodeProject("web")
+        try bench.file("maison/Downloads/film.mov", bytes: 200_000, modified: Date().addingTimeInterval(-60 * 86_400))
+        var environment = bench.environment()
+        environment.trasher = FinderTrasher()
+        let service = AgentService(environment: environment)
+        let scan = await service.scan(finders: [.projectArtifacts, .userContent])
+        let removal = try #require(scan.items.first { $0.method.kind == "removeNow" })
+        let trash = try #require(scan.items.first { $0.method.kind == "trash" })
+        #expect(removal.agent.verdict == "allowed")
+        #expect(trash.agent.verdict == "refused")
+        #expect(scan.totals.needsAllowReviewBytes == 0)
+        for dryRun in [true, false] {
+            do {
+                _ = try await service.clean(ids: [removal.id, trash.id], token: scan.token,
+                                            allowReview: true, dryRun: dryRun)
+                Issue.record("Le lot mixte aurait dû être refusé")
+            } catch let error as AgentError {
+                guard case .refused(let refusals) = error else { Issue.record("\(error)"); continue }
+                #expect(refusals.map(\.id) == [trash.id])
+                #expect(refusals.map(\.reason) == ["unavailable"])
+            }
+        }
+        #expect(bench.exists("maison/Developpement/web/node_modules/react/index.js"))
+        #expect(bench.exists("maison/Downloads/film.mov"))
+        #expect(await bench.history().isEmpty)
+    }
+
     @Test("« À examiner » exige allowReview, et part alors dans la corbeille")
     func reviewNeedsFlag() async throws {
         let bench = try AgentBench()
@@ -380,7 +410,7 @@ struct AgentPolicyTests {
         #expect(AgentPolicy.verdict(for: item(.review, method: .archive(copy: "/Volumes/x"))) == .refused(.notForAgents))
         #expect(AgentPolicy.verdict(for: item(.review, method: .photoAsset(localIdentifier: "ABC/L0/001")))
                 == .refused(.notForAgents))
-        #expect(ItemReport(item(.safe, method: .localSnapshot(date: "d")), preselected: false).method.requiresAdministrator)
+        #expect(MethodReport(.localSnapshot(date: "d")).requiresAdministrator)
         #expect(AgentPolicy.verdict(for: item(.rebuilds, method: .gitWorktreeRemove(repository: "/r"))) == .allowed)
     }
 

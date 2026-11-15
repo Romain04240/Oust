@@ -49,10 +49,10 @@ private struct ResultGroup: View {
     var body: some View {
         ItemGroup(title: L10n.string(section.localizationKey), symbol: section.symbol,
                   tint: Palette.colors(for: section).glow,
-                  total: items.filter(\.isSelectable).reduce(0) { $0 + $1.sizes.freeable }) {
+                  total: items.filter(model.canSelectForCleanup).reduce(0) { $0 + $1.sizes.freeable }) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(showAll ? items : Array(items.prefix(20))) { item in
-                    ItemRow(item, isSelected: model.isInCart(item.id), showOwner: true) { model.toggle(item) }
+                    ItemRow(item, enabled: model.canSelectForCleanup(item), isSelected: model.isInCart(item.id), showOwner: true) { model.toggle(item) }
                     Divider().opacity(0.25)
                 }
                 if items.count > 20 {

@@ -26,7 +26,7 @@ public struct TimeMachineView: View {
                           totalLabel: model.snapshotRetainedBytes.map(Formatters.bytes) ?? L10n.string("snapshot.size_unknown")) {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(snapshots) { item in
-                            ItemRow(item, isSelected: model.isInCart(item.id)) { model.toggle(item) }
+                            ItemRow(item, enabled: model.canSelectForCleanup(item), isSelected: model.isInCart(item.id)) { model.toggle(item) }
                                 .disabled(model.snapshotReadFailed || model.cleaning == .running)
                             Divider().opacity(0.25)
                         }

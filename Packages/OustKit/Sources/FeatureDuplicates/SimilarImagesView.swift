@@ -25,7 +25,7 @@ struct DuplicatesTabs: View {
 
     private var identicalSummary: String {
         guard model.duplicates.hasRun else { return L10n.string("duplicates.tab.on_demand") }
-        return summary(model.duplicateGroups.count, model.duplicateGroups.reduce(Int64(0)) { $0 + $1.potential })
+        return summary(model.duplicateGroups.count, model.reclaimableDuplicateBytes)
     }
 
     private var similarSummary: String {
@@ -250,9 +250,10 @@ private struct SimilarResults: View {
 
     var body: some View {
         let groups = similar.groups
-        if similar.potential > 0 {
+        let reclaimable = similar.potential
+        if reclaimable > 0 {
             HStack(alignment: .bottom) {
-                HeroSize(similar.potential, caption: "similar.total_caption")
+                HeroSize(reclaimable, caption: "similar.total_caption")
                 Spacer()
             }
         }
@@ -354,13 +355,13 @@ private struct SimilarGroupCard: View {
                     .truncationMode(.middle)
                 Spacer()
                 Text(verbatim: L10n.string("similar.group_detail", Formatters.count(group.images.count),
-                                           Formatters.compactBytes(group.potential)))
+                                           Formatters.compactBytes(similar.reclaimableBytes(in: group))))
                     .font(Typography.caption).foregroundStyle(.secondary).monospacedDigit()
                 // Un geste de l'utilisateur, groupe par groupe : jamais fait d'office.
-                Button(action: keepBest) { Text("similar.keep_best", bundle: .oust).font(Typography.caption) }
+                Button { similar.keepBest(in: group) } label: { Text("similar.keep_best", bundle: .oust).font(Typography.caption) }
                     .buttonStyle(.borderless)
-                    .help(Text("similar.keep_best_help", bundle: .oust))
-                    .disabled(group.images.dropFirst().allSatisfy { similar.isInCart($0, paths: paths) })
+                    .help(Text(model.canMoveFiles ? "similar.keep_best_help" : "agent.refusal.unavailable", bundle: .oust))
+                    .disabled(!similar.canKeepBest(in: group, paths: paths))
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: Spacing.medium, alignment: .top)],
                       alignment: .leading, spacing: Spacing.medium) {
@@ -375,14 +376,6 @@ private struct SimilarGroupCard: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
     }
 
-    /// Garder l'étoile, cocher les autres ; une image à l'étoile déjà cochée est décochée.
-    private func keepBest() {
-        guard let best = group.best else { return }
-        if similar.isInCart(best) { similar.toggle(best, in: group) }
-        for image in group.images.dropFirst() where !similar.isInCart(image) {
-            similar.toggle(image, in: group)
-        }
-    }
 }
 
 /// Une image d'un groupe : la voir avant de choisir.
@@ -399,6 +392,7 @@ private struct SimilarTile: View {
 
     var body: some View {
         let inCart = similar.isInCart(image, paths: paths)
+        let item = similar.item(for: image, in: group)
         let enabled = similar.canToggle(image, in: group, paths: paths)
         let isBest = group.best == image
         VStack(alignment: .leading, spacing: Spacing.tight) {
@@ -427,7 +421,8 @@ private struct SimilarTile: View {
                 .padding(Spacing.tight)
                 .background(.black.opacity(0.35), in: Circle())
                 .padding(Spacing.tight)
-                .help(Text(inCart ? "row.remove_from_cart" : (enabled ? "row.add_to_cart" : "similar.last_kept"), bundle: .oust))
+                .help(Text(inCart ? "row.remove_from_cart" : (enabled ? "row.add_to_cart"
+                    : (model.canMoveFiles ? "similar.last_kept" : "agent.refusal.unavailable")), bundle: .oust))
                 .accessibilityLabel(Text(inCart ? "row.remove_from_cart" : "row.add_to_cart", bundle: .oust))
             }
             .overlay(alignment: .topTrailing) {
@@ -454,7 +449,7 @@ private struct SimilarTile: View {
                     Image(systemName: "info.circle").foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .popover(isPresented: $explaining, arrowEdge: .trailing) { Explanation(item: group.cleanupItem(for: image)) }
+                .popover(isPresented: $explaining, arrowEdge: .trailing) { Explanation(item: item) }
                 .accessibilityLabel(Text("row.why", bundle: .oust))
             }
             HStack(spacing: Spacing.tight) {
@@ -462,7 +457,7 @@ private struct SimilarTile: View {
                                            Formatters.count(image.pixelHeight)))
                     .font(Typography.caption).foregroundStyle(.secondary).monospacedDigit()
                 Spacer(minLength: 0)
-                Text(verbatim: Formatters.compactBytes(image.privateSize)).font(Typography.size)
+                Text(verbatim: Formatters.compactBytes(item.sizes.freeable)).font(Typography.size)
             }
             Text(verbatim: (image.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
                 .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)

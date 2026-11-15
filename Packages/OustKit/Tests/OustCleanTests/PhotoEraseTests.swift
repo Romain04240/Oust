@@ -49,7 +49,8 @@ struct PhotoEraseTests {
                       history: HistoryStore(directory: folder.appendingPathComponent("_historique")),
                       pathGuard: PathGuard(home: folder.appendingPathComponent("maison")),
                       processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil },
-                      deleteSnapshots: { _ in false }, runningApps: { [] }, photos: eraser)
+                      deleteSnapshots: { _ in false }, runningApps: { [] }, photos: eraser,
+                      allowsPathBasedRemoval: true)
     }
 
     func photo(_ id: String, bytes: Int64 = 1_000_000, editedAt: Date? = nil) -> CleanupItem {

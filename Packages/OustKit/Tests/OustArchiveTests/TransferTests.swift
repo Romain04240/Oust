@@ -9,7 +9,8 @@ import Testing
 
 private func transferEngine(
   _ desk: Desk, copier: ArchiveCopier = ArchiveCopier(),
-  external: Bool = true, sameVolume: Bool = false, readOnly: Bool = false
+  external: Bool = true, sameVolume: Bool = false, readOnly: Bool = false,
+  engine: CleanupEngine? = nil
 ) -> VerifiedTransfer {
   let folder = desk.external
   let destination = ArchiveDestination(
@@ -17,7 +18,7 @@ private func transferEngine(
     available: 1 << 40, isReadOnly: readOnly, isLocal: true,
     device: sameVolume ? ArchivePlan.device(of: folder)! : -1)
   return VerifiedTransfer(
-    engine: desk.engine(), copier: copier, pathGuard: PathGuard(home: desk.home),
+    engine: engine ?? desk.engine(), copier: copier, pathGuard: PathGuard(home: desk.home),
     processes: { ProcessSnapshot(processes: []) }, inspect: { _ in (destination, external) })
 }
 
@@ -33,6 +34,24 @@ private func transferOutcomes(
 
 @Suite("Déplacement vérifié de fichiers et dossiers choisis")
 struct TransferTests {
+  @Test("Le déplacement refuse avant la copie, même avec un plan déjà préparé")
+  func unavailableTrashPreventsTransferCopy() async throws {
+    let desk = try Desk()
+    let source = try desk.file("source.txt", bytes: 100)
+    let original = try Data(contentsOf: source)
+    let ready = try await transferEngine(desk).prepare(sources: [source], folder: desk.external)
+    let unavailable = transferEngine(desk, engine: CleanupEngine(history: nil, pathGuard: PathGuard(home: desk.home)))
+    await #expect(throws: TransferError.trashUnavailable) {
+      try await unavailable.prepare(sources: [source], folder: desk.external)
+    }
+    let progress = ArchiveProgress()
+    let outcomes = await transferOutcomes(unavailable, ready, progress: progress)
+    let outcome = try #require(outcomes.first)
+    #expect(outcome.error == .trashUnavailable && outcome.copy == nil && outcome.partial == nil)
+    #expect(progress.copiedBytes == 0)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: desk.external.path).isEmpty)
+    #expect(try Data(contentsOf: source) == original)
+  }
   @Test("Un fichier et un dossier sont vérifiés puis mis à la corbeille par OustClean")
   func fileAndFolder() async throws {
     let desk = try Desk()

@@ -14,6 +14,7 @@ public enum FinderKind: String, Sendable, CaseIterable {
     case packageCaches, xcode, simulators, agents, models, userContent, projectArtifacts
     case toolVersions, toolCleanups, appCaches, personalFiles, cloud, compression
     case creative, games, appData, pro
+    case userLogs
     /// Sur un autre disque seulement (`RuleContext.volume`) : rien ailleurs.
     case volumeInstallers, volumeTrash, volumeTraces, volumeKept
 }
@@ -109,6 +110,7 @@ public enum RuleEngine {
         case .toolVersions: await ToolVersionsFinder(context: context).find()
         case .toolCleanups: await ToolCleanupsFinder(context: context).find()
         case .appCaches: await AppCachesFinder(context: context).find()
+        case .userLogs: UserLogsFinder(context: context).find()
         case .personalFiles: await PersonalFilesFinder(context: context).find()
         case .cloud: await CloudCopiesFinder(context: context).find()
         case .compression: await CompressionFinder(context: context).find()
@@ -144,7 +146,7 @@ public enum RuleEngine {
                 if item.lastActivity == nil { item.lastActivity = latest }
                 if inaccessible && sizes.allocated == 0 { item.protect(.needsFullDiskAccess) }
             }
-            if let first = item.paths.first {
+            if item.fingerprint == nil, let first = item.paths.first {
                 let values = try? first.resourceValues(forKeys: [.contentModificationDateKey, .fileResourceIdentifierKey])
                 item.fingerprint = Fingerprint(modificationDate: values?.contentModificationDate,
                                                fileID: Self.inode(of: first))
@@ -195,7 +197,7 @@ public enum RuleCatalog {
         "version.xcode", "version.macos_installer", "version.nvm", "version.pyenv", "version.jdk_gradle",
         "version.jdk_system", "version.ndk", "version.rustup", "tool.brew_cleanup",
         "container.build_cache", "container.images", "container.stopped",
-        "cache.app", "attachments.mail", "attachments.messages", "ios.update", "screenshots.desktop",
+        "cache.app", "logs.user", "attachments.mail", "attachments.messages", "ios.update", "screenshots.desktop",
         "creative.library.render", "creative.library.transcoded", "creative.resolve.cache",
         "creative.resolve.proxy", "creative.resolve.gallery", "creative.insta360.cache", "creative.insta360.proxy",
         "creative.blender.cache", "creative.blender.temp", "creative.sound_library",

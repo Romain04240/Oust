@@ -79,15 +79,15 @@ public struct CategoryList: View {
                 symbol: category.symbol,
                 tint: Palette.color(for: category),
                 // Le total de ce qui est affiché : filtré, la liste et son chiffre vont ensemble.
-                total: items.filter(\.isSelectable).reduce(0) { $0 + $1.sizes.freeable },
+                total: items.filter(model.canSelectForCleanup).reduce(0) { $0 + $1.sizes.freeable },
                 selectAll: {
-                    model.add(items.filter { $0.safety <= .rebuilds && $0.isSelectable })
+                    model.add(items.filter { $0.safety <= .rebuilds && model.canSelectForCleanup($0) })
                 }
             ) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     note
                     ForEach(showAll ? items : Array(items.prefix(10))) { item in
-                        ItemRow(item, isSelected: model.isInCart(item.id), showOwner: true) { model.toggle(item) }
+                        ItemRow(item, enabled: model.canSelectForCleanup(item), isSelected: model.isInCart(item.id), showOwner: true) { model.toggle(item) }
                         Divider().opacity(0.25)
                     }
                     if items.count > 10 {

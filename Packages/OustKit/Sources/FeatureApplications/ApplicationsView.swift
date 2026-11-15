@@ -361,7 +361,7 @@ private struct Items: View {
 
     var body: some View {
         let items = applications.items
-        let selectable = items.filter(\.isSelectable)
+        let selectable = items.filter(applications.canSelectForCleanup)
         let checked = selectable.filter { applications.chosen.contains($0.id) }.count
         ItemGroup(title: L10n.string("applications.leftovers_title"), symbol: "shippingbox", tint: Palette.color(for: .applications),
                   total: applications.leftoverBytes) {
@@ -377,7 +377,7 @@ private struct Items: View {
                     Divider().opacity(0.4)
                 }
                 ForEach(items) { item in
-                    ItemRow(item, isSelected: applications.chosen.contains(item.id)) { applications.toggle(item) }
+                    ItemRow(item, enabled: applications.canSelectForCleanup(item), isSelected: applications.chosen.contains(item.id)) { applications.toggle(item) }
                     Divider().opacity(0.25)
                 }
                 if applications.leftoversLoading {
@@ -512,7 +512,7 @@ private struct OrphanGroupCard: View {
 
     var body: some View {
         let items = model.applications.items(of: group)
-        let selectable = items.filter(\.isSelectable)
+        let selectable = items.filter(model.canSelectForCleanup)
         let allIn = !selectable.isEmpty && selectable.allSatisfy { model.isInCart($0.id) }
         ItemGroup(title: group.title, symbol: ItemCategory.appLeftovers.symbol, tint: Palette.color(for: .appLeftovers),
                   total: group.freeable, selectAllTitle: allIn ? "group.deselect_all" : "group.select_all",
@@ -534,7 +534,7 @@ private struct OrphanGroupCard: View {
                     .padding(.vertical, Spacing.tight)
                 }
                 ForEach(items) { item in
-                    ItemRow(item, isSelected: model.isInCart(item.id)) { model.toggle(item) }
+                    ItemRow(item, enabled: model.canSelectForCleanup(item), isSelected: model.isInCart(item.id)) { model.toggle(item) }
                     Divider().opacity(0.25)
                 }
             }

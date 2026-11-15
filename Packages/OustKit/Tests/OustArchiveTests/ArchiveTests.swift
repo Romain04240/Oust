@@ -113,6 +113,20 @@ final class Desk {
 
 @Suite("L'archivage copie, vérifie, et seulement ensuite jette l'original")
 struct ArchiveTests {
+    @Test("L'archivage refuse avant de créer une copie quand la Corbeille est indisponible")
+    func unavailableTrashPreventsArchiveCopy() async throws {
+        let desk = try Desk()
+        let src = try desk.sampleProject("projet")
+        let engine = CleanupEngine(history: nil, pathGuard: PathGuard(home: desk.home))
+        let progress = ArchiveProgress()
+        let outcomes = await desk.run(ProjectArchiver(engine: engine, history: nil), [desk.candidate(src)],
+                                      progress: progress)
+        let outcome = try #require(outcomes.first)
+        #expect(outcome.error == .trashUnavailable && outcome.copy == nil)
+        #expect(progress.copiedBytes == 0)
+        #expect(FileManager.default.fileExists(atPath: src.path))
+        #expect(!FileManager.default.fileExists(atPath: desk.external.appendingPathComponent("Archives Oust").path))
+    }
 
     @Test("Copié à l'identique, vérifié, puis l'original à la corbeille du Mac et au journal")
     func archiveEndToEnd() async throws {

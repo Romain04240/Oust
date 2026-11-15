@@ -238,13 +238,13 @@ private struct FileRow: View {
         let inCart = model.isInCart(item.id)
         HStack(spacing: Spacing.medium) {
             Button { model.toggle(item) } label: {
-                Image(systemName: !item.isSelectable ? "lock.circle" : (inCart ? "checkmark.circle.fill" : "circle"))
+                Image(systemName: !model.canSelectForCleanup(item) ? "lock.circle" : (inCart ? "checkmark.circle.fill" : "circle"))
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(inCart ? Palette.color(for: .largeFiles) : .secondary)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
-            .disabled(!item.isSelectable)
+            .disabled(!model.canSelectForCleanup(item))
             .accessibilityLabel(Text(inCart ? "row.remove_from_cart" : "row.add_to_cart", bundle: .oust))
             .help(Text(verbatim: item.protections.first.map(Describe.protection) ?? L10n.string("row.add_to_cart")))
 
@@ -293,11 +293,11 @@ private struct FileRow: View {
             } label: {
                 Label { Text("advice.prepare_transfer", bundle: .oust) } icon: { Image(systemName: "externaldrive") }
             }
-            .disabled(!item.isSelectable || model.transfer.isRunning)
+            .disabled(!model.canSelectForCleanup(item) || model.transfer.isRunning)
             Button { model.toggle(item) } label: {
                 Label { Text(inCart ? "row.remove_from_cart" : "row.add_to_cart", bundle: .oust) } icon: { Image(systemName: "trash") }
             }
-            .disabled(!item.isSelectable)
+            .disabled(!model.canSelectForCleanup(item))
         }
     }
 }

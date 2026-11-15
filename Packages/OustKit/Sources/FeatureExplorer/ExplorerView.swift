@@ -729,12 +729,12 @@ struct BinButton: View {
 
     var body: some View {
         Button { model.toggle(item) } label: {
-            Image(systemName: !item.isSelectable ? "lock" : (model.isInCart(item.id) ? "trash.fill" : "trash"))
-                .foregroundStyle(item.isSelectable ? Palette.colors(for: .explorer).glow : .secondary)
+            Image(systemName: !model.canSelectForCleanup(item) ? "lock" : (model.isInCart(item.id) ? "trash.fill" : "trash"))
+                .foregroundStyle(model.canSelectForCleanup(item) ? Palette.colors(for: .explorer).glow : .secondary)
         }
         .buttonStyle(.plain)
-        .disabled(!item.isSelectable)
-        .help(Text(item.isSelectable ? (model.isInCart(item.id) ? "row.remove_from_cart" : "row.add_to_cart") : "explorer.protected_help",
+        .disabled(!model.canSelectForCleanup(item))
+        .help(Text(model.canSelectForCleanup(item) ? (model.isInCart(item.id) ? "row.remove_from_cart" : "row.add_to_cart") : "explorer.protected_help",
                    bundle: .oust))
     }
 }
@@ -756,7 +756,7 @@ struct CommonMenu: View {
         } label: {
             Label { Text("advice.prepare_transfer", bundle: .oust) } icon: { Image(systemName: "externaldrive") }
         }
-        .disabled(!item.isSelectable || model.transfer.isRunning)
+        .disabled(!model.canSelectForCleanup(item) || model.transfer.isRunning)
         Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(path, forType: .string)
@@ -768,7 +768,7 @@ struct CommonMenu: View {
             Label { Text(model.isInCart(item.id) ? "row.remove_from_cart" : "row.add_to_cart", bundle: .oust) }
                 icon: { Image(systemName: model.isInCart(item.id) ? "trash.slash" : "trash") }
         }
-        .disabled(!item.isSelectable)
+        .disabled(!model.canSelectForCleanup(item))
     }
 }
 

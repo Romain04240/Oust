@@ -36,7 +36,7 @@ public struct ItemReport: Codable, Sendable, Hashable {
     /// Ce qu'un agent a le droit d'en faire.
     public var agent: VerdictReport
 
-    init(_ item: CleanupItem, preselected: Bool) {
+    init(_ item: CleanupItem, preselected: Bool, verdict: AgentVerdict) {
         id = item.id
         title = item.title
         detail = item.detail
@@ -56,7 +56,7 @@ public struct ItemReport: Codable, Sendable, Hashable {
                                               label: Describe.note($0)) }
         lastActivity = item.lastActivity
         self.preselected = preselected
-        agent = VerdictReport(AgentPolicy.verdict(for: item))
+        agent = VerdictReport(verdict)
     }
 }
 

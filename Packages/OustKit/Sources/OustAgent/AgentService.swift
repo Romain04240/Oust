@@ -63,7 +63,9 @@ public struct AgentService: Sendable {
         let items = await collect(finders: finders, paths: paths)
         let policy = PreselectionPolicy(recencyDays: environment.recencyDays)
         let shownItems = limit.map { Array(items.prefix(max(0, $0))) } ?? items
-        let shown = shownItems.map { ItemReport($0, preselected: policy.preselects($0, now: now)) }
+        let shown = shownItems.map {
+            ItemReport($0, preselected: supports($0.method) && policy.preselects($0, now: now), verdict: verdict(for: $0))
+        }
 
         func bytes(_ include: (CleanupItem) -> Bool) -> Int64 {
             items.filter(include).reduce(0) { $0 + $1.sizes.freeable }
@@ -71,9 +73,9 @@ public struct AgentService: Sendable {
         let totals = ScanTotals(
             items: items.count,
             shown: shown.count,
-            freeableBytes: bytes { $0.isSelectable && $0.countsInHeadline },
-            allowedBytes: bytes { AgentPolicy.verdict(for: $0) == .allowed },
-            needsAllowReviewBytes: bytes { AgentPolicy.verdict(for: $0) == .needsReviewFlag }
+            freeableBytes: bytes { $0.isSelectable && $0.countsInHeadline && supports($0.method) },
+            allowedBytes: bytes { verdict(for: $0) == .allowed },
+            needsAllowReviewBytes: bytes { verdict(for: $0) == .needsReviewFlag }
         )
         var report = ScanReport(
             generatedAt: now,
@@ -226,7 +228,7 @@ public struct AgentService: Sendable {
         guard changed.isEmpty else { throw AgentError.changedSincePreview(changed) }
 
         if dryRun {
-            let outcomes = items.map { OutcomeReport(wouldClean: ItemReport($0, preselected: false)) }
+            let outcomes = items.map { OutcomeReport(wouldClean: ItemReport($0, preselected: false, verdict: verdict(for: $0))) }
                 + vanished.map(OutcomeReport.init(vanished:))
             let now = items.filter(\.method.freesImmediately).reduce(0) { $0 + $1.sizes.freeable }
             let later = items.filter { !$0.method.freesImmediately }.reduce(0) { $0 + $1.sizes.freeable }
@@ -258,7 +260,8 @@ public struct AgentService: Sendable {
             // juste après, et le chiffre rendu doit déjà être vrai.
             transit: nil,
             // L'Historique de l'app distingue ce qu'un agent a nettoyé.
-            origin: .agent(name: environment.agentName())
+            origin: .agent(name: environment.agentName()),
+            allowsPathBasedRemoval: environment.allowsPathBasedRemoval
         )
         // L'annulation (`notifications/cancelled` en MCP) arrête le nettoyage
         // entre deux éléments ; le flux, lui, va jusqu'au bilan. D'où une tâche
@@ -292,7 +295,7 @@ public struct AgentService: Sendable {
 
     /// Pourquoi l'agent ne peut pas nettoyer cet élément, ou `nil`.
     func refusal(of item: CleanupItem, allowReview: Bool) -> AgentError.Refusal? {
-        let verdict = AgentPolicy.verdict(for: item)
+        let verdict = verdict(for: item)
         switch verdict {
         case .allowed:
             return nil
@@ -307,6 +310,17 @@ public struct AgentService: Sendable {
                 ? reasons.joined(separator: ", ") : L10n.string(refusal.localizationKey)
             return AgentError.Refusal(id: item.id, reason: refusal.rawValue, label: label)
         }
+    }
+
+    private func supports(_ method: CleanupMethod) -> Bool {
+        CleanupEngine.supports(method, trasher: environment.trasher,
+                               allowsPathBasedRemoval: environment.allowsPathBasedRemoval)
+    }
+
+    private func verdict(for item: CleanupItem) -> AgentVerdict {
+        let verdict = AgentPolicy.verdict(for: item)
+        if case .refused = verdict { return verdict }
+        return supports(item.method) ? verdict : .refused(.unavailable)
     }
 
     static func totals(_ outcomes: [OutcomeReport], freedNow: Int64, pendingInTrash: Int64, measured: Int64?,

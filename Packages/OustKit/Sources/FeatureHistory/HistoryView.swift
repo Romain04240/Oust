@@ -103,7 +103,6 @@ private struct AgentBadge: View {
 private struct EntryRow: View {
     let model: AppModel
     let entry: CleanupOutcome
-    @State private var failedRestore = false
 
     var body: some View {
         HStack(spacing: Spacing.medium) {
@@ -128,11 +127,6 @@ private struct EntryRow: View {
             Text(verbatim: Formatters.compactBytes(entry.bytes)).font(Typography.size)
             if model.restoredIDs.contains(entry.id) {
                 Tag(L10n.string("history.restored"), symbol: "arrow.uturn.backward", tint: Palette.vivid(for: .safe))
-            } else if model.canRestore(entry) {
-                Button {
-                    Task { failedRestore = !(await model.restore(entry)) }
-                } label: { Text("history.restore", bundle: .oust) }
-                    .buttonStyle(.bordered)
             }
         }
         .contextMenu {
@@ -146,9 +140,6 @@ private struct EntryRow: View {
                     Label { Text("history.reveal_trash", bundle: .oust) } icon: { Image(systemName: "trash.square") }
                 }
             }
-        }
-        .alert(Text("history.restore_failed", bundle: .oust), isPresented: $failedRestore) {
-            Button(role: .cancel) {} label: { Text("common.ok", bundle: .oust) }
         }
     }
 

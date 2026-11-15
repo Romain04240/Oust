@@ -59,6 +59,7 @@ public struct DuplicatesView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .toggleStyle(.switch)
+                .disabled(model.duplicatesAsClones ? !model.canMoveFiles : !model.canCloneDuplicates)
                 Divider().overlay(Color.white.opacity(0.2))
                 // Rien n'est coché sans cette case (RULES.md, règle 4) ;
                 // cochée, Oust! garde un exemplaire par groupe et coche le reste.
@@ -73,6 +74,7 @@ public struct DuplicatesView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .toggleStyle(.switch)
+                .disabled(!model.canCleanDuplicates)
             }
         }
         // Les groupes d'un autre disque que celui choisi ne se montrent pas :
@@ -92,15 +94,15 @@ public struct DuplicatesView: View {
                 }
             }
         case .done:
-            let reclaimable = model.duplicateGroups.reduce(Int64(0)) { $0 + $1.potential }
+            let suggestions = model.availableDuplicateSuggestions
             HStack(alignment: .bottom) {
-                HeroSize(reclaimable, caption: "duplicates.total_caption")
+                HeroSize(model.reclaimableDuplicateBytes, caption: "duplicates.total_caption")
                 Spacer()
                 Button {
-                    model.add(model.duplicateGroups.flatMap { $0.cleanupItems(asClones: model.duplicatesAsClones) })
+                    model.add(suggestions)
                 } label: { Text("duplicates.add_suggested", bundle: .oust) }
                     .buttonStyle(PrimaryButtonStyle(section: .duplicates))
-                    .disabled(model.duplicateGroups.allSatisfy { $0.proposed.isEmpty })
+                    .disabled(suggestions.isEmpty)
             }
             if model.duplicateGroups.isEmpty {
                 EmptyState(symbol: "checkmark.seal", title: "duplicates.none_title", message: "duplicates.none_detail")
@@ -199,11 +201,13 @@ private struct CopyRow: View {
                 Image(systemName: "star.fill").foregroundStyle(Color(hex: 0xFFC233)).frame(width: 20)
                     .help(Text("duplicates.kept", bundle: .oust))
             } else if let item = model.duplicateItem(group: group, file: index) {
+                let selectable = model.canSelectForCleanup(item)
                 Button { model.toggle(item) } label: {
-                    Image(systemName: model.isInCart(item.id) ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: !selectable ? "lock.circle" : (model.isInCart(item.id) ? "checkmark.circle.fill" : "circle"))
                         .foregroundStyle(model.isInCart(item.id) ? Palette.color(for: .duplicates) : .secondary)
                 }
                 .buttonStyle(.plain)
+                .disabled(!selectable)
                 .frame(width: 20)
             } else {
                 Color.clear.frame(width: 20)

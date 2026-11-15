@@ -44,7 +44,8 @@ struct TransitTests {
             processes: { ProcessSnapshot(processes: []) },
             capacity: { _ in nil },
             deleteSnapshots: { _ in false },
-            transit: transit
+            transit: transit,
+            allowsPathBasedRemoval: true
         )
     }
 

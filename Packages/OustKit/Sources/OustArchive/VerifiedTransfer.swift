@@ -7,7 +7,7 @@ import OustSafety
 public enum TransferError: Error, Sendable, Equatable {
   case noSources, invalidSource, overlappingSources, invalidDestination, externalRequired,
     destinationChanged
-  case sourceChanged, protectedSource
+  case sourceChanged, protectedSource, trashUnavailable
   case git(ArchiveBlocker)
   case destinationRefused(DestinationRefusal)
   case copy(ArchiveError)
@@ -23,6 +23,7 @@ public enum TransferError: Error, Sendable, Equatable {
     case .destinationChanged: "transfer.error.destinationChanged"
     case .sourceChanged: "archive.error.sourceChanged"
     case .protectedSource: "transfer.error.protectedSource"
+    case .trashUnavailable: "archive.error.trashUnavailable"
     case .git(let blocker): blocker.localizationKey
     case .destinationRefused(let error): error.localizationKey
     case .copy(let error): error.localizationKey
@@ -133,6 +134,7 @@ public struct VerifiedTransfer: Sendable {
   /// Bloquant, sur le thread dédié de l'archivage ; aucune erreur de parcours
   /// n'est transformée en taille zéro ni en autorisation implicite.
   public func prepare(sources urls: [URL], folder: URL) async throws -> TransferPlan {
+    guard engine.supports(.trash) else { throw TransferError.trashUnavailable }
     let result = await ProjectArchiver.onDedicatedThread {
       () -> Result<TransferPlan, TransferError> in
       do { return .success(try prepareNow(sources: urls, folder: folder)) } catch let error
@@ -368,6 +370,7 @@ public struct VerifiedTransfer: Sendable {
     var copies: [ArchiveCopy] = []
     let cancelled = { progress.isCancelled || cancellation.isCancelled || Task.isCancelled }
     do {
+      guard engine.supports(.trash) else { throw TransferError.trashUnavailable }
       try validateDestination(plan)
       for source in plan.sources {
         if cancelled() { throw TransferError.cancelled }

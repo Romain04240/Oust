@@ -37,7 +37,8 @@ final class Bench {
             pathGuard: PathGuard(home: root.appendingPathComponent("maison")),
             processes: { snapshot },
             capacity: { _ in nil },
-            deleteSnapshots: { _ in false }
+            deleteSnapshots: { _ in false },
+            allowsPathBasedRemoval: true
         )
     }
 
@@ -66,6 +67,65 @@ final class Bench {
 
 @Suite("Le nettoyage fait ce qu'il dit, et rien d'autre")
 struct CleanupTests {
+    private actor RefusedTrasher: Trasher {
+        nonisolated let isAvailable = false
+        private(set) var calls = 0
+
+        func trash(_ urls: [URL]) async -> [Result<URL, TrashError>] {
+            calls += 1
+            return urls.map { _ in .failure(TrashError("Corbeille fictive appelée")) }
+        }
+    }
+
+    @Test("Les actions génériques refusent la Corbeille avant d'appeler le système")
+    func genericTrashUnavailable() async throws {
+        let bench = try Bench()
+        let source = try bench.file("dossier/fichier.txt")
+        let trasher = RefusedTrasher()
+        #expect(!FinderTrasher().isAvailable)
+        #expect(!FileManagerTrasher().isAvailable)
+        let engine = CleanupEngine(trasher: trasher, history: nil, pathGuard: PathGuard(home: bench.root),
+                                   processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil })
+        let methods: [CleanupMethod] = [.trash, .archive(copy: bench.root.appendingPathComponent("copie").path),
+                                        .trashFromCloud, .cloneOf(original: source.path), .compressInPlace]
+        for method in methods {
+            let item = CleanupItem(title: source.lastPathComponent, paths: [source], category: .explorer,
+                                   owner: "", ruleID: "explorer.item", safety: .review, method: method,
+                                   rebuild: .irreversible)
+            var report: CleanupReport?
+            for await event in engine.run([item]) {
+                if case .finished(let result) = event { report = result }
+            }
+            #expect(report?.outcomes.map(\.result) == [.skipped(.refusedByGuard)])
+            #expect(report?.outcomes.first?.trashedTo.isEmpty == true)
+        }
+        #expect(await trasher.calls == 0)
+        #expect(try Data(contentsOf: source) == Data(repeating: 1, count: 10_000))
+    }
+
+    @Test("La suppression directe et le transit sont refusés, même pour un journal déjà dans la Corbeille",
+          arguments: [false, true])
+    func permanentRemovalUnavailable(withTransit: Bool) async throws {
+        let bench = try Bench()
+        let home = bench.root.appendingPathComponent("maison")
+        let journal = try bench.file("maison/.Trash/recovered.log", byte: 7)
+        let ordinary = try bench.file("maison/Caches/fichier.txt", byte: 9)
+        let transitFolder = bench.root.appendingPathComponent("_transit")
+        let engine = CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: nil,
+                                   pathGuard: PathGuard(home: home), processes: { ProcessSnapshot(processes: []) },
+                                   capacity: { _ in nil }, transit: withTransit ? Transit(directory: transitFolder) : nil)
+        let trashItem = CleanupItem(title: "Corbeille", paths: [journal], category: .trash,
+                                    owner: "", ruleID: "trash.contents", safety: .review,
+                                    method: .removeNow, rebuild: .irreversible)
+        var outcomes: [CleanupOutcome] = []
+        for await event in engine.run([trashItem, bench.item(ordinary)]) {
+            if case .itemFinished(let outcome) = event { outcomes.append(outcome) }
+        }
+        #expect(outcomes.map(\.result) == [.skipped(.refusedByGuard), .skipped(.refusedByGuard)])
+        #expect(try Data(contentsOf: journal) == Data(repeating: 7, count: 10_000))
+        #expect(try Data(contentsOf: ordinary) == Data(repeating: 9, count: 10_000))
+        #expect(!FileManager.default.fileExists(atPath: transitFolder.path))
+    }
 
     @Test("Le régénérable est supprimé, et l'historique le retient")
     func removeNow() async throws {
@@ -88,8 +148,8 @@ struct CleanupTests {
         #expect(events.filter { if case .itemFinished = $0 { true } else { false } }.count == 1)
     }
 
-    @Test("Le personnel va à la corbeille, et se restaure")
-    func trashAndRestore() async throws {
+    @Test("Une ancienne entrée de Corbeille ordinaire reste consultable sans être restaurable")
+    func genericRestoreUnavailable() async throws {
         let bench = try Bench()
         let film = try bench.file("Telechargements/film.mkv", bytes: 50_000)
 
@@ -102,9 +162,15 @@ struct CleanupTests {
         #expect(report?.expectedNow == 0)
 
         let store = HistoryStore(directory: bench.historyFolder)
-        try await store.restore(outcome)
-        #expect(FileManager.default.fileExists(atPath: film.path))
-        #expect(await store.restoredIDs().contains(outcome.id))
+        let trashed = URL(fileURLWithPath: try #require(outcome.trashedTo.first))
+        try FileManager.default.removeItem(at: film.deletingLastPathComponent())
+        await #expect(throws: HistoryStore.RestoreError.notRestorable) {
+            try await store.restore(outcome)
+        }
+        #expect(!FileManager.default.fileExists(atPath: film.deletingLastPathComponent().path))
+        #expect(try Data(contentsOf: trashed) == Data(repeating: 1, count: 50_000))
+        #expect(await store.load().map(\.id) == [outcome.id])
+        #expect(await store.restoredIDs().isEmpty)
     }
 
     @Test("La restauration n'écrase jamais un fichier revenu à sa place")
@@ -115,9 +181,10 @@ struct CleanupTests {
         let outcome = try #require(report?.outcomes.first)
         try bench.file("doc.txt", byte: 9)
 
-        await #expect(throws: HistoryStore.RestoreError.self) {
+        await #expect(throws: HistoryStore.RestoreError.notRestorable) {
             try await HistoryStore(directory: bench.historyFolder).restore(outcome)
         }
+        #expect(try Data(contentsOf: file) == Data(repeating: 9, count: 10_000))
     }
 
     @Test("Disparu, remplacé ou modifié depuis l'analyse : laissé en place")
@@ -267,7 +334,8 @@ struct VolumeCleanupTests {
     private func engine(_ bench: Bench, volume: URL) -> CleanupEngine {
         CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: HistoryStore(directory: bench.historyFolder),
                       pathGuard: PathGuard(home: bench.root.appendingPathComponent("maison"), otherVolumeRoots: [volume]),
-                      processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil }, deleteSnapshots: { _ in false })
+                      processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil }, deleteSnapshots: { _ in false },
+                      allowsPathBasedRemoval: true)
     }
 
     @Test("Vider la corbeille du disque efface son contenu, jamais le dossier .Trashes/<uid>")

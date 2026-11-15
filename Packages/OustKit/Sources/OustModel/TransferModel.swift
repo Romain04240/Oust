@@ -34,7 +34,7 @@ public final class TransferModel {
   public init() {}
   public var isRunning: Bool { [.copying, .revalidating, .trashing].contains(phase) }
   public var canPrepare: Bool {
-    !sources.isEmpty && folder != nil && !isRunning && phase != .planning
+    app?.canMoveFiles == true && !sources.isEmpty && folder != nil && !isRunning && phase != .planning
   }
 
   /// Préremplit le parcours depuis un conseil ou l'Explorateur, sans préparer
@@ -92,7 +92,7 @@ public final class TransferModel {
 
   /// Appelé uniquement par le bouton de confirmation du plan affiché.
   public func startConfirmedPlan() {
-    guard phase == .ready, let plan, let app else { return }
+    guard phase == .ready, let plan, let app, app.canMoveFiles else { return }
     progress = ArchiveProgress()
     cancellation = CleanupCancellation()
     startedAt = .now

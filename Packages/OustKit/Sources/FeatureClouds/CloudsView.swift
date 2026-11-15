@@ -553,7 +553,7 @@ private struct FileRow: View {
     var body: some View {
         let item = clouds.item(for: file)
         let inCart = clouds.isInCart(file)
-        let enabled = group.map { clouds.canToggle(file, in: $0) } ?? item.isSelectable
+        let enabled = group.map { clouds.canToggle(file, in: $0) } ?? model.canSelectForCleanup(item)
         HStack(spacing: Spacing.medium) {
             CheckButton(item: item, inCart: inCart, enabled: enabled) { clouds.toggle(file) }
             Image(systemName: file.isPackage ? "shippingbox" : FileKind.of(file.name).symbol)
@@ -636,7 +636,7 @@ private struct CheckButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: !item.isSelectable ? "lock.circle" : (inCart ? "checkmark.circle.fill" : "circle"))
+            Image(systemName: !enabled ? "lock.circle" : (inCart ? "checkmark.circle.fill" : "circle"))
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(inCart ? AnyShapeStyle(Palette.color(for: .cloudItems)) : AnyShapeStyle(.secondary))
                 .contentTransition(.symbolEffect(.replace))

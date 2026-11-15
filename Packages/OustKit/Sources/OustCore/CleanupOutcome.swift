@@ -85,6 +85,24 @@ public struct CleanupOutcome: Sendable, Hashable, Codable, Identifiable {
     /// `nil` dans les lignes écrites avant que l'origine existe : l'app était
     /// alors seule à nettoyer. Optionnelle pour que ces lignes se lisent encore.
     public var origin: CleanupOrigin?
+    /// Identité enregistrée avant le déplacement d'un journal utilisateur.
+    public var userLogRestoreIdentity: UserLogRestoreIdentity?
+
+    public struct UserLogRestoreIdentity: Sendable, Hashable, Codable {
+        public let device: Int32
+        public let inode: UInt64
+        public let parentInode: UInt64
+        public let birthSeconds: Int
+        public let birthNanoseconds: Int
+
+        public init(device: Int32, inode: UInt64, parentInode: UInt64, birthSeconds: Int, birthNanoseconds: Int) {
+            self.device = device
+            self.inode = inode
+            self.parentInode = parentInode
+            self.birthSeconds = birthSeconds
+            self.birthNanoseconds = birthNanoseconds
+        }
+    }
 
     /// Vrai si un agent IA l'a nettoyé, par `oust`.
     public var isByAgent: Bool {

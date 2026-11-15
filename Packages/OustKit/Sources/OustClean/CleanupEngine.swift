@@ -16,6 +16,7 @@ import Synchronization
 /// disputeraient son verrou.
 public struct CleanupEngine: Sendable {
     let trasher: any Trasher
+    private let allowsPathBasedRemoval: Bool
     let history: HistoryStore?
     let pathGuard: PathGuard
     let processes: @Sendable () -> ProcessSnapshot
@@ -28,6 +29,8 @@ public struct CleanupEngine: Sendable {
     /// Ce que macOS dit du compte d'un fichier du cloud : le fichier, le dossier
     /// de son compte File Provider (nil pour iCloud Drive), les apps ouvertes.
     let cloudConnection: @Sendable (URL, URL?, Set<String>) async -> CloudConnection
+    let userLogOpenStatus: @Sendable (String) -> OpenFiles.Status
+    let userLogTrashDirectory: URL
 
     /// Le régénérable y est renommé puis effacé en arrière-plan ; sans lui, il
     /// est effacé sur place (les tests, qui n'écrivent que chez eux).
@@ -55,9 +58,13 @@ public struct CleanupEngine: Sendable {
         photos: any PhotoEraser = SystemPhotoEraser(),
         cloudConnection: @escaping @Sendable (URL, URL?, Set<String>) async -> CloudConnection = {
             await CloudConnectionCheck.connection(of: $0, accountRoot: $1, running: $2)
-        }
+        },
+        allowsPathBasedRemoval: Bool = false,
+        userLogOpenStatus: @escaping @Sendable (String) -> OpenFiles.Status = OpenFiles.status(at:),
+        userLogTrashDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash", isDirectory: true)
     ) {
         self.trasher = trasher
+        self.allowsPathBasedRemoval = allowsPathBasedRemoval
         self.history = history
         self.pathGuard = pathGuard
         self.processes = processes
@@ -85,6 +92,23 @@ public struct CleanupEngine: Sendable {
         self.origin = origin
         self.photos = photos
         self.cloudConnection = cloudConnection
+        self.userLogOpenStatus = userLogOpenStatus
+        self.userLogTrashDirectory = userLogTrashDirectory
+    }
+
+    public func supports(_ method: CleanupMethod) -> Bool {
+        Self.supports(method, trasher: trasher, allowsPathBasedRemoval: allowsPathBasedRemoval)
+    }
+
+    public static func supports(_ method: CleanupMethod, trasher: any Trasher,
+                                allowsPathBasedRemoval: Bool) -> Bool {
+        switch method {
+        case .trash, .archive, .trashFromCloud: trasher.isAvailable
+        // Le transit et la suppression sur place résolvent des chemins après
+        // le contrôle. Seuls les bancs isolés activent cette implémentation.
+        case .removeNow, .cloneOf, .compressInPlace: allowsPathBasedRemoval
+        default: true
+        }
     }
 
     /// Lance le nettoyage. Annuler la tâche qui lit le flux, ou `cancellation`,
@@ -108,7 +132,9 @@ public struct CleanupEngine: Sendable {
     func execute(_ items: [CleanupItem], session: UUID = UUID(), cancellation: CleanupCancellation? = nil,
                  emit: @escaping @Sendable (CleanupEvent) -> Void) async -> CleanupReport {
         let started = Date()
-        let selectable = items.filter(\.isSelectable)
+        let selectable = items.filter {
+            $0.isSelectable && (!($0.category == .userLogs || $0.ruleID == "logs.user") || $0.method == .trash)
+        }
         emit(.began(total: selectable.count, expectedBytes: selectable.reduce(0) { $0 + $1.sizes.freeable }))
         emit(.phaseChanged(.preparing, itemIDs: []))
         let volumes = Self.volumes(of: items)
@@ -132,6 +158,12 @@ public struct CleanupEngine: Sendable {
                     if isCancelled() {
                         let outcome = CleanupOutcome(sessionID: session, date: Date(), item: item,
                                                      result: .skipped(.cancelled), bytes: 0)
+                        await record(outcome, into: &outcomes, emit: emit)
+                        continue
+                    }
+                    if item.category == .userLogs || item.ruleID == "logs.user" {
+                        let outcome = CleanupOutcome(sessionID: session, date: Date(), item: item,
+                                                     result: .skipped(userLogProtection(item)), bytes: 0)
                         await record(outcome, into: &outcomes, emit: emit)
                         continue
                     }
@@ -275,7 +307,9 @@ public struct CleanupEngine: Sendable {
     /// Rend une raison de ne pas toucher l'élément, ou `nil` si tout est en ordre
     /// (RULES.md, règle 2).
     func revalidate(_ item: CleanupItem, snapshot: ProcessSnapshot) async -> SkipReason? {
+        guard supports(item.method) else { return .refusedByGuard }
         for path in item.paths {
+            guard !pathGuard.protectsUserLogs(path) else { return .refusedByGuard }
             // L'éviction ne supprime rien, mais ne vaut que dans le nuage ; un
             // fichier d'un nuage ne part que s'il est bien un document de
             // l'utilisateur (jamais la racine d'un compte) ; tout le reste passe
@@ -362,13 +396,20 @@ public struct CleanupEngine: Sendable {
             CleanupOutcome(sessionID: session, date: Date(), item: item, result: result,
                            bytes: result.succeeded ? bytes : 0, trashedTo: trashedTo)
         }
+        guard supports(item.method) else { return outcome(.skipped(.refusedByGuard)) }
+        var resolvedPaths: [URL] = []
+        for path in item.paths {
+            guard !pathGuard.protectsUserLogs(path), let resolved = PathGuard.withResolvedParent(path),
+                  !pathGuard.protectsUserLogs(resolved) else { return outcome(.skipped(.refusedByGuard)) }
+            resolvedPaths.append(resolved)
+        }
         let freeable = item.sizes.freeable
 
         switch item.method {
         case .removeNow:
             // Renommé dans le dossier de transit : parti à l'instant, effacé
             // derrière. Sinon (autre volume, droits), effacé sur place.
-            for (index, path) in item.paths.enumerated() {
+            for (index, path) in resolvedPaths.enumerated() {
                 if transit?.move(path, bytes: index == 0 ? freeable : 0) == true { continue }
                 if let error = Remover.remove(path) { return outcome(.failed(message: error)) }
             }
@@ -378,7 +419,7 @@ public struct CleanupEngine: Sendable {
         // la corbeille du service (iCloud Drive, Google Drive), sans le télécharger,
         // et « Remettre » le fait revenir.
         case .trash, .archive, .trashFromCloud:
-            let results = await trasher.trash(item.paths)
+            let results = await trasher.trash(resolvedPaths)
             var destinations: [String] = []
             for result in results {
                 switch result {

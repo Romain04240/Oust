@@ -91,7 +91,7 @@ private struct ProfileCard: View {
                     }
                 }
                 .toggleStyle(.switch)
-                .disabled(!item.isSelectable)
+                .disabled(!model.canSelectForCleanup(item))
             }
         }
         .padding(Spacing.large)

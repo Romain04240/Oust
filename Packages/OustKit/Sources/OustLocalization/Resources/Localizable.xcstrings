@@ -545,6 +545,23 @@
         }
       }
     },
+    "agent.refusal.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This action is currently unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette action est actuellement indisponible"
+          }
+        }
+      }
+    },
     "agent.verdict.allowed": {
       "extractionState": "manual",
       "localizations": {
@@ -1391,6 +1408,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "L’original a changé pendant la copie"
+          }
+        }
+      }
+    },
+    "archive.error.trashUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Trash is unavailable in Oust!. No files were copied."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La mise à la Corbeille est indisponible dans Oust!. Aucun fichier n’a été copié."
           }
         }
       }
@@ -4043,6 +4077,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Corbeille du Mac"
+          }
+        }
+      }
+    },
+    "category.userLogs": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User Logs"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Journaux utilisateur"
           }
         }
       }
@@ -14213,6 +14264,23 @@
         }
       }
     },
+    "protection.fileOpen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File is open"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichier ouvert"
+          }
+        }
+      }
+    },
     "protection.inUse": {
       "extractionState": "manual",
       "localizations": {
@@ -20244,6 +20312,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "Un gros fichier que vous n’avez pas ouvert ni modifié depuis un moment. Oust! n’en sait pas plus."
+          }
+        }
+      }
+    },
+    "logs.user.error.restore_conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The log could not be put back. Its recovery path is shown in History."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le journal n’a pas pu être remis en place. Son chemin de récupération figure dans l’Historique."
+          }
+        }
+      }
+    },
+    "rule.logs.user.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore the journal from the Trash if you need it again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurez le journal depuis la Corbeille si vous en avez besoin."
+          }
+        }
+      }
+    },
+    "rule.logs.user.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Old user log"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ancien journal utilisateur"
+          }
+        }
+      }
+    },
+    "rule.logs.user.what": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An old diagnostic log from your user Library. Logs can help investigate an earlier problem."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un ancien journal de diagnostic de votre bibliothèque utilisateur. Il peut servir à comprendre un incident passé."
           }
         }
       }
@@ -26636,6 +26772,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "macOS écrit ces fichiers sur les disques qui ne sont pas formatés pour le Mac. Un fichier « ._ » dont le fichier existe encore porte ses métadonnées (étiquettes, commentaires, provenance) : il va à la corbeille du Mac. Sans son fichier, il part tout de suite, comme les .DS_Store."
+          }
+        }
+      }
+    },
+    "system.user_log_modified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modified %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifié %@"
+          }
+        }
+      }
+    },
+    "system.user_logs_note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logs last modified more than 30 days ago. Oust! displays them for inspection and blocks automatic removal."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Journaux modifiés pour la dernière fois il y a plus de 30 jours. Oust! permet de les consulter et bloque leur déplacement."
           }
         }
       }

@@ -139,8 +139,12 @@ public final class ApplicationsModel {
         return [selected.cleanupItem()] + leftovers.map { $0.cleanupItem(for: selected) }
     }
 
+    public func canSelectForCleanup(_ item: CleanupItem) -> Bool {
+        app?.canSelectForCleanup(item) == true
+    }
+
     public func toggle(_ item: CleanupItem) {
-        guard item.isSelectable else { return }
+        guard canSelectForCleanup(item) else { return }
         if chosen.contains(item.id) {
             chosen.remove(item.id)
         } else {
@@ -151,17 +155,17 @@ public final class ApplicationsModel {
 
     /// Tout ce qui peut être coché l'est déjà.
     public var allChosen: Bool {
-        let selectable = items.filter(\.isSelectable)
+        let selectable = items.filter(canSelectForCleanup)
         return !selectable.isEmpty && selectable.allSatisfy { chosen.contains($0.id) }
     }
 
     /// Tout cocher d'un coup, ou tout décocher si tout l'est déjà (demande de
     /// Romain, 18/10/2026). Les éléments protégés restent hors de portée.
     public func toggleAll() {
-        chosen = allChosen ? [] : Set(items.filter(\.isSelectable).map(\.id))
+        chosen = allChosen ? [] : Set(items.filter(canSelectForCleanup).map(\.id))
     }
 
-    public var chosenItems: [CleanupItem] { items.filter { chosen.contains($0.id) && $0.isSelectable } }
+    public var chosenItems: [CleanupItem] { items.filter { chosen.contains($0.id) && canSelectForCleanup($0) } }
     public var chosenBytes: Int64 { chosenItems.reduce(0) { $0 + $1.sizes.freeable } }
     public var leftoverBytes: Int64 { leftovers.filter { $0.protection == nil }.reduce(0) { $0 + $1.sizes.freeable } }
 
@@ -220,7 +224,7 @@ public final class ApplicationsModel {
         orphans = measured.filter { !$0.isFullyProtected } + measured.filter(\.isFullyProtected)
         // Un reste jeté dans la corbeille d'Oust! que la nouvelle recherche ne
         // propose plus (l'application est revenue, quelque chose y écrit) en sort.
-        let proposed = Set(orphans.flatMap(items(of:)).filter(\.isSelectable).map(\.id))
+        let proposed = Set(orphans.flatMap(items(of:)).filter(canSelectForCleanup).map(\.id))
         app.remove(app.cartItems.filter { $0.category == .appLeftovers && !proposed.contains($0.id) }.map(\.id))
         orphansReadContainers = canRead
         orphanPhase = .done(Date())
@@ -238,7 +242,7 @@ public final class ApplicationsModel {
     /// s'il y est déjà.
     public func toggleAll(of group: OrphanGroup) {
         guard let app else { return }
-        let selectable = items(of: group).filter(\.isSelectable)
+        let selectable = items(of: group).filter(canSelectForCleanup)
         if selectable.allSatisfy({ app.isInCart($0.id) }) {
             app.remove(selectable.map(\.id))
         } else {

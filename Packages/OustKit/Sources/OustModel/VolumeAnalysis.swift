@@ -153,12 +153,11 @@ extension AppModel {
         for await batch in RuleEngine.run(context, finders: FinderKind.volumeFinders, measurer: .tree { root }) {
             for var item in batch.items {
                 if Self.titledByRule.contains(item.ruleID) { item.title = L10n.string("rule.\(item.ruleID).title") }
-                items[item.id] = item
-                if firstTime, policy.preselects(item) { cart.insert(item.id) }
+                recordAnalyzedItem(item, preselect: firstTime, policy: policy)
             }
             finishedFinders.insert(batch.finder)
         }
-        cart = cart.filter { items[$0]?.isSelectable == true }
+        cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
         refreshVolumes()
         volumeAnalysisDates[volume.id] = Date()
         analyzingVolumeID = nil

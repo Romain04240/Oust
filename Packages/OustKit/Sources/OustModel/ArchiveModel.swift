@@ -100,7 +100,7 @@ public final class ArchiveModel {
     }
 
     public var canStart: Bool {
-        destination != nil && !chosen.isEmpty && !planning && refusals.isEmpty && running != .running
+        app?.engine.supports(.trash) == true && destination != nil && !chosen.isEmpty && !planning && refusals.isEmpty && running != .running
     }
 
     private func schedulePlan() {

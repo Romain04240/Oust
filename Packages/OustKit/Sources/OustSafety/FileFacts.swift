@@ -14,6 +14,7 @@ public struct FileFacts: Sendable {
     public let group: gid_t
     public let mode: mode_t
     public let device: Int32
+    public let created: timespec
     public let modified: timespec
     /// Change à chaque écriture, renommage ou changement d'attribut, même quand
     /// la date de modification est remise en place derrière.
@@ -23,16 +24,38 @@ public struct FileFacts: Sendable {
     public static func of(_ path: String) -> FileFacts? {
         var info = stat()
         guard lstat(path, &info) == 0 else { return nil }
-        return FileFacts(
-            inode: UInt64(info.st_ino), size: Int64(info.st_size), allocated: Int64(info.st_blocks) * 512,
-            linkCount: Int(info.st_nlink), flags: info.st_flags, owner: info.st_uid, group: info.st_gid,
-            mode: info.st_mode, device: info.st_dev, modified: info.st_mtimespec, changed: info.st_ctimespec,
-            isRegularFile: (info.st_mode & S_IFMT) == S_IFREG
-        )
+        return FileFacts(info)
+    }
+
+    public static func at(_ name: String, in directory: Int32) -> FileFacts? {
+        var info = stat()
+        guard fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { return nil }
+        return FileFacts(info)
+    }
+
+    private init(_ info: stat) {
+        inode = UInt64(info.st_ino)
+        size = Int64(info.st_size)
+        allocated = Int64(info.st_blocks) * 512
+        linkCount = Int(info.st_nlink)
+        flags = info.st_flags
+        owner = info.st_uid
+        group = info.st_gid
+        mode = info.st_mode
+        device = info.st_dev
+        created = info.st_birthtimespec
+        modified = info.st_mtimespec
+        changed = info.st_ctimespec
+        isRegularFile = (info.st_mode & S_IFMT) == S_IFREG
     }
 
     public var modificationDate: Date {
         Date(timeIntervalSince1970: TimeInterval(modified.tv_sec) + TimeInterval(modified.tv_nsec) / 1e9)
+    }
+
+    public func userLogID(at url: URL) -> String {
+        let path = PathNormalizer.normalize(url.path)
+        return "logs.user|\(device):\(inode):\(changed.tv_sec):\(changed.tv_nsec)|\(path)"
     }
 
     /// Déjà compressé par APFS (`UF_COMPRESSED`).

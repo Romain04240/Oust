@@ -223,10 +223,13 @@ public final class AppModel {
         // administrateur en cours dans une autre copie n'est interrompue.
         Task { await PrivilegedHelper.synchronizeApprovedInstallation() }
         // Ce qu'un lancement précédent n'a pas fini d'effacer.
-        transit.resume(volumes: volumes.filter { !$0.isBoot }.map(\.mountURL))
+        if engine.supports(.removeNow) {
+            transit.resume(volumes: volumes.filter { !$0.isBoot }.map(\.mountURL))
+        }
         Task { await disk.start() }
         fullDiskAccess = FullDiskAccess.isGranted(home: home)
         await refreshSnapshots()
+        await engine.recoverUserLogs()
         await loadHistory()
         Task { await watchVolumes() }
         Task { await refreshTimeMachineMounts() }
@@ -311,7 +314,9 @@ public final class AppModel {
         for await event in VolumeMonitor.events() {
             refreshVolumes()
             if case .unmounted(let url) = event { forgetVolume(at: url) }
-            if case .mounted(let url) = event { transit.resume(volumes: [url]) }
+            if case .mounted(let url) = event, engine.supports(.removeNow) {
+                transit.resume(volumes: [url])
+            }
             if case .mounted(let url) = event,
                let volume = volumes.first(where: { $0.mountURL.standardizedFileURL == url.standardizedFileURL }) {
                 // Un disque de sauvegarde ne se propose pas : seul Time Machine y touche.
@@ -359,13 +364,11 @@ public final class AppModel {
         refreshBrowsers()
         for await batch in RuleEngine.run(context, measurer: .tree(tree)) {
             for item in batch.items {
-                items[item.id] = item
-                // On ne coche d'office que la première fois, et que le sûr.
-                if firstTime, policy.preselects(item) { cart.insert(item.id) }
+                recordAnalyzedItem(item, preselect: firstTime, policy: policy)
             }
             finishedFinders.insert(batch.finder)
         }
-        cart = cart.filter { items[$0]?.isSelectable == true }
+        cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
         await refreshSnapshots()
         refreshVolumes()
         if let boot = bootVolume { volumeAnalysisDates[boot.id] = Date() }
@@ -454,7 +457,7 @@ public final class AppModel {
     public func total(of categories: Set<ItemCategory>, headlineOnly: Bool = true) -> Int64 {
         let scope = itemScope()
         return items.values.filter { categories.contains($0.category) && (!headlineOnly || $0.countsInHeadline)
-            && $0.isSelectable && scope($0) }
+            && canSelectForCleanup($0) && scope($0) }
             .reduce(0) { $0 + $1.sizes.freeable }
     }
 
@@ -644,8 +647,36 @@ public final class AppModel {
 
     public func isInCart(_ id: String) -> Bool { cart.contains(id) }
 
+    func recordAnalyzedItem(_ item: CleanupItem, preselect: Bool, policy: PreselectionPolicy) {
+        items[item.id] = item
+        if !canSelectForCleanup(item) {
+            cart.remove(item.id)
+        } else if preselect, policy.preselects(item) {
+            cart.insert(item.id)
+        }
+    }
+
+    public var canMoveFiles: Bool { engine.supports(.trash) }
+
+    public var canCloneDuplicates: Bool { engine.supports(.cloneOf(original: "")) }
+
+    public var canCleanDuplicates: Bool { duplicatesAsClones ? canCloneDuplicates : canMoveFiles }
+
+    public var availableDuplicateSuggestions: [CleanupItem] {
+        guard canCleanDuplicates else { return [] }
+        return duplicateGroups.flatMap { $0.cleanupItems(asClones: duplicatesAsClones) }.filter(canSelectForCleanup)
+    }
+
+    public var reclaimableDuplicateBytes: Int64 {
+        availableDuplicateSuggestions.reduce(0) { $0 + $1.sizes.freeable }
+    }
+
+    public func canSelectForCleanup(_ item: CleanupItem) -> Bool {
+        item.isSelectable && engine.supports(item.method)
+    }
+
     public func toggle(_ item: CleanupItem) {
-        guard item.isSelectable else { return }
+        guard canSelectForCleanup(items[item.id] ?? item) else { return }
         if cart.contains(item.id) {
             cart.remove(item.id)
         } else {
@@ -655,7 +686,7 @@ public final class AppModel {
     }
 
     public func add(_ newItems: [CleanupItem]) {
-        for item in newItems where item.isSelectable {
+        for item in newItems where canSelectForCleanup(items[item.id] ?? item) {
             items[item.id] = items[item.id] ?? item
             cart.insert(item.id)
         }
@@ -668,7 +699,7 @@ public final class AppModel {
     public func clearCart() { cart.removeAll() }
 
     public var cartItems: [CleanupItem] {
-        orderedForDisplay(cart.compactMap { items[$0] })
+        orderedForDisplay(cart.compactMap { items[$0] }.filter(canSelectForCleanup))
     }
 
     /// Ce que le panier rendrait, d'après les tailles libérables.
@@ -711,14 +742,15 @@ public final class AppModel {
         .milliseconds(min(150, max(40, 2_000 / max(1, count))))
     }
 
-    func startCleaning(_ queue: [CleanupItem]) {
+    func startCleaning(_ requested: [CleanupItem]) {
+        let queue = requested.filter(canSelectForCleanup)
         guard cleaning != .running, !queue.isEmpty else { return }
         liveQueue = queue
         liveOutcomes = []
         freedSoFar = 0
         currentItemID = nil
         currentItemIDs = []
-        cleanupProgress = CleanupProgress(total: queue.filter(\.isSelectable).count)
+        cleanupProgress = CleanupProgress(total: queue.count)
         cleaningStopRequested = false
         reclaimed = nil
         cleaning = .running
@@ -865,7 +897,7 @@ public final class AppModel {
         guard cleaning != .running else { return }
         for item in fresh {
             items[item.id] = item
-            if addingToCart, item.isSelectable { cart.insert(item.id) }
+            if addingToCart, canSelectForCleanup(item) { cart.insert(item.id) }
         }
     }
 
@@ -882,21 +914,6 @@ public final class AppModel {
         for await _ in history.changes() {
             await loadHistory()
         }
-    }
-
-    public func restore(_ outcome: CleanupOutcome) async -> Bool {
-        do {
-            try await history.restore(outcome)
-            await loadHistory()
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    public func canRestore(_ outcome: CleanupOutcome) -> Bool {
-        outcome.result == .trashed && !restoredIDs.contains(outcome.id)
-            && outcome.trashedTo.allSatisfy { FileManager.default.fileExists(atPath: $0) }
     }
 
     // MARK: - Permissions

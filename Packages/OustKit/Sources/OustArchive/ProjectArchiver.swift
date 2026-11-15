@@ -104,6 +104,11 @@ public struct ProjectArchiver: Sendable {
         if Task.isCancelled || progress.isCancelled {
             return ArchiveOutcome(project: project, copy: nil, result: .skipped(.cancelled), error: .cancelled, bytes: 0)
         }
+        // L'original doit pouvoir partir avant d'engager la moindre copie.
+        guard engine.supports(.trash) else {
+            return ArchiveOutcome(project: project, copy: nil, result: .skipped(.refusedByGuard),
+                                  error: .trashUnavailable, bytes: 0)
+        }
         // Avant de copier : copier un projet où quelqu'un travaille, c'est
         // archiver un état qui n'existera plus dans une minute.
         let snapshot = processes()

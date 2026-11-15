@@ -53,6 +53,7 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
     case iosBackups
     /// Caches des applications, une par une.
     case appCaches
+    case userLogs
     /// Installeurs de macOS et mises à jour iOS téléchargées.
     case systemDownloads
     /// Pièces jointes de Mail et de Messages.
@@ -108,7 +109,7 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
              .toolVersions, .containers, .compressibleProjects:
             .developer
         case .downloads, .trash, .iosBackups, .virtualMachines,
-             .appCaches, .systemDownloads, .attachments, .screenshots, .cloudFiles, .creative, .games,
+             .appCaches, .userLogs, .systemDownloads, .attachments, .screenshots, .cloudFiles, .creative, .games,
              .diskTraces, .protectedOnDisk:
             .system
         case .browsers: .browsers
@@ -141,6 +142,7 @@ public enum ItemCategory: String, Sendable, Hashable, Codable, CaseIterable {
         case .trash: "trash.square"
         case .iosBackups: "externaldrive.badge.timemachine"
         case .appCaches: "app.badge"
+        case .userLogs: "doc.text"
         case .systemDownloads: "arrow.down.app"
         case .attachments: "paperclip"
         case .screenshots: "camera.viewfinder"
@@ -236,6 +238,8 @@ public enum ProtectionReason: Sendable, Hashable, Codable {
     case appRunning(name: String)
     /// Utilisé dans les dernières 24 heures (session d'agent en cours).
     case inUse
+    /// Un processus tient encore le fichier ouvert.
+    case fileOpen
     /// La version la plus récente est gardée (DeviceSupport, sauvegarde iOS).
     case newestKept
     /// Simulateur démarré.
@@ -295,6 +299,7 @@ public enum ProtectionReason: Sendable, Hashable, Codable {
         case .uniqueIgnoredFiles: "protection.uniqueIgnoredFiles"
         case .appRunning: "protection.appRunning"
         case .inUse: "protection.inUse"
+        case .fileOpen: "protection.fileOpen"
         case .newestKept: "protection.newestKept"
         case .booted: "protection.booted"
         case .needsFullDiskAccess: "protection.needsFullDiskAccess"

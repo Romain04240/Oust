@@ -180,7 +180,7 @@ private struct TrashedAppItems: View {
 
     var body: some View {
         let items = trashed.items(of: report)
-        let selectable = items.filter(\.isSelectable)
+        let selectable = items.filter(trashed.canSelectForCleanup)
         let checked = selectable.filter { trashed.isChosen($0, in: report) }.count
         // L'application n'est plus là : seulement ce qu'elle a laissé.
         ItemGroup(title: L10n.string("trashed.leftovers_title"), symbol: "shippingbox",
@@ -195,7 +195,7 @@ private struct TrashedAppItems: View {
                     Divider().opacity(0.4)
                 }
                 ForEach(items) { item in
-                    ItemRow(item, isSelected: trashed.isChosen(item, in: report)) { trashed.toggle(item, in: report) }
+                    ItemRow(item, enabled: trashed.canSelectForCleanup(item), isSelected: trashed.isChosen(item, in: report)) { trashed.toggle(item, in: report) }
                     Divider().opacity(0.25)
                 }
                 if trashed.refreshing.contains(report.id) {

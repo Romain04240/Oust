@@ -50,7 +50,9 @@ public enum Describe {
         case .compressed: L10n.string("outcome.compressed")
         case .recentlyDeleted: L10n.string("outcome.recentlyDeleted")
         case .skipped(let reason): skip(reason)
-        case .failed(let message): L10n.string("outcome.failed", message.hasPrefix("snapshot.error.") ? L10n.string(message) : message)
+        case .failed(let message): L10n.string("outcome.failed",
+            message.hasPrefix("snapshot.error.") || message == "logs.user.error.restore_conflict"
+                ? L10n.string(message) : message)
         }
     }
 

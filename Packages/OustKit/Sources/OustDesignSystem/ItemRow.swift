@@ -6,6 +6,7 @@ import OustLocalization
 /// Une ligne d'élément : cocher, comprendre, voir ce que ça rend.
 public struct ItemRow: View {
     let item: CleanupItem
+    let enabled: Bool
     let isSelected: Bool
     let showOwner: Bool
     let showsPreview: Bool
@@ -16,9 +17,10 @@ public struct ItemRow: View {
 
     /// `preview` : le coup d'œil, pour un élément d'un seul chemin. L'œil
     /// paraît au survol, ou toujours quand `showsPreview` (la ligne choisie).
-    public init(_ item: CleanupItem, isSelected: Bool, showOwner: Bool = false,
+    public init(_ item: CleanupItem, enabled: Bool = true, isSelected: Bool, showOwner: Bool = false,
                 showsPreview: Bool = false, preview: (() -> Void)? = nil, onToggle: @escaping () -> Void) {
         self.item = item
+        self.enabled = enabled && item.isSelectable
         self.isSelected = isSelected
         self.showOwner = showOwner
         self.showsPreview = showsPreview
@@ -31,11 +33,11 @@ public struct ItemRow: View {
             Button(action: onToggle) {
                 Image(systemName: checkSymbol)
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(item.isSelectable ? (isSelected ? Palette.color(for: item.category) : .secondary) : .secondary.opacity(0.6))
+                    .foregroundStyle(enabled ? (isSelected ? Palette.color(for: item.category) : .secondary) : .secondary.opacity(0.6))
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
-            .disabled(!item.isSelectable)
+            .disabled(!enabled)
             .accessibilityLabel(Text("row.select", bundle: .oust))
 
             Image(systemName: item.category.symbol)
@@ -68,6 +70,10 @@ public struct ItemRow: View {
                 }
                 if let detail = item.detail, detail != item.title {
                     Text(verbatim: detail).font(Typography.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                }
+                if item.category == .userLogs, let modified = item.lastActivity {
+                    Text(verbatim: L10n.string("system.user_log_modified", Formatters.relative(modified)))
+                        .font(Typography.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: Spacing.medium)
@@ -116,12 +122,12 @@ public struct ItemRow: View {
             Button(action: onToggle) {
                 Label { Text(isSelected ? "row.remove_from_cart" : "row.add_to_cart", bundle: .oust) } icon: { Image(systemName: isSelected ? "trash.slash" : "trash") }
             }
-            .disabled(!item.isSelectable)
+            .disabled(!enabled)
         }
     }
 
     private var checkSymbol: String {
-        if !item.isSelectable { return "lock.circle" }
+        if !enabled { return "lock.circle" }
         return isSelected ? "checkmark.circle.fill" : "circle"
     }
 }

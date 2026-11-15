@@ -86,6 +86,7 @@ final class AgentBench: Sendable {
             history: HistoryStore(directory: historyFolder),
             stateDirectory: stateFolder,
             trasher: FolderTrasher(folder: trash),
+            allowsPathBasedRemoval: true,
             capacity: { _ in nil },
             now: { [self] in clock.withLock { $0 } },
             workingDirectory: root

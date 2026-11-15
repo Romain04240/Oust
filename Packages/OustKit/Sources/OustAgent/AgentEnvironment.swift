@@ -38,6 +38,7 @@ public struct AgentEnvironment: Sendable {
     /// Où vivent les aperçus ; `nil` : à côté du journal.
     public var stateDirectory: URL?
     public var trasher: any Trasher
+    public var allowsPathBasedRemoval: Bool
     public var capacity: @Sendable (URL) -> Capacity?
     public var now: @Sendable () -> Date
     /// Ce contre quoi un `--path` relatif se résout.
@@ -63,6 +64,7 @@ public struct AgentEnvironment: Sendable {
         history: HistoryStore,
         stateDirectory: URL? = nil,
         trasher: any Trasher = FinderTrasher(),
+        allowsPathBasedRemoval: Bool = false,
         capacity: @escaping @Sendable (URL) -> Capacity? = { VolumeService.capacity(of: $0) },
         now: @escaping @Sendable () -> Date = { Date() },
         workingDirectory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true),
@@ -85,6 +87,7 @@ public struct AgentEnvironment: Sendable {
         self.history = history
         self.stateDirectory = stateDirectory
         self.trasher = trasher
+        self.allowsPathBasedRemoval = allowsPathBasedRemoval
         self.capacity = capacity
         self.now = now
         self.workingDirectory = workingDirectory

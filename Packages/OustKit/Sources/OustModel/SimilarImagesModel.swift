@@ -109,8 +109,12 @@ public final class SimilarImagesModel {
         }
     }
 
-    /// Ce que rendrait le retrait de tout sauf la meilleure de chaque groupe.
-    public var potential: Int64 { groups.reduce(0) { $0 + $1.potential } }
+    /// Ce que la mise à la Corbeille rendrait en gardant la meilleure image.
+    public var potential: Int64 { groups.reduce(0) { $0 + reclaimableBytes(in: $1) } }
+
+    public func reclaimableBytes(in group: SimilarImageGroup) -> Int64 {
+        app?.canMoveFiles == true ? group.potential : 0
+    }
     public var examined: Int { findings?.examined ?? 0 }
     public var skippedInCloud: Int { findings?.skippedInCloud ?? 0 }
     public var unreadable: Int { findings?.unreadable ?? 0 }
@@ -135,10 +139,22 @@ public final class SimilarImagesModel {
         (paths ?? cartPaths()).contains(image.url.path)
     }
 
+    public func item(for image: SimilarImage, in group: SimilarImageGroup) -> CleanupItem {
+        var item = group.cleanupItem(for: image)
+        if app?.canSelectForCleanup(item) != true {
+            item.protect(.unknownState)
+            item.sizes.freeable = 0
+        }
+        return item
+    }
+
     /// Cocher une image n'est possible que s'il en reste au moins une autre du
     /// groupe à garder. Décocher l'est toujours.
     public func canToggle(_ image: SimilarImage, in group: SimilarImageGroup, paths: Set<String>? = nil) -> Bool {
-        group.canToggle(image, checked: paths ?? cartPaths())
+        guard app != nil else { return false }
+        let checked = paths ?? cartPaths()
+        return group.canToggle(image, checked: checked)
+            && (checked.contains(image.url.path) || item(for: image, in: group).isSelectable)
     }
 
     public func toggle(_ image: SimilarImage, in group: SimilarImageGroup) {
@@ -148,7 +164,21 @@ public final class SimilarImagesModel {
         if !holding.isEmpty {
             app.remove(Array(holding))
         } else if canToggle(image, in: group) {
-            app.toggle(group.cleanupItem(for: image))
+            app.toggle(item(for: image, in: group))
+        }
+    }
+
+    public func canKeepBest(in group: SimilarImageGroup, paths: Set<String>? = nil) -> Bool {
+        guard app?.canMoveFiles == true else { return false }
+        let checked = paths ?? cartPaths()
+        return group.images.dropFirst().contains { !checked.contains($0.url.path) }
+    }
+
+    public func keepBest(in group: SimilarImageGroup) {
+        guard canKeepBest(in: group), let best = group.best else { return }
+        if isInCart(best) { toggle(best, in: group) }
+        for image in group.images.dropFirst() where !isInCart(image) {
+            toggle(image, in: group)
         }
     }
 

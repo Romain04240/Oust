@@ -230,7 +230,7 @@ let package = Package(
         .testTarget(name: "OustScanTests", dependencies: ["OustScan"]),
         .testTarget(name: "OustVolumeTests", dependencies: ["OustVolume"]),
         .testTarget(name: "OustSafetyTests", dependencies: ["OustSafety"]),
-        .testTarget(name: "OustRulesTests", dependencies: ["OustRules", "OustLocalization"]),
+        .testTarget(name: "OustRulesTests", dependencies: ["OustRules", "OustLocalization", "OustClean"]),
         .testTarget(name: "OustCleanTests", dependencies: ["OustClean"]),
         .testTarget(name: "OustDuplicatesTests", dependencies: ["OustDuplicates"]),
         .testTarget(name: "OustBrowsersTests", dependencies: ["OustBrowsers", "OustCore", "OustSafety"]),
@@ -239,7 +239,7 @@ let package = Package(
             dependencies: ["OustLocalization", "OustCore", "OustUninstall", "OustArchive", "OustModel"]
         ),
         .testTarget(name: "OustUninstallTests", dependencies: ["OustUninstall", "OustClean", "OustCore", "OustSafety"]),
-        .testTarget(name: "OustModelTests", dependencies: ["OustModel", "OustCore", "OustVolume"]),
+        .testTarget(name: "OustModelTests", dependencies: ["OustModel", "OustCore", "OustDuplicates", "OustVolume"]),
         .testTarget(name: "OustUpdatesTests", dependencies: ["OustUpdates", "OustCore"]),
         .testTarget(name: "OustArchiveTests", dependencies: ["OustArchive", "OustClean", "OustCore", "OustSafety"]),
         .testTarget(name: "OustLargeFilesTests", dependencies: ["OustLargeFiles", "OustScan", "OustCore", "OustSafety"]),

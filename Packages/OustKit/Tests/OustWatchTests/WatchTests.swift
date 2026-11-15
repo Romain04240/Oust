@@ -409,7 +409,8 @@ struct RetentionRunTests {
             CleanupEngine(trasher: FolderTrasher(folder: root.appendingPathComponent("_corbeille")),
                           history: HistoryStore(directory: root.appendingPathComponent("_historique")),
                           pathGuard: PathGuard(home: home), processes: { ProcessSnapshot(processes: []) },
-                          capacity: { _ in nil }, deleteSnapshots: { _ in false }, runningApps: { [] })
+                          capacity: { _ in nil }, deleteSnapshots: { _ in false }, runningApps: { [] },
+                          allowsPathBasedRemoval: true)
         }
     }
 

@@ -205,7 +205,7 @@ public final class CloudsModel {
     /// jamais toutes les copies d'ici (SPEC §7), d'autant que rien ne prouve
     /// qu'elles soient identiques.
     public func canToggle(_ file: CloudEntry, in group: CloudDuplicateGroup) -> Bool {
-        guard item(for: file).isSelectable else { return false }
+        guard app?.canSelectForCleanup(item(for: file)) == true else { return false }
         if isInCart(file) { return true }
         let others = group.files.filter { $0.id != file.id }
         return others.contains { !isInCart($0) }

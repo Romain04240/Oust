@@ -149,10 +149,11 @@ public final class MaintenanceModel {
         }
         let home = app.home
         let recency = preferences.recencyDays
+        let engine = app.engine
         let items = await Task.detached(priority: .utility) {
             let found = await RuleEngine.collect(context, measurer: measurer)
             let browsers = await Self.measured(BrowserFinder.caches(home: home))
-            return MaintenanceSelection.announced(found + browsers, recencyDays: recency)
+            return MaintenanceSelection.announced((found + browsers).filter { engine.supports($0.method) }, recencyDays: recency)
         }.value
         return MaintenanceFinding(items: items.filter(Self.stillThere), capacity: VolumeService.bootVolume()?.capacity)
     }
@@ -186,6 +187,7 @@ public final class MaintenanceModel {
         // de navigateur ouvert entre quand même : la revue propose de fermer le
         // navigateur, et la revalidation le garde s'il ne l'est pas.
         let fresh = finding.items.filter(Self.stillThere).filter { item in
+            guard app.engine.supports(item.method) else { return false }
             guard let known = app.items[item.id], !known.protections.isEmpty else { return true }
             return BrowserFinder.browser(of: known) != nil && known.protections.allSatisfy(\.isAppRunning)
         }
@@ -218,10 +220,11 @@ public final class MaintenanceModel {
                 item.sizes = known.sizes
                 return item
             }
-            let items = MaintenanceSelection.announced(browsers + Array(app.items.values),
+            let items = MaintenanceSelection.announced((browsers + Array(app.items.values)).filter { app.engine.supports($0.method) },
                                                        recencyDays: app.preferences.recencyDays)
             onFinding?(MaintenanceFinding(items: items, capacity: capacity))
         } else if var known = finding {
+            known.items = known.items.filter { app.engine.supports($0.method) }
             known.capacity = capacity ?? known.capacity
             onFinding?(known)
         } else {

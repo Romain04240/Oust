@@ -157,7 +157,7 @@ public final class WatchModel {
     public var safeTotal: Int64? {
         guard let app, app.analysis.hasRun else { return nil }
         // Le disque de démarrage seul : c'est lui que l'alerte surveille.
-        return app.items.values.filter { $0.safety == .safe && $0.isSelectable && $0.countsInHeadline
+        return app.items.values.filter { $0.safety == .safe && app.canSelectForCleanup($0) && $0.countsInHeadline
             && app.isOnBootVolume($0) }
             .reduce(0) { $0 + $1.sizes.freeable }
     }
@@ -254,7 +254,8 @@ public final class WatchModel {
     public func lastRun(_ family: RetentionFamily) -> Date? { state.lastRun(family) }
 
     public func nextRun(_ family: RetentionFamily) -> Date? {
-        settings.policy(family).nextRun(lastRun: state.lastRun(family))
+        guard app?.engine.supports(.removeNow) == true else { return nil }
+        return settings.policy(family).nextRun(lastRun: state.lastRun(family))
     }
 
     /// Cocher une règle : son premier passage viendra une période plus tard, et
@@ -274,7 +275,7 @@ public final class WatchModel {
     /// Un passage peut-il commencer : un seul à la fois, et jamais pendant que
     /// l'utilisateur analyse ou fait le vide lui-même.
     public var canRun: Bool {
-        guard let app else { return false }
+        guard let app, app.engine.supports(.removeNow) else { return false }
         return runningFamily == nil && app.cleaning != .running && !app.analysis.isRunning && !maintenance.isRunning
     }
 
@@ -299,6 +300,7 @@ public final class WatchModel {
     }
 
     private func candidates(for policy: RetentionPolicy, app: AppModel) async -> [CleanupItem] {
+        guard app.engine.supports(.removeNow) else { return [] }
         let preferences = app.preferences
         let context = RuleContext(home: app.home, projectRoots: preferences.projectRoots,
                                   historyRetentionDays: preferences.historyRetentionDays,

@@ -90,7 +90,7 @@ final class FakeMac {
         let snapshot = ProcessSnapshot(processes: processes)
         return CleanupEngine(trasher: FolderTrasher(folder: trash), history: HistoryStore(directory: historyFolder),
                              pathGuard: PathGuard(home: home), processes: { snapshot }, capacity: { _ in nil },
-                             deleteSnapshots: { _ in false })
+                             deleteSnapshots: { _ in false }, allowsPathBasedRemoval: true)
     }
 }
 

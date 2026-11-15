@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// La dernière barrière avant une suppression (SPEC §5).
@@ -13,6 +14,7 @@ public struct PathGuard: Sendable {
 
     private let home: String
     private let exact: Set<String>
+    private let userLogRoots: Set<String>
     private let prefixes: [String]
     /// Les pièces jointes, seule chose que l'on retire de Mail et de Messages.
     private let messagesAttachments: String
@@ -27,6 +29,8 @@ public struct PathGuard: Sendable {
     public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, otherVolumeRoots: [URL]? = nil) {
         let home = home.standardizedFileURL.path
         self.home = home
+        let logs = URL(fileURLWithPath: home).appendingPathComponent("Library/Logs")
+        self.userLogRoots = Set([logs.path, logs.resolvingSymlinksInPath().path].map(PathNormalizer.normalize))
         self.otherVolumeRoots = otherVolumeRoots.map { $0.map { PathNormalizer.normalize($0.standardizedFileURL.path) } }
 
         let systemExact = [
@@ -69,6 +73,10 @@ public struct PathGuard: Sendable {
     }
 
     public func check(_ url: URL) -> Verdict {
+        check(url, protectUserLogs: true)
+    }
+
+    private func check(_ url: URL, protectUserLogs: Bool) -> Verdict {
         let raw = url.path
         guard raw.hasPrefix("/") else { return .refused("relative") }
         guard !raw.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }) else { return .refused("dot-components") }
@@ -79,13 +87,14 @@ public struct PathGuard: Sendable {
         // Le parent est résolu (un lien symbolique au milieu du chemin pourrait
         // mener ailleurs) ; le dernier élément ne l'est pas : supprimer un lien
         // supprime le lien, pas sa cible.
-        let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
-        let resolved = Self.normalize((parent as NSString).appendingPathComponent(url.lastPathComponent))
+        guard let resolvedURL = Self.withResolvedParent(url) else { return .refused("unresolved-parent") }
+        let resolved = Self.normalize(resolvedURL.path)
         let literal = Self.normalize(raw)
+        let candidates = Set([resolved, literal])
+        if !exact.isDisjoint(with: candidates) { return .refused("protected-root") }
+        if protectUserLogs && protectsUserLogs(url, resolved: resolvedURL) { return .refused("user-logs") }
 
-
-        for candidate in Set([resolved, literal]) {
-            if exact.contains(candidate) { return .refused("protected-root") }
+        for candidate in candidates {
             if prefixes.contains(where: { candidate.hasPrefix($0) }), !isAttachment(candidate) {
                 return .refused("protected-area")
             }
@@ -182,6 +191,84 @@ public struct PathGuard: Sendable {
     }
 
     public func allows(_ url: URL) -> Bool { check(url) == .allowed }
+
+    /// Résout le plus proche ancêtre existant, puis rattache les composants absents.
+    /// Le dernier composant reste le nom de l'entrée que l'appelant va déplacer.
+    public static func withResolvedParent(_ url: URL) -> URL? {
+        guard url.isFileURL, url.path.hasPrefix("/"),
+              !url.path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }),
+              !url.path.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return nil }
+        if url.path == "/" { return url }
+        var parent = url.deletingLastPathComponent()
+        var suffix = [url.lastPathComponent]
+        while true {
+            if let resolved = realpath(parent.path, nil) {
+                defer { free(resolved) }
+                return suffix.reversed().reduce(URL(fileURLWithPath: String(cString: resolved), isDirectory: true)) {
+                    $0.appendingPathComponent($1)
+                }
+            }
+            guard errno == ENOENT, parent.path != "/" else { return nil }
+            var info = stat()
+            guard lstat(parent.path, &info) != 0, errno == ENOENT else { return nil }
+            suffix.append(parent.lastPathComponent)
+            parent.deleteLastPathComponent()
+        }
+    }
+
+    /// Protège la racine, ses ancêtres et les journaux, indépendamment de leur règle.
+    public func protectsUserLogs(_ url: URL) -> Bool {
+        guard let resolved = Self.withResolvedParent(url) else { return true }
+        return protectsUserLogs(url, resolved: resolved)
+    }
+
+    private func protectsUserLogs(_ url: URL, resolved: URL) -> Bool {
+        let logs = URL(fileURLWithPath: home).appendingPathComponent("Library/Logs")
+        let roots = userLogRoots.union([PathNormalizer.normalize(logs.resolvingSymlinksInPath().path)])
+        var paths = [url.path, resolved.path]
+        var info = stat()
+        if lstat(resolved.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFLNK {
+            // Le Finder peut suivre aussi le dernier lien au moment de déplacer.
+            guard let target = realpath(resolved.path, nil) else { return true }
+            defer { free(target) }
+            paths.append(String(cString: target))
+        }
+        return paths.contains { raw in
+            let path = PathNormalizer.normalize(raw)
+            return roots.contains { root in
+                let candidate = path.lowercased()
+                let base = root.lowercased()
+                // L'exception Roblox ne vaut que dans son propre sous-arbre.
+                return candidate == "/" || PathNormalizer.isWithin(base, candidate)
+                    || (PathNormalizer.isWithin(candidate, base) && !PathNormalizer.isWithin(path, root + "/Roblox"))
+            }
+        }
+    }
+
+    /// Un journal utilisateur reste sous sa racine réelle, même après l'analyse.
+    public func allowsUserLog(_ url: URL) -> Bool {
+        userLogParent(url) != nil
+    }
+
+    public func userLogParent(_ url: URL) -> URL? {
+        userLogLocation(url)?.parent
+    }
+
+    /// Le dossier de premier niveau peut porter l'identifiant exact du bundle.
+    public func userLogLocation(_ url: URL) -> (parent: URL, bundleDirectory: String?)? {
+        let root = PathNormalizer.normalize(URL(fileURLWithPath: home).appendingPathComponent("Library/Logs").path)
+        let literal = PathNormalizer.normalize(url.path)
+        guard literal.hasPrefix(root + "/"), check(url, protectUserLogs: false) == .allowed else { return nil }
+        let homeURL = URL(fileURLWithPath: home).resolvingSymlinksInPath()
+        let expected = PathNormalizer.normalize(homeURL.appendingPathComponent("Library/Logs").path)
+        let parent = url.deletingLastPathComponent()
+        let relativeParent = PathNormalizer.normalize(parent.path).dropFirst(root.count)
+        let resolved = parent.resolvingSymlinksInPath()
+        guard PathNormalizer.normalize(resolved.path) == expected + relativeParent else { return nil }
+        let folder = relativeParent.split(separator: "/").first
+        let bundleDirectory = folder.flatMap { $0.contains(".") ? String($0) : nil }
+        return (resolved, bundleDirectory)
+    }
 
     // MARK: Nuages
 

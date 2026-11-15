@@ -296,7 +296,8 @@ struct RunningOwnerTests {
         let engine = CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: nil,
                                    pathGuard: PathGuard(home: bench.root.appendingPathComponent("maison")),
                                    processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil },
-                                   deleteSnapshots: { _ in false }, runningApps: { ["com.spotify.client"] })
+                                   deleteSnapshots: { _ in false }, runningApps: { ["com.spotify.client"] },
+                                   allowsPathBasedRemoval: true)
         var item = bench.item(folder, method: .removeNow, safety: .safe)
         item = CleanupItem(id: item.id, title: "Spotify", paths: [folder], category: .appCaches, owner: "Spotify",
                            ruleID: "cache.app", safety: .safe, method: .removeNow, sizes: item.sizes,

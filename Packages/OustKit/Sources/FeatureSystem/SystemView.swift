@@ -36,7 +36,7 @@ public struct SystemView: View {
     }
 
     static let categories: [ItemCategory] = [
-        .downloads, .systemDownloads, .appCaches, .creative, .games, .cloudFiles, .attachments, .screenshots, .trash,
+        .downloads, .systemDownloads, .appCaches, .userLogs, .creative, .games, .cloudFiles, .attachments, .screenshots, .trash,
         .iosBackups, .virtualMachines, .diskTraces, .protectedOnDisk,
     ]
 }
@@ -50,11 +50,11 @@ private struct SystemCategory: View {
         if !items.isEmpty {
             ItemGroup(title: L10n.string(category.localizationKey), symbol: category.symbol,
                       tint: Palette.color(for: category),
-                      total: items.filter(\.isSelectable).reduce(0) { $0 + $1.sizes.freeable }) {
+                      total: items.filter(model.canSelectForCleanup).reduce(0) { $0 + $1.sizes.freeable }) {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     note
                     ForEach(items) { item in
-                        ItemRow(item, isSelected: model.isInCart(item.id), showOwner: Self.showsOwner.contains(category)) {
+                        ItemRow(item, enabled: model.canSelectForCleanup(item), isSelected: model.isInCart(item.id), showOwner: Self.showsOwner.contains(category)) {
                             model.toggle(item)
                         }
                         Divider().opacity(0.25)
@@ -79,6 +79,7 @@ private struct SystemCategory: View {
             case .protectedOnDisk: Text("system.protected_note", bundle: .oust)
             case .cloudFiles: Text("system.cloud_note", bundle: .oust)
             case .attachments: Text("system.attachments_note", bundle: .oust)
+            case .userLogs: Text("system.user_logs_note", bundle: .oust)
             default: EmptyView()
             }
         }

@@ -86,10 +86,12 @@ struct OrphanTests {
         ])
         let group = try #require(found.first)
         let items = group.leftovers.map { $0.cleanupItem(in: group) }
-        // Jamais coché d'office, toujours à la corbeille du Mac (RULES.md, règles 4 et 5).
-        #expect(items.allSatisfy { $0.safety == .review && $0.method == .trash && $0.category == .appLeftovers })
+        // Les journaux restent visibles avec les autres restes et protégés.
+        let log = try #require(items.first { $0.paths.first?.deletingLastPathComponent().lastPathComponent == "Logs" })
+        #expect(log.safety == .protected && log.protections.contains(.unknownState) && !log.isSelectable)
+        #expect(items.allSatisfy { $0.method == .trash && $0.category == .appLeftovers })
         #expect(items.allSatisfy { !PreselectionPolicy().preselects($0) })
-        #expect(items.allSatisfy { $0.isSelectable })
+        #expect(items.filter { $0.id != log.id }.allSatisfy { $0.safety == .review && $0.isSelectable })
     }
 
     @Test("Un nom, un jeton, une bibliothèque partagée, Apple, des secrets : jamais")

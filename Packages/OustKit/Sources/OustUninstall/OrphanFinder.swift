@@ -231,7 +231,10 @@ public enum OrphanFinder {
         let pathGuard = PathGuard(home: home)
         var kept: [Candidate] = []
         for var candidate in candidates {
-            guard pathGuard.allows(candidate.url) else { continue }
+            if !pathGuard.allows(candidate.url) {
+                guard pathGuard.protectsUserLogs(candidate.url) else { continue }
+                candidate.protection = candidate.protection ?? .unknownState
+            }
             if candidate.associated.contains(where: { claims.owner(of: $0) != nil }) { continue }
             if let name = candidate.appName, claims.hasApplication(named: name) { continue }
             if claims.owner(of: candidate.identifier) != nil { continue }
