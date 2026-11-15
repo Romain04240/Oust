@@ -16,6 +16,7 @@ public struct DuplicateFile: Sendable, Hashable, Identifiable {
     public let privateSize: Int64
     public let modified: Date?
     public let created: Date?
+    public internal(set) var privateSizeKnown = true
 }
 
 /// Des fichiers au contenu identique, octet pour octet.
@@ -43,6 +44,7 @@ public struct DuplicateGroup: Sendable, Identifiable {
 /// Réglages d'une recherche de doublons.
 public struct DuplicateOptions: Sendable {
     public var roots: [URL]
+    public var exclusions = DuplicateExclusions()
     public var minimumSize: Int64
     /// Jamais proposés au retrait : les originaux de référence.
     public var referenceFolders: [URL]
@@ -68,9 +70,12 @@ public struct DuplicateOptions: Sendable {
 
 /// L'avancement d'une recherche de doublons.
 public final class DuplicateProgress: Sendable {
+    private let cancelled = Atomic<Bool>(false)
     private let examined = Atomic<Int>(0)
     private let hashed = Atomic<Int>(0)
     public init() {}
+    public var isCancelled: Bool { cancelled.load(ordering: .relaxed) }
+    public func cancel() { cancelled.store(true, ordering: .relaxed) }
     public var filesExamined: Int { examined.load(ordering: .relaxed) }
     public var filesHashed: Int { hashed.load(ordering: .relaxed) }
     func didExamine() { examined.add(1, ordering: .relaxed) }
@@ -107,6 +112,7 @@ public enum DuplicateFinder {
         // Lire un fichier iCloud non téléchargé pour son empreinte le ferait
         // télécharger : jamais, analyse lancée ou non.
         Scanner.configureProcessIOPolicy()
+        guard options.exclusions.canSearch(options.roots) else { return [] }
         let candidates = tree.flatMap { collect(options, from: $0, progress: progress) }
             ?? collect(options, progress: progress)
 
@@ -115,22 +121,50 @@ public enum DuplicateFinder {
 
         var groups: [DuplicateGroup] = []
         for sameSize in bySize {
+            guard !progress.isCancelled else { return [] }
             // 2. Liens physiques et clones complets : déjà un seul contenu sur le
             //    disque, en retirer un ne rend rien. On garde un représentant.
             let distinct = collapseShared(sameSize)
             guard distinct.count > 1 else { continue }
 
             // 3. Empreinte partielle (tête et queue), puis 4. complète.
-            let partial = await hashGroups(distinct, progress: progress) { try partialHash($0.url, size: $0.logicalSize) }
+            let partial = await hashGroups(distinct, progress: progress) {
+                guard !progress.isCancelled else { return nil }
+                let file = $0
+                if options.exclusions.requiresBoundRead {
+                    return try options.exclusions.withRead(file.url, expected: file.readIdentity) { handle, size in
+                        try partialHash(handle, size: size)
+                    }
+                }
+                return try partialHash(file.url, size: file.logicalSize)
+            }
             for samePartial in partial.values where samePartial.count > 1 {
-                let full = await hashGroups(samePartial, progress: progress) { try fullHash($0.url) }
+                let full = await hashGroups(samePartial, progress: progress) {
+                    guard !progress.isCancelled else { return nil }
+                    let file = $0
+                    if options.exclusions.requiresBoundRead {
+                        return try options.exclusions.withRead(file.url, expected: file.readIdentity) { handle, _ in
+                            try fullHash(handle)
+                        }
+                    }
+                    return try fullHash(file.url)
+                }
                 for (hash, identical) in full where identical.count > 1 {
-                    let files = identical.map { scanned in
-                        DuplicateFile(url: scanned.url, logicalSize: scanned.logicalSize,
-                                      allocated: scanned.allocated > 0 ? scanned.allocated : allocatedSize(scanned.url),
-                                      privateSize: Scanner.privateSize(of: scanned.url) ?? scanned.allocated,
-                                      modified: scanned.modified, created: scanned.created ?? birthDate(scanned.url))
+                    let files = identical.compactMap { scanned -> DuplicateFile? in
+                        if options.exclusions.requiresBoundRead {
+                            guard let identity = scanned.readIdentity,
+                                  let storage = options.exclusions.storage(of: scanned.url, expected: identity) else { return nil }
+                            return DuplicateFile(url: scanned.url, logicalSize: identity.size,
+                                                 allocated: storage.allocated, privateSize: storage.privateSize ?? 0,
+                                                 modified: identity.modified, created: identity.created,
+                                                 privateSizeKnown: storage.privateSize != nil)
+                        }
+                        return DuplicateFile(url: scanned.url, logicalSize: scanned.logicalSize,
+                                             allocated: scanned.allocated > 0 ? scanned.allocated : allocatedSize(scanned.url),
+                                             privateSize: Scanner.privateSize(of: scanned.url) ?? scanned.allocated,
+                                             modified: scanned.modified, created: scanned.created ?? birthDate(scanned.url))
                     }.sorted { $0.url.path < $1.url.path }
+                    guard files.count > 1 else { continue }
                     let selection = SmartSelection(options: options)
                     let choice = selection.choose(files)
                     let automatic = choice.keep.map { (keep: $0, remove: choice.remove) } ?? selection.tieBreak(files)
@@ -139,6 +173,7 @@ public enum DuplicateFinder {
                 }
             }
         }
+        guard !progress.isCancelled, options.exclusions.canSearch(options.roots) else { return [] }
         return groups.sorted { $0.potential > $1.potential }
     }
 
@@ -149,10 +184,10 @@ public enum DuplicateFinder {
         let logicalSize: Int64
         let allocated: Int64
         let fileID: String?
-        let contentID: Int64?
-        let sharesContent: Bool
+        let contentKey: DuplicateContentKey?
         let modified: Date?
         let created: Date?
+        let readIdentity: DuplicateReadIdentity?
     }
 
     static func collect(_ options: DuplicateOptions, progress: DuplicateProgress) -> [Scanned] {
@@ -162,32 +197,36 @@ public enum DuplicateFinder {
             .isDirectoryKey,
         ]
         var result: [Scanned] = []
-        for root in options.roots {
+        for root in options.roots where options.exclusions.permitsDirectory(root) {
             guard let enumerator = FileManager.default.enumerator(
                 at: root, includingPropertiesForKeys: keys,
                 options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true }
             ) else { continue }
             for case let url as URL in enumerator {
+                guard !progress.isCancelled else { return [] }
                 guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
                 if values.isDirectory == true {
-                    if skippedFolders.contains(url.lastPathComponent) || skippedExtensions.contains(url.pathExtension) {
+                    if !options.exclusions.permitsDirectory(url) || skippedFolders.contains(url.lastPathComponent) || skippedExtensions.contains(url.pathExtension) {
                         enumerator.skipDescendants()
                     }
                     continue
                 }
-                guard values.isRegularFile == true, let size = values.fileSize, Int64(size) >= options.minimumSize else {
+                guard options.exclusions.permitsFile(url), values.isRegularFile == true, let size = values.fileSize, Int64(size) >= options.minimumSize else {
                     continue
                 }
+                let identity = options.exclusions.requiresBoundRead ? options.exclusions.readIdentity(url) : nil
+                guard !options.exclusions.requiresBoundRead || identity?.size == Int64(size) else { continue }
                 progress.didExamine()
                 result.append(Scanned(
                     url: url,
                     logicalSize: Int64(size),
                     allocated: Int64(values.totalFileAllocatedSize ?? size),
-                    fileID: values.fileResourceIdentifier.map { "\($0)" },
-                    contentID: values.fileContentIdentifier,
-                    sharesContent: values.mayShareFileContent ?? false,
+                    fileID: identity?.fileID ?? values.fileResourceIdentifier.map { "\($0)" },
+                    contentKey: contentKey(url, identity: identity, exclusions: options.exclusions,
+                                           fallbackID: values.mayShareFileContent == true ? values.fileContentIdentifier : nil),
                     modified: values.contentModificationDate,
-                    created: values.creationDate
+                    created: values.creationDate,
+                    readIdentity: identity
                 ))
             }
         }
@@ -211,29 +250,37 @@ public enum DuplicateFinder {
             packages[ext] = package
             return package
         }
-        for root in options.roots {
+        for root in options.roots where options.exclusions.permitsDirectory(root) {
             guard let node = tree.descendant(atPath: root.standardizedFileURL.path), node.status == .ok else { return nil }
             var stack: [(TreeNode, URL)] = [(node, root.standardizedFileURL)]
             while let (directory, url) = stack.popLast() {
+                guard !progress.isCancelled else { return [] }
                 for leaf in directory.files where leaf.logicalSize >= options.minimumSize && !leaf.name.hasPrefix(".") {
+                    guard !progress.isCancelled else { return [] }
+                    let file = url.appendingPathComponent(leaf.name, isDirectory: false)
+                    let identity = options.exclusions.requiresBoundRead ? options.exclusions.readIdentity(file) : nil
+                    guard !options.exclusions.requiresBoundRead
+                        || (identity?.size == leaf.logicalSize && identity?.inode == leaf.fileID) else { continue }
                     progress.didExamine()
                     result.append(Scanned(
-                        url: url.appendingPathComponent(leaf.name, isDirectory: false),
+                        url: file,
                         logicalSize: leaf.logicalSize,
                         allocated: leaf.sizes.allocated,
-                        fileID: String(leaf.fileID),
+                        fileID: identity?.fileID ?? String(leaf.fileID),
                         // Même identifiant de flux de données : clones l'un de l'autre.
-                        contentID: leaf.cloneID == 0 ? nil : Int64(bitPattern: leaf.cloneID),
-                        sharesContent: leaf.cloneID != 0,
+                        contentKey: contentKey(file, identity: identity, exclusions: options.exclusions,
+                                               fallbackID: leaf.cloneID != 0 ? Int64(bitPattern: leaf.cloneID) : nil),
                         modified: leaf.modified,
-                        created: nil
+                        created: nil,
+                        readIdentity: identity
                     ))
                 }
                 for child in directory.children where child.status == .ok {
                     let name = child.name
                     if name.hasPrefix(".") || skippedFolders.contains(name) { continue }
                     if skippedExtensions.contains((name as NSString).pathExtension) || isPackage(name) { continue }
-                    stack.append((child, url.appendingPathComponent(name, isDirectory: true)))
+                    let folder = url.appendingPathComponent(name, isDirectory: true)
+                    if options.exclusions.permitsDirectory(folder) { stack.append((child, folder)) }
                 }
             }
         }
@@ -257,23 +304,30 @@ public enum DuplicateFinder {
                     + Double(info.st_birthtimespec.tv_nsec) / 1e9)
     }
 
+    static func contentKey(_ url: URL, identity: DuplicateReadIdentity?, exclusions: DuplicateExclusions,
+                           fallbackID: Int64?) -> DuplicateContentKey? {
+        if let identity { return exclusions.cloneKey(of: url, identity: identity) }
+        return fallbackID.map { DuplicateContentKey(device: nil, identifier: $0) }
+    }
+
     /// Un seul représentant par inode, et par contenu APFS partagé.
     static func collapseShared(_ files: [Scanned]) -> [Scanned] {
         var seenInodes = Set<String>()
-        var seenContent = Set<Int64>()
+        var seenContent = Set<DuplicateContentKey>()
         return files.filter { file in
             if let id = file.fileID, !seenInodes.insert(id).inserted { return false }
-            if file.sharesContent, let content = file.contentID, !seenContent.insert(content).inserted { return false }
+            if let content = file.contentKey, !seenContent.insert(content).inserted { return false }
             return true
         }
     }
 
     static func hashGroups(_ files: [Scanned], progress: DuplicateProgress,
-                           hash: @escaping @Sendable (Scanned) throws -> String) async -> [String: [Scanned]] {
+                           hash: @escaping @Sendable (Scanned) throws -> String?) async -> [String: [Scanned]] {
         await withTaskGroup(of: (String, Scanned)?.self) { group in
             var result: [String: [Scanned]] = [:]
             var running = 0
             for file in files {
+                guard !progress.isCancelled else { break }
                 if running >= 4, let next = await group.next() {
                     running -= 1
                     if let (key, value) = next { result[key, default: []].append(value) }
@@ -295,6 +349,10 @@ public enum DuplicateFinder {
     static func partialHash(_ url: URL, size: Int64) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
+        return try partialHash(handle, size: size)
+    }
+
+    private static func partialHash(_ handle: FileHandle, size: Int64) throws -> String {
         var hasher = SHA256()
         let chunk = 16 * 1024
         hasher.update(data: try handle.read(upToCount: chunk) ?? Data())
@@ -309,6 +367,10 @@ public enum DuplicateFinder {
     static func fullHash(_ url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
+        return try fullHash(handle)
+    }
+
+    private static func fullHash(_ handle: FileHandle) throws -> String {
         var hasher = SHA256()
         while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty {
             hasher.update(data: data)

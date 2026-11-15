@@ -206,17 +206,26 @@ extension AppModel {
     /// l'autre, et jamais sans l'arbre, qui garantit qu'on ne quitte pas le
     /// volume (RULES.md, règle 10).
     func findDuplicates(on volume: VolumeDescriptor) async {
+        let session = duplicateReadSession
+        guard session.acquire() else { return }
+        defer { session.release() }
         duplicates = .running
         let progress = DuplicateProgress()
         duplicateProgress = progress
         // À jour : par FSEvents si l'arbre date du branchement, en entier sinon.
-        guard let tree = await volumeIndexForAnalysis(volume)?.root else {
+        let revision = duplicateExclusionRevision
+        guard canSearchDuplicates([volume.scanRoot]) else { return }
+        let tree = await volumeIndexForAnalysis(volume)?.root
+        guard revision == duplicateExclusionRevision else { return }
+        guard let tree else {
             duplicates = .idle
             return
         }
         var options = DuplicateOptions(roots: [volume.scanRoot])
         options.minimumSize = Int64(preferences.duplicateMinimumMegabytes) * 1_000_000
+        options.exclusions = preferences.duplicateExclusions
         let groups = await DuplicateFinder.find(options, tree: tree, progress: progress)
+        guard revision == duplicateExclusionRevision, canSearchDuplicates(options.roots) else { return }
         showDuplicates(groups, volume: volume)
     }
 

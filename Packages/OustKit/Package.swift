@@ -239,7 +239,7 @@ let package = Package(
             dependencies: ["OustLocalization", "OustCore", "OustUninstall", "OustArchive", "OustModel"]
         ),
         .testTarget(name: "OustUninstallTests", dependencies: ["OustUninstall", "OustClean", "OustCore", "OustSafety"]),
-        .testTarget(name: "OustModelTests", dependencies: ["OustModel", "OustCore", "OustDuplicates", "OustVolume"]),
+        .testTarget(name: "OustModelTests", dependencies: ["OustModel", "OustCore", "OustDuplicates", "OustVolume", "OustDesignSystem"]),
         .testTarget(name: "OustUpdatesTests", dependencies: ["OustUpdates", "OustCore"]),
         .testTarget(name: "OustArchiveTests", dependencies: ["OustArchive", "OustClean", "OustCore", "OustSafety"]),
         .testTarget(name: "OustLargeFilesTests", dependencies: ["OustLargeFiles", "OustScan", "OustCore", "OustSafety"]),

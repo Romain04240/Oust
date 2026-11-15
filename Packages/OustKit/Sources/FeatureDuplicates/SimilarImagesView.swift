@@ -94,6 +94,7 @@ struct SimilarSearchButton: View {
 /// de coché (RULES.md, règle 4).
 struct SimilarImagesContent: View {
     let model: AppModel
+    let preview: FilePreview
 
     private var similar: SimilarImagesModel { model.similarImages }
 
@@ -104,7 +105,7 @@ struct SimilarImagesContent: View {
         case .running:
             SimilarWorking(progress: similar.progress, onCancel: similar.cancel)
         case .done:
-            SimilarResults(model: model)
+            SimilarResults(model: model, preview: preview)
         }
     }
 }
@@ -243,7 +244,7 @@ private struct SimilarResults: View {
     let model: AppModel
     @State private var limit = 40
     @State private var editingFolders = false
-    @State private var preview = FilePreview()
+    let preview: FilePreview
     @State private var selection: SimilarImage.ID?
 
     private var similar: SimilarImagesModel { model.similarImages }
@@ -296,6 +297,7 @@ private struct SimilarResults: View {
             LazyVStack(spacing: Spacing.medium) {
                 ForEach(shown) { group in
                     SimilarGroupCard(model: model, group: group, selection: $selection) { image in
+                        guard model.canUseDuplicateQuickLook else { return }
                         selection = image.id
                         preview.show(image.url, among: group.images.map(\.url))
                     }
@@ -303,13 +305,14 @@ private struct SimilarResults: View {
             }
         }
         .previewKeys(selection: $selection, order: shown.flatMap { $0.images.map(\.id) }) { id in
+            guard model.canUseDuplicateQuickLook else { return }
             if case let (group, image)? = find(id, in: shown) { preview.toggle(image.url, among: group.images.map(\.url)) }
         }
         .filePreview(preview)
         // Le panneau montre les images d'un groupe ; il suit la sélection d'un
         // groupe à l'autre, et la sélection suit ses flèches.
         .onChange(of: selection) {
-            guard let selection, case let (group, image)? = find(selection, in: shown) else { return }
+            guard model.canUseDuplicateQuickLook, let selection, case let (group, image)? = find(selection, in: shown) else { return }
             preview.follow(image.url, among: group.images.map(\.url))
         }
         .onChange(of: preview.current) { if let current = preview.current { selection = current.path } }
@@ -406,7 +409,8 @@ private struct SimilarTile: View {
                     .clipShape(RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(Text("quicklook.help", bundle: .oust))
+            .disabled(!model.canUseDuplicateQuickLook)
+            .help(Text(model.canUseDuplicateQuickLook ? "quicklook.help" : "duplicates.exclusions_preview", bundle: .oust))
             .accessibilityLabel(Text(verbatim: image.url.lastPathComponent))
             .accessibilityHint(Text("quicklook.action", bundle: .oust))
             .overlay(RoundedRectangle(cornerRadius: Radius.small, style: .continuous)
@@ -466,7 +470,9 @@ private struct SimilarTile: View {
                 Text(verbatim: date.formatted(date: .abbreviated, time: .shortened))
                     .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            if image.isClone {
+            if !image.privateSizeKnown {
+                Tag(L10n.string("duplicates.private_size_unknown"), symbol: "questionmark.circle", tint: .secondary)
+            } else if image.isClone {
                 Tag(L10n.string("similar.clone_tag"), symbol: "square.on.square", tint: .secondary)
                     .help(Text("similar.clone_help", bundle: .oust))
             }
@@ -477,7 +483,7 @@ private struct SimilarTile: View {
             }
         }
         .contextMenu {
-            PreviewMenuItem(action: open)
+            if model.canUseDuplicateQuickLook { PreviewMenuItem(action: open) }
             Button { NSWorkspace.shared.activateFileViewerSelecting([image.url]) } label: {
                 Label { Text("row.reveal", bundle: .oust) } icon: { Image(systemName: "folder") }
             }

@@ -6325,6 +6325,210 @@
         }
       }
     },
+    "duplicates.private_size_unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reclaimable space unknown"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espace récupérable inconnu"
+          }
+        }
+      }
+    },
+    "duplicates.exclusions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Folders excluded from Duplicates"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dossiers exclus de Doublons"
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exclude a folder…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exclure un dossier…"
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_blocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search stopped. Check the folder exclusions."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherche bloquée. Vérifie les dossiers exclus."
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_check": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check folder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À vérifier"
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These folders are skipped in Identical Files and Similar Images."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ces dossiers sont ignorés dans Identiques et Images similaires."
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_invalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a real folder on a local disk."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisis un dossier réel sur un disque local."
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_ok": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove exclusion"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retirer l’exclusion"
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_preview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick Look is unavailable while folder exclusions are active."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coup d’œil est indisponible tant que les exclusions de dossiers sont actives."
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_wait_quicklook": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close Quick Look to apply the folder exclusions."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ferme Coup d’œil pour appliquer les exclusions de dossiers."
+          }
+        }
+      }
+    },
+    "duplicates.exclusions_reset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset the unreadable exclusions list"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réinitialiser la liste d’exclusions illisible"
+          }
+        }
+      }
+    },
     "duplicates.add_suggested": {
       "extractionState": "manual",
       "localizations": {

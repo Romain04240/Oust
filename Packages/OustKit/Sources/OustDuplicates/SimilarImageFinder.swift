@@ -18,6 +18,7 @@ import Vision
 /// strict sinon, et jamais tout comparé à tout.
 public struct SimilarImageOptions: Sendable {
     public var roots: [URL]
+    public var exclusions = DuplicateExclusions()
     /// Jamais parcourus, même sous un dossier choisi : les dossiers de projets.
     public var excludedFolders: [URL]
     /// Distance de Vision en dessous de laquelle deux images d'une même prise de
@@ -95,19 +96,24 @@ public struct SimilarImage: Sendable, Hashable, Identifiable {
     public let logicalSize: Int64
     public let allocated: Int64
     /// Ce que sa suppression rendrait vraiment (clones et snapshots déduits).
-    public let privateSize: Int64
+    private let measuredPrivateSize: Int64?
+    private let confirmedFullClone: Bool?
+    public var privateSize: Int64 { measuredPrivateSize ?? 0 }
+    public var privateSizeKnown: Bool { measuredPrivateSize != nil }
     public let modified: Date?
     /// La prise de vue (EXIF), quand le fichier la porte.
     public let captured: Date?
     public let pixelWidth: Int
     public let pixelHeight: Int
+    var readIdentity: DuplicateReadIdentity?
 
-    public init(url: URL, logicalSize: Int64, allocated: Int64, privateSize: Int64, modified: Date?, captured: Date?,
-                pixelWidth: Int, pixelHeight: Int) {
+    public init(url: URL, logicalSize: Int64, allocated: Int64, privateSize: Int64?, modified: Date?, captured: Date?,
+                pixelWidth: Int, pixelHeight: Int, confirmedFullClone: Bool? = nil) {
         self.url = url
         self.logicalSize = logicalSize
         self.allocated = allocated
-        self.privateSize = privateSize
+        self.measuredPrivateSize = privateSize
+        self.confirmedFullClone = confirmedFullClone
         self.modified = modified
         self.captured = captured
         self.pixelWidth = pixelWidth
@@ -117,7 +123,9 @@ public struct SimilarImage: Sendable, Hashable, Identifiable {
     public var pixels: Int { pixelWidth * pixelHeight }
     /// Tous ses blocs sont partagés avec un autre fichier (clone APFS) : la
     /// jeter ne rendrait rien tant que l'autre existe.
-    public var isClone: Bool { privateSize == 0 && allocated > 0 }
+    public var isClone: Bool {
+        privateSizeKnown && (confirmedFullClone ?? (privateSize == 0 && allocated > 0))
+    }
 
     /// La meilleure copie à garder : la plus grande résolution, puis l'originale,
     /// c'est-à-dire la plus ancienne (Romain, 18/10/2026 : l'étoile allait à une
@@ -148,6 +156,10 @@ public struct SimilarImageGroup: Sendable, Hashable, Identifiable {
     public var best: SimilarImage? { images.first }
     /// Ce que le groupe rendrait si l'on ne gardait que la meilleure.
     public var potential: Int64 { images.dropFirst().reduce(0) { $0 + $1.privateSize } }
+    public var isCloneOnly: Bool {
+        images.count > 1 && potential == 0 && images.allSatisfy(\.privateSizeKnown)
+            && images.dropFirst().allSatisfy(\.isClone)
+    }
 }
 
 /// Ce que la recherche a trouvé, et ce qu'elle a laissé de côté.
@@ -216,6 +228,11 @@ public struct ImagePrint: Sendable, Hashable {
 /// Ce qui calcule l'empreinte d'une image : Vision, ou un faux dans les tests.
 public protocol ImagePrinter: Sendable {
     func featurePrint(of url: URL, side: Int) -> ImagePrint?
+    func featurePrint(of image: CGImage, for url: URL) -> ImagePrint?
+}
+
+public extension ImagePrinter {
+    func featurePrint(of image: CGImage, for url: URL) -> ImagePrint? { nil }
 }
 
 /// Vision, sur une vignette décodée par ImageIO. Tout reste sur ce Mac :
@@ -226,6 +243,10 @@ public struct VisionImagePrinter: ImagePrinter {
 
     public func featurePrint(of url: URL, side: Int) -> ImagePrint? {
         guard let image = ImageReader.thumbnail(of: url, side: side) else { return nil }
+        return featurePrint(of: image, for: url)
+    }
+
+    public func featurePrint(of image: CGImage, for url: URL) -> ImagePrint? {
         let request = VNGenerateImageFeaturePrintRequest()
         do {
             try VNImageRequestHandler(cgImage: image).perform([request])
@@ -248,6 +269,24 @@ public struct ImageThumbnail: @unchecked Sendable {
     }
 }
 
+/// ImageIO peut garder le fournisseur après le décodage. Toute lecture tardive
+/// est refusée avant que le descripteur de l'appelant puisse être réutilisé.
+private final class BoundImageInput {
+    private let lock = NSLock()
+    private var fd: Int32
+
+    init(fd: Int32) { self.fd = fd }
+
+    func read(_ buffer: UnsafeMutableRawPointer, position: off_t, count: Int) -> Int {
+        lock.withLock {
+            guard fd >= 0 else { return 0 }
+            return max(0, pread(fd, buffer, count, position))
+        }
+    }
+
+    func stop() { lock.withLock { fd = -1 } }
+}
+
 /// Lire une image sans la charger en entier.
 public enum ImageReader {
 
@@ -259,8 +298,13 @@ public enum ImageReader {
     }
 
     public static func facts(of url: URL) -> Facts? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
-              CGImageSourceGetCount(source) > 0,
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return nil }
+        return facts(from: source)
+    }
+
+    private static func facts(from source: CGImageSource) -> Facts? {
+        guard CGImageSourceGetCount(source) > 0,
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
@@ -279,6 +323,10 @@ public enum ImageReader {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
             return nil
         }
+        return thumbnail(from: source, url: url, side: side)
+    }
+
+    private static func thumbnail(from source: CGImageSource, url: URL, side: Int) -> CGImage? {
         func make(always: Bool) -> CGImage? {
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: always,
@@ -294,6 +342,50 @@ public enum ImageReader {
             return preview
         }
         return make(always: true)
+    }
+
+    static func facts(of url: URL, expected: DuplicateReadIdentity?, exclusions: DuplicateExclusions) -> Facts? {
+        guard exclusions.requiresBoundRead else { return facts(of: url) }
+        return exclusions.withRead(url, expected: expected) { handle, size in
+            withSource(handle, size: size, facts(from:))
+        }
+    }
+
+    public static func thumbnail(of image: SimilarImage, side: Int, exclusions: DuplicateExclusions) -> CGImage? {
+        thumbnail(of: image.url, expected: image.readIdentity, side: side, exclusions: exclusions)
+    }
+
+    private static func withSource<T>(_ handle: FileHandle, size: Int64,
+                                      _ read: (CGImageSource) -> T?) -> T? {
+        let input = BoundImageInput(fd: handle.fileDescriptor)
+        defer { input.stop() }
+        let context = Unmanaged.passRetained(input)
+        var callbacks = CGDataProviderDirectCallbacks(
+            version: 0, getBytePointer: nil, releaseBytePointer: nil,
+            getBytesAtPosition: { info, buffer, position, count in
+                guard let info else { return 0 }
+                return Unmanaged<BoundImageInput>.fromOpaque(info).takeUnretainedValue()
+                    .read(buffer, position: position, count: count)
+            },
+            releaseInfo: { info in
+                if let info { Unmanaged<BoundImageInput>.fromOpaque(info).release() }
+            }
+        )
+        guard let provider = CGDataProvider(directInfo: context.toOpaque(), size: size, callbacks: &callbacks) else {
+            context.release()
+            return nil
+        }
+        guard let source = CGImageSourceCreateWithDataProvider(provider, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return nil }
+        return read(source)
+    }
+
+    static func thumbnail(of url: URL, expected: DuplicateReadIdentity?, side: Int,
+                          exclusions: DuplicateExclusions) -> CGImage? {
+        guard exclusions.requiresBoundRead else { return thumbnail(of: url, side: side) }
+        return exclusions.withRead(url, expected: expected) { handle, size in
+            withSource(handle, size: size) { thumbnail(from: $0, url: url, side: side) }
+        }
     }
 
     /// « 2026:10:18 14:32:10 », à l'heure de l'appareil : son décalage s'il l'a
@@ -373,6 +465,7 @@ public enum SimilarImageFinder {
         // Lire un fichier iCloud non téléchargé le ferait télécharger : jamais.
         Scanner.configureProcessIOPolicy()
         var findings = SimilarImageFindings()
+        guard options.exclusions.canSearch(options.roots) else { return findings }
 
         progress.begin(.listing, total: 0)
         let listing = collect(options, progress: progress)
@@ -385,7 +478,8 @@ public enum SimilarImageFinder {
         for file in listing.files {
             guard !progress.isCancelled else { return findings }
             progress.advance()
-            guard let facts = ImageReader.facts(of: file.url) else { findings.unreadable += 1; continue }
+            guard let facts = ImageReader.facts(of: file.url, expected: file.readIdentity, exclusions: options.exclusions)
+            else { findings.unreadable += 1; continue }
             guard min(facts.pixelWidth, facts.pixelHeight) >= options.minimumSide else { continue }
             images.append(Candidate(file: file, facts: facts))
         }
@@ -395,7 +489,7 @@ public enum SimilarImageFinder {
         let pairs = candidatePairs(images, stems: stems, options: options)
         let needed = pairedImageIndices(pairs, imageCount: images.count)
         progress.begin(.printing, total: needed.count)
-        let prints = await featurePrints(of: needed.map { images[$0].file.url }, options: options,
+        let prints = await featurePrints(of: needed.map { images[$0].file }, options: options,
                                          printer: printer, progress: progress)
         guard !progress.isCancelled else { return findings }
         var printed: [Int: ImagePrint] = [:]
@@ -408,19 +502,35 @@ public enum SimilarImageFinder {
             sameShot(images[a], images[b], stems: (stems[a], stems[b]), window: options.window)
                 ? options.threshold : options.strictThreshold
         }
-        findings.groups = clusters.map { members in
-            SimilarImageGroup(images: members.map { index in
+        findings.groups = clusters.compactMap { members in
+            let verified = members.compactMap { index -> SimilarImage? in
                 let file = images[index].file
                 let facts = images[index].facts
-                return SimilarImage(url: file.url, logicalSize: file.logicalSize, allocated: file.allocated,
-                                    privateSize: Scanner.privateSize(of: file.url) ?? file.allocated,
-                                    modified: file.modified, captured: facts.captured,
-                                    pixelWidth: facts.pixelWidth, pixelHeight: facts.pixelHeight)
-            })
+                let allocated: Int64
+                let privateSize: Int64?
+                let confirmedFullClone: Bool?
+                if options.exclusions.requiresBoundRead {
+                    guard let storage = options.exclusions.storage(of: file.url, expected: file.readIdentity) else { return nil }
+                    allocated = storage.allocated
+                    privateSize = storage.privateSize
+                    confirmedFullClone = storage.fullCloneID != nil
+                } else {
+                    allocated = file.allocated
+                    privateSize = Scanner.privateSize(of: file.url) ?? allocated
+                    confirmedFullClone = nil
+                }
+                var image = SimilarImage(url: file.url, logicalSize: file.logicalSize, allocated: allocated,
+                                         privateSize: privateSize, modified: file.readIdentity?.modified ?? file.modified,
+                                         captured: facts.captured, pixelWidth: facts.pixelWidth, pixelHeight: facts.pixelHeight,
+                                         confirmedFullClone: confirmedFullClone)
+                image.readIdentity = file.readIdentity
+                return image
+            }
+            return verified.count > 1 ? SimilarImageGroup(images: verified) : nil
         }
         .sorted { ($0.potential, $0.id) > ($1.potential, $1.id) }
         progress.advance(by: pairs.count)
-        return findings
+        return options.exclusions.canSearch(options.roots) ? findings : SimilarImageFindings()
     }
 
     // MARK: Parcours
@@ -430,9 +540,9 @@ public enum SimilarImageFinder {
         let logicalSize: Int64
         let allocated: Int64
         let fileID: String?
-        let contentID: Int64?
-        let sharesContent: Bool
+        let contentKey: DuplicateContentKey?
         let modified: Date?
+        let readIdentity: DuplicateReadIdentity?
     }
 
     struct Candidate: Sendable {
@@ -454,7 +564,7 @@ public enum SimilarImageFinder {
         var seen = Set<String>()
         var catalogFolders: [String] = []
         var skippedInCloud = 0
-        for root in options.roots {
+        for root in options.roots where options.exclusions.permitsDirectory(root) {
             guard let enumerator = FileManager.default.enumerator(
                 at: root, includingPropertiesForKeys: keys,
                 options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true }
@@ -472,14 +582,14 @@ public enum SimilarImageFinder {
                 if values.isDirectory == true {
                     // Un point de montage sous un dossier choisi : un autre disque,
                     // jamais parcouru sans qu'on l'ait choisi (RULES.md, règle 10).
-                    if values.isVolume == true || skippedFolderNames.contains(url.lastPathComponent)
+                    if !options.exclusions.permitsDirectory(url) || values.isVolume == true || skippedFolderNames.contains(url.lastPathComponent)
                         || skippedExtensions.contains(ext) || excluded.contains(url.standardizedFileURL.path)
                         || isRepository(url) {
                         enumerator.skipDescendants()
                     }
                     continue
                 }
-                guard values.isRegularFile == true, imageExtensions.contains(ext) || rawExtensions.contains(ext),
+                guard options.exclusions.permitsFile(url), values.isRegularFile == true, imageExtensions.contains(ext) || rawExtensions.contains(ext),
                       let size = values.fileSize, Int64(size) >= options.minimumSize else { continue }
                 // Un fichier évincé par iCloud n'occupe rien : le lire le
                 // téléchargerait, le jeter ne rendrait rien.
@@ -488,11 +598,16 @@ public enum SimilarImageFinder {
                     continue
                 }
                 guard !isScreenshot(url), seen.insert(url.standardizedFileURL.path).inserted else { continue }
+                let identity = options.exclusions.requiresBoundRead ? options.exclusions.readIdentity(url) : nil
+                guard !options.exclusions.requiresBoundRead || identity?.size == Int64(size) else { continue }
                 progress.advance()
                 files.append(File(
                     url: url.standardizedFileURL, logicalSize: Int64(size), allocated: Int64(allocated),
-                    fileID: values.fileResourceIdentifier.map { "\($0)" }, contentID: values.fileContentIdentifier,
-                    sharesContent: values.mayShareFileContent ?? false, modified: values.contentModificationDate
+                    fileID: identity?.fileID ?? values.fileResourceIdentifier.map { "\($0)" },
+                    contentKey: DuplicateFinder.contentKey(url, identity: identity, exclusions: options.exclusions,
+                                                          fallbackID: values.mayShareFileContent == true ? values.fileContentIdentifier : nil),
+                    modified: identity?.modified ?? values.contentModificationDate,
+                    readIdentity: identity
                 ))
             }
         }
@@ -532,10 +647,10 @@ public enum SimilarImageFinder {
     /// retirer ne rendrait rien. Un seul représentant.
     static func collapseShared(_ files: [File]) -> [File] {
         var inodes = Set<String>()
-        var contents = Set<Int64>()
+        var contents = Set<DuplicateContentKey>()
         return files.filter { file in
             if let id = file.fileID, !inodes.insert(id).inserted { return false }
-            if file.sharesContent, let content = file.contentID, !contents.insert(content).inserted { return false }
+            if let content = file.contentKey, !contents.insert(content).inserted { return false }
             return true
         }
     }
@@ -631,9 +746,9 @@ public enum SimilarImageFinder {
     /// 18/10/2026 : tous les fils arrêtés dans `VNControlledCapacityTasksQueue`,
     /// trois recherches en parallèle). Dans l'app, la recherche de Photos et
     /// celle-ci tournant ensemble auraient pu en faire autant.
-    static func featurePrints(of urls: [URL], options: SimilarImageOptions, printer: any ImagePrinter,
+    static func featurePrints(of files: [File], options: SimilarImageOptions, printer: any ImagePrinter,
                               progress: SimilarImageProgress) async -> [ImagePrint?] {
-        let prints = PrintSlots(count: urls.count)
+        let prints = PrintSlots(count: files.count)
         let side = options.thumbnailSide
         let width = max(1, options.concurrency)
         await withTaskCancellationHandler {
@@ -642,11 +757,20 @@ public enum SimilarImageFinder {
                 queue.name = "fr.meaillais.oust.similar-images"
                 queue.maxConcurrentOperationCount = width
                 queue.qualityOfService = .userInitiated
-                for (slot, url) in urls.enumerated() {
+                for (slot, file) in files.enumerated() {
                     queue.addOperation {
                         defer { progress.advance() }
                         guard !progress.isCancelled else { return }
-                        prints.set(slot, autoreleasepool { printer.featurePrint(of: url, side: side) })
+                        let print = autoreleasepool {
+                            guard options.exclusions.requiresBoundRead else {
+                                return printer.featurePrint(of: file.url, side: side)
+                            }
+                            guard let image = ImageReader.thumbnail(of: file.url, expected: file.readIdentity,
+                                                                   side: side, exclusions: options.exclusions)
+                            else { return nil }
+                            return printer.featurePrint(of: image, for: file.url)
+                        }
+                        prints.set(slot, print)
                     }
                 }
                 queue.addBarrierBlock { continuation.resume() }

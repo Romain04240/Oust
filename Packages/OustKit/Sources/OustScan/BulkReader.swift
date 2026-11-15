@@ -229,6 +229,48 @@ enum BulkReader {
         let fd = open(parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
+        return privateSize { list, buffer, count in
+            name.withCString { getattrlistat(fd, $0, list, buffer, count, UInt(Attr.optCmnExtended | Attr.optNoFollow)) }
+        }.flatMap { $0.sharesBlocks ? $0.size : nil }
+    }
+
+    /// Les champs étendus suivent l'ordre de leurs bits et les champs absents
+    /// sont omis. Le clone et la taille restent deux preuves indépendantes.
+    static func blockSharing(descriptor: Int32, allocated: Int64) -> (privateSize: Int64?, fullCloneID: UInt64?) {
+        var list = attrlist()
+        list.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
+        list.commonattr = Attr.cmnReturnedAttrs
+        list.forkattr = Attr.cmnextPrivateSize | Attr.cmnextCloneID | Attr.cmnextExtFlags
+        var buffer = [UInt8](repeating: 0, count: 64)
+        let status = buffer.withUnsafeMutableBytes { raw in
+            fgetattrlist(descriptor, &list, raw.baseAddress, raw.count, UInt32(Attr.optCmnExtended))
+        }
+        guard status == 0 else { return (nil, nil) }
+        return buffer.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return (nil, nil) }
+            let length = Int(base.loadUnaligned(as: UInt32.self))
+            let first = 4 + MemoryLayout<attribute_set_t>.size
+            guard (first...raw.count).contains(length) else { return (nil, nil) }
+            let returned = base.advanced(by: 4).loadUnaligned(as: attribute_set_t.self)
+            var offset = first
+            func field(_ bit: UInt32) -> UInt64? {
+                guard returned.forkattr & bit != 0, offset + 8 <= length else { return nil }
+                defer { offset += 8 }
+                return base.advanced(by: offset).loadUnaligned(as: UInt64.self)
+            }
+            let size = field(Attr.cmnextPrivateSize).flatMap { Int64(exactly: $0) }
+            let cloneID = field(Attr.cmnextCloneID)
+            guard let flags = field(Attr.cmnextExtFlags) else { return (nil, nil) }
+            let privateSize = size.map { bytes in
+                flags & Attr.efMayShareBlocks != 0 ? min(allocated, bytes) : allocated
+            }
+            let fullClone = flags & Attr.efSharesAllBlocks != 0 && cloneID != 0 ? cloneID : nil
+            return (privateSize, fullClone)
+        }
+    }
+
+    private static func privateSize(_ fetch: (UnsafeMutablePointer<attrlist>, UnsafeMutableRawPointer?, Int) -> Int32)
+    -> (size: Int64, sharesBlocks: Bool)? {
         var list = attrlist()
         list.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
         list.commonattr = Attr.cmnReturnedAttrs
@@ -237,10 +279,7 @@ enum BulkReader {
         list.forkattr = wanted
         var buffer = [UInt8](repeating: 0, count: 64)
         let status = buffer.withUnsafeMutableBytes { raw in
-            name.withCString { cName in
-                getattrlistat(fd, cName, &list, raw.baseAddress, raw.count,
-                              UInt(Attr.optCmnExtended | Attr.optNoFollow))
-            }
+            fetch(&list, raw.baseAddress, raw.count)
         }
         guard status == 0 else { return nil }
         return buffer.withUnsafeBytes { raw in
@@ -250,7 +289,8 @@ enum BulkReader {
             let values = base.advanced(by: 4 + MemoryLayout<attribute_set_t>.size)
             let size = values.loadUnaligned(as: Int64.self)
             let flags = values.advanced(by: 8).loadUnaligned(as: UInt64.self)
-            return flags & Attr.efMayShareBlocks != 0 ? size : nil
+            guard size >= 0 else { return nil }
+            return (size, flags & Attr.efMayShareBlocks != 0)
         }
     }
 }

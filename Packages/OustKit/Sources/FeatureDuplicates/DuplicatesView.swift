@@ -11,6 +11,7 @@ public struct DuplicatesView: View {
     @Bindable var model: AppModel
     @State private var limit = 60
     @State private var preview = FilePreview()
+    @State private var previewOwner = UUID()
     @State private var selection: DuplicateFile.ID?
 
     public init(model: AppModel) {
@@ -38,11 +39,19 @@ public struct DuplicatesView: View {
             // Identiques ou similaires (Romain, 18/10/2026 : les images hors de
             // la photothèque aussi).
             DuplicatesTabs(model: model)
+            DuplicateExclusionsView(model: model)
             if similar {
-                SimilarImagesContent(model: model)
+                SimilarImagesContent(model: model, preview: preview)
             } else {
                 identical
             }
+        }
+        .onAppear {
+            model.setDuplicatePreviewRevoker(for: previewOwner) { [weak preview] in preview?.revoke() }
+        }
+        .onDisappear {
+            preview.revoke()
+            model.setDuplicatePreviewRevoker(for: previewOwner, nil)
         }
     }
 
@@ -115,20 +124,26 @@ public struct DuplicatesView: View {
                 LazyVStack(spacing: Spacing.medium) {
                     ForEach(shown) { group in
                         GroupCard(model: model, group: group, selection: $selection) { file in
+                            guard model.canUseDuplicateQuickLook else { return }
                             preview.show(file.url, among: group.files.map(\.url))
                         }
                     }
                 }
             }
             .previewKeys(selection: $selection, order: shown.flatMap { $0.files.map(\.id) }) { id in
+                guard model.canUseDuplicateQuickLook else { return }
                 if case let (group, file)? = copy(id, in: shown) { preview.toggle(file.url, among: group.files.map(\.url)) }
             }
             .filePreview(preview)
             // Le panneau montre les copies d'un groupe ; il suit la sélection
             // d'un groupe à l'autre, et la sélection suit ses flèches.
             .onChange(of: selection) {
-                guard let selection, case let (group, file)? = copy(selection, in: shown) else { return }
+                guard model.canUseDuplicateQuickLook, let selection, case let (group, file)? = copy(selection, in: shown) else { return }
                 preview.follow(file.url, among: group.files.map(\.url))
+            }
+            .onChange(of: model.duplicateExclusionRevision) {
+                selection = nil
+                preview.close()
             }
             .onChange(of: preview.current) { if let current = preview.current { selection = current.path } }
             if model.duplicateGroups.count > limit {
@@ -218,14 +233,24 @@ private struct CopyRow: View {
             if let modified = file.modified {
                 Text(verbatim: Formatters.relative(modified)).font(Typography.caption).foregroundStyle(.secondary)
             }
-            Text(verbatim: Formatters.compactBytes(file.privateSize)).font(Typography.size).frame(width: 70, alignment: .trailing)
-            PreviewButton(isVisible: hovering || isSelected, action: preview)
+            if file.privateSizeKnown {
+                Text(verbatim: Formatters.compactBytes(file.privateSize))
+                    .font(Typography.size).frame(width: 70, alignment: .trailing)
+            } else {
+                Image(systemName: "questionmark.circle")
+                    .frame(width: 70, alignment: .trailing)
+                    .help(Text("duplicates.private_size_unknown", bundle: .oust))
+                    .accessibilityLabel(Text("duplicates.private_size_unknown", bundle: .oust))
+            }
+            if model.canUseDuplicateQuickLook {
+                PreviewButton(isVisible: hovering || isSelected, action: preview)
+            }
         }
         .padding(.vertical, Spacing.hair)
         .onHover { hovering = $0 }
         .previewRow(isSelected: isSelected, select: select, preview: preview)
         .contextMenu {
-            PreviewMenuItem(action: preview)
+            if model.canUseDuplicateQuickLook { PreviewMenuItem(action: preview) }
             Button { NSWorkspace.shared.activateFileViewerSelecting([file.url]) } label: {
                 Label { Text("row.reveal", bundle: .oust) } icon: { Image(systemName: "folder") }
             }

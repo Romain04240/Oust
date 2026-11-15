@@ -661,6 +661,11 @@ public enum MountTable {
 extension Scanner {
     /// La part privée d'un fichier (`ATTR_CMNEXT_PRIVATESIZE`) : ce que sa
     /// suppression rendrait vraiment, clones et snapshots déduits.
+    public static func blockSharing(fileDescriptor: Int32, allocated: Int64)
+    -> (privateSize: Int64?, fullCloneID: UInt64?) {
+        BulkReader.blockSharing(descriptor: fileDescriptor, allocated: allocated)
+    }
+
     public static func privateSize(of url: URL) -> Int64? {
         BulkReader.privateSize(path: url.path)
     }

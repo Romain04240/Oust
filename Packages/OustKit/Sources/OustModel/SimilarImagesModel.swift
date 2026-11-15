@@ -54,12 +54,18 @@ public final class SimilarImagesModel {
     // MARK: Recherche
 
     public func search() async {
-        guard !phase.isRunning, !folders.isEmpty else { return }
+        guard let app, !phase.isRunning, !folders.isEmpty, app.canSearchDuplicates(folders) else { return }
+        let session = app.duplicateReadSession
+        guard session.acquire() else { return }
+        defer { session.release() }
+        let revision = app.duplicateExclusionRevision
         phase = .running
         let progress = SimilarImageProgress()
         self.progress = progress
-        let options = SimilarImageOptions(roots: folders, excludedFolders: app?.preferences.projectRoots ?? [])
+        var options = SimilarImageOptions(roots: folders, excludedFolders: app.preferences.projectRoots)
+        options.exclusions = app.preferences.duplicateExclusions
         let found = await SimilarImageFinder.find(options, progress: progress)
+        guard revision == app.duplicateExclusionRevision, app.canSearchDuplicates(options.roots) else { return }
         guard !progress.isCancelled else {
             phase = findings == nil ? .idle : .done(searchedAt ?? Date())
             return
@@ -69,6 +75,14 @@ public final class SimilarImagesModel {
         thumbnails = [:]
         reconcileCart()
         phase = .done(Date())
+    }
+
+    func invalidateExclusionResults() {
+        progress.cancel()
+        findings = nil
+        searchedAt = nil
+        thumbnails = [:]
+        phase = .idle
     }
 
     public func cancel() {
@@ -88,14 +102,12 @@ public final class SimilarImagesModel {
 
     // MARK: Ce qui est montré
 
-    /// Les groupes montrés : ceux qui rendraient quelque chose. Les groupes de
-    /// clones APFS sont masqués (Romain, 18/10/2026 : « les masquer, oui ») ;
-    /// leurs images partagent leur stockage avec d'autres fichiers, les jeter ne
-    /// libérerait rien. Sur son Mac, c'était les 19 groupes trouvés.
-    public var groups: [SimilarImageGroup] { remainingGroups.filter { $0.potential > 0 } }
+    /// Seuls les groupes à gain nul expliqué par des clones sont masqués.
+    /// Une mesure indisponible laisse le groupe consultable.
+    public var groups: [SimilarImageGroup] { remainingGroups.filter { !$0.isCloneOnly } }
 
     /// Combien de groupes de clones sont masqués : l'écran le dit.
-    public var hiddenCloneGroups: Int { remainingGroups.count(where: { $0.potential == 0 }) }
+    public var hiddenCloneGroups: Int { remainingGroups.count(where: \.isCloneOnly) }
 
     /// Les groupes, sans ce qui est parti depuis la recherche ; un groupe
     /// réduit à une image n'en est plus un.
@@ -168,7 +180,7 @@ public final class SimilarImagesModel {
 
     public func selectionRestriction(for image: SimilarImage, in group: SimilarImageGroup,
                                      paths: Set<String>? = nil) -> SelectionRestriction? {
-        guard let app else { return .trashUnavailable }
+        guard let app, app.isCurrentSimilarGroup(group) else { return .trashUnavailable }
         return Self.selectionRestriction(for: image, in: group, checked: paths ?? cartPaths(),
                                          canAdd: app.canSelectForCleanup(group.cleanupItem(for: image)))
     }
@@ -181,7 +193,7 @@ public final class SimilarImagesModel {
     }
 
     public func toggle(_ image: SimilarImage, in group: SimilarImageGroup) {
-        guard let app else { return }
+        guard let app, app.isCurrentSimilarGroup(group), group.images.contains(image) else { return }
         let path = image.url.path
         let holding = app.cart.filter { app.items[$0]?.paths.contains { $0.path == path } == true }
         if !holding.isEmpty {
@@ -192,7 +204,7 @@ public final class SimilarImagesModel {
     }
 
     public func canKeepBest(in group: SimilarImageGroup, paths: Set<String>? = nil) -> Bool {
-        guard app?.canMoveFiles == true else { return false }
+        guard let app, app.canMoveFiles, app.isCurrentSimilarGroup(group) else { return false }
         let checked = paths ?? cartPaths()
         return group.images.dropFirst().contains { !checked.contains($0.url.path) }
     }
@@ -210,15 +222,26 @@ public final class SimilarImagesModel {
     /// Une vignette pour l'écran, décodée hors du fil principal et gardée le
     /// temps de la recherche ; aucune n'est écrite sur le disque.
     public func thumbnail(for url: URL, side: Int) async -> CGImage? {
+        guard let app, !app.changingDuplicateExclusions else { return nil }
+        let session = app.duplicateReadSession
+        let revision = app.duplicateExclusionRevision
         let key = "\(side)|\(url.path)"
-        if let cached = thumbnails[key] { return cached.image }
-        let made = await Task.detached(priority: .userInitiated) {
-            ImageReader.thumbnail(of: url, side: side).map(ImageThumbnail.init)
+        let usePath = app.canUseDuplicateQuickLook
+        let exclusions = app.preferences.duplicateExclusions
+        let member = usePath ? nil : groups.lazy.flatMap(\.images).first { $0.url == url }
+        if usePath, let cached = thumbnails[key] { return cached.image }
+        let made: ImageThumbnail? = await Task.detached(priority: .userInitiated) {
+            guard session.acquire() else { return nil }
+            defer { session.release() }
+            if usePath { return ImageReader.thumbnail(of: url, side: side).map(ImageThumbnail.init) }
+            guard let member else { return nil }
+            return ImageReader.thumbnail(of: member, side: side, exclusions: exclusions).map(ImageThumbnail.init)
         }.value
         // Une centaine de groupes à l'écran au plus : au-delà, on repart de zéro
         // plutôt que de garder des centaines de mégaoctets d'images décodées.
+        guard revision == app.duplicateExclusionRevision, !app.changingDuplicateExclusions else { return nil }
         if thumbnails.count > 600 { thumbnails = [:] }
-        if let made { thumbnails[key] = made }
+        if usePath, let made { thumbnails[key] = made }
         return made?.image
     }
 }

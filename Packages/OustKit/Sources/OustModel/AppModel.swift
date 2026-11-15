@@ -35,9 +35,23 @@ public final class AppModel {
     // MARK: Environnement
 
     public let home: URL
+    private var storedPreferences: Preferences
     public var preferences: Preferences {
-        didSet { preferences.save() }
+        get { storedPreferences }
+        set {
+            var updated = newValue
+            updated.duplicateExclusions = storedPreferences.duplicateExclusions
+            storedPreferences = updated
+            updated.save(defaults: defaults)
+        }
     }
+    private let defaults: UserDefaults
+
+    func persistDuplicateExclusions(_ exclusions: DuplicateExclusions) {
+        storedPreferences.duplicateExclusions = exclusions
+        storedPreferences.save(defaults: defaults)
+    }
+
     // Partagés avec les sections de la phase 2 : un seul journal, un seul
     // moteur, pour que deux écritures ne se croisent jamais dans le fichier.
     let history: HistoryStore
@@ -115,6 +129,13 @@ public final class AppModel {
     /// Le disque des doublons montrés.
     public internal(set) var duplicatesVolumeID: String?
     public var duplicatesAsClones = false
+    public internal(set) var duplicateExclusionRevision = 0
+    public internal(set) var duplicateExclusionBlocked = false
+    public internal(set) var changingDuplicateExclusions = false
+    public internal(set) var duplicateExclusionsWaitingForQuickLook = false
+    @ObservationIgnored var duplicateNativePanelClosed: () -> Bool = { AppModel.isNativeDuplicatePreviewClosed() }
+    @ObservationIgnored var duplicateReadSession = DuplicateReadSession()
+    @ObservationIgnored var duplicatePreviewRevokers: [UUID: () -> Void] = [:]
     /// Les images qui se ressemblent, hors photothèque : l'onglet « Similaires ».
     public let similarImages: SimilarImagesModel
 
@@ -184,9 +205,10 @@ public final class AppModel {
     /// règle planifiée peuvent chacune le demander.
     private var started = false
 
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, defaults: UserDefaults = .standard) {
         self.home = home
-        self.preferences = Preferences.load(home: home)
+        self.defaults = defaults
+        self.storedPreferences = Preferences.load(home: home, defaults: defaults)
         let history = HistoryStore.standard()
         self.history = history
         let transit = Transit.standard()
@@ -577,16 +599,23 @@ public final class AppModel {
             await findDuplicates(on: volume)
             return
         }
+        let session = duplicateReadSession
+        guard session.acquire() else { return }
+        defer { session.release() }
         duplicates = .running
         let progress = DuplicateProgress()
         duplicateProgress = progress
         var options = DuplicateOptions.standard(home: home)
         if let roots { options.roots = roots }
         options.minimumSize = Int64(preferences.duplicateMinimumMegabytes) * 1_000_000
+        options.exclusions = preferences.duplicateExclusions
+        let revision = duplicateExclusionRevision
+        guard canSearchDuplicates(options.roots) else { return }
         // Les candidats viennent des feuilles de l'arbre partagé, sans
         // reparcourir le dossier personnel.
         let tree = await disk.treeProvider()()
         let groups = await DuplicateFinder.find(options, tree: tree, progress: progress)
+        guard revision == duplicateExclusionRevision, canSearchDuplicates(options.roots) else { return }
         showDuplicates(groups, volume: bootVolume)
     }
 
@@ -629,7 +658,8 @@ public final class AppModel {
 
     /// L'élément de panier d'une copie précise d'un groupe.
     public func duplicateItem(group: DuplicateGroup, file index: Int, keeping chosen: Int? = nil) -> CleanupItem? {
-        guard let keep = chosen ?? duplicateKeep(group) ?? group.files.indices.first(where: { $0 != index }), keep != index
+        guard isCurrentExactGroup(group),
+              let keep = chosen ?? duplicateKeep(group) ?? group.files.indices.first(where: { $0 != index }), keep != index
         else { return nil }
         let file = group.files[index]
         let original = group.files[keep]
@@ -672,7 +702,7 @@ public final class AppModel {
     }
 
     public func canSelectForCleanup(_ item: CleanupItem) -> Bool {
-        item.isSelectable && engine.supports(item.method)
+        item.isSelectable && engine.supports(item.method) && isCurrentDuplicateSelection(item)
     }
 
     public func toggle(_ item: CleanupItem) {

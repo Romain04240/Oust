@@ -46,6 +46,7 @@ public enum PreviewKind: Sendable, Equatable {
 public final class FilePreview {
     /// Le fichier montré ; `nil` quand le panneau est fermé.
     public var current: URL?
+    fileprivate var acceptsPanelUpdates = true
     /// Les voisins, dans l'ordre de la liste. Toujours des fichiers : un dossier
     /// n'a rien à y faire, il s'ouvre dans le Finder.
     public private(set) var items: [URL] = []
@@ -65,6 +66,7 @@ public final class FilePreview {
         case .package:
             NSWorkspace.shared.activateFileViewerSelecting([url])
         case .file:
+            acceptsPanelUpdates = true
             items = neighbors.contains(url) ? neighbors : [url]
             current = url
         }
@@ -87,9 +89,22 @@ public final class FilePreview {
         current = nil
     }
 
+    /// Révoque les URL et ferme le panneau détenu par cette liste dans le
+    /// même tour du fil principal, avant que les nouvelles exclusions s'appliquent.
+    public func revoke() {
+        let wasOpen = isOpen
+        acceptsPanelUpdates = false
+        current = nil
+        items = []
+        watchPanelKeys(false)
+        if wasOpen, QLPreviewPanel.sharedPreviewPanelExists() {
+            QLPreviewPanel.shared()?.orderOut(nil)
+        }
+    }
+
     /// Le fichier d'à côté dans `items` ; rien au bout de la liste.
     public func step(_ offset: Int) {
-        guard let current, let index = items.firstIndex(of: current), items.indices.contains(index + offset) else { return }
+        guard acceptsPanelUpdates, let current, let index = items.firstIndex(of: current), items.indices.contains(index + offset) else { return }
         self.current = items[index + offset]
     }
 
@@ -158,7 +173,10 @@ private struct FilePreviewPanel: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .quickLookPreview($preview.current, in: preview.items)
+            .quickLookPreview(Binding(
+                get: { preview.acceptsPanelUpdates ? preview.current : nil },
+                set: { if preview.acceptsPanelUpdates { preview.current = $0 } }
+            ), in: preview.items)
             // Le panneau a ses propres touches quand il a le clavier ; quand la
             // liste l'a repris d'un clic, Échap le ferme aussi.
             .onKeyPress(.escape) {
