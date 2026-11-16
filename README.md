@@ -195,4 +195,6 @@ also requires your confirmation and is performed by Photos.
 
 ## License
 
+The Oust! source code is licensed under the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only).
+
 Copyright © 2026 Daniel-Romain BLANC EI — BLANC-Conseil · [blanc-conseil.fr](https://blanc-conseil.fr)

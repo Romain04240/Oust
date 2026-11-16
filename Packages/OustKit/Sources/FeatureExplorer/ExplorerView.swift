@@ -12,6 +12,7 @@ import OustScan
 /// leur âge, les plus gros fichiers et l'évolution depuis la dernière analyse.
 public struct ExplorerView: View {
     @Bindable var model: AppModel
+    @State private var documentHistory: DocumentVersionHistory?
 
     public init(model: AppModel) {
         self.model = model
@@ -23,6 +24,10 @@ public struct ExplorerView: View {
             VStack(alignment: .leading, spacing: Spacing.large) {
                 SectionHeader(.explorer, subtitle: "explorer.subtitle") {
                     HStack(spacing: Spacing.small) {
+                        Button { chooseDocument() } label: {
+                            Label { Text("explorer.document_history.title", bundle: .oust) } icon: { Image(systemName: "clock") }
+                        }
+                        .buttonStyle(OnGradientButtonStyle())
                         RescanButton(model: model)
                         VolumePicker(model: model)
                     }
@@ -43,6 +48,20 @@ public struct ExplorerView: View {
             }
             .padding(Spacing.xxLarge)
             .onSectionBackground()
+        }
+        .sheet(item: $documentHistory) { DocumentVersionHistorySheet(document: $0) }
+    }
+
+    private func chooseDocument() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = false
+        panel.canDownloadUbiquitousContents = false
+        panel.canResolveUbiquitousConflicts = false
+        if panel.runModal() == .OK, let url = panel.url {
+            documentHistory = DocumentVersionHistory(url: url)
         }
     }
 }
