@@ -103,6 +103,10 @@ struct CloudConnectionTests {
         #expect(!closed.isSelectable && closed.protections == [.cloudAppClosed(name: "Google Drive")])
         let dead = file.cleanupItem(account: account(.disconnected), guard: guardian)
         #expect(!dead.isSelectable && dead.protections == [.cloudDisconnected])
+        let unchecked = file.cleanupItem(account: account(.disconnected), pathRefused: false)
+        #expect(unchecked.protections == [.cloudDisconnected])
+        let connected = file.cleanupItem(account: account(.connected), pathRefused: false)
+        #expect(connected.protections.isEmpty)
     }
 }
 

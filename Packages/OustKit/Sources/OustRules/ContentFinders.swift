@@ -133,20 +133,7 @@ struct UserContentFinder {
             candidates.append(Candidate(item: item, needsMeasure: false))
         }
 
-        // Sauvegardes iOS : on garde toujours la plus récente.
-        let backups = context.path("Library/Application Support/MobileSync/Backup")
-        let backupEntries = fileManager.children(of: backups).filter { fileManager.isDirectory($0) }
-        let newest = backupEntries.max { ($0.modificationDate ?? .distantPast) < ($1.modificationDate ?? .distantPast) }
-        for backup in backupEntries {
-            var item = CleanupItem(
-                title: Self.backupName(backup) ?? backup.lastPathComponent,
-                detail: backup.modificationDate.map { $0.formatted(date: .abbreviated, time: .omitted) },
-                paths: [backup], category: .iosBackups, owner: "iOS", ruleID: "ios.backup", safety: .review,
-                method: .trash, lastActivity: backup.modificationDate, rebuild: .irreversible
-            )
-            if backup == newest { item.protect(.newestKept) }
-            candidates.append(Candidate(item: item))
-        }
+        candidates += DeviceBackupsFinder(context: context).find()
 
         // Machines virtuelles et images Docker : gérées à part, hors du total en titre.
         let vmFolders = ["Virtual Machines.localized", "Virtual Machines", "Parallels",
@@ -191,12 +178,5 @@ struct UserContentFinder {
         return facts
     }
 
-    /// Le nom de l'appareil, lu dans `Info.plist` de la sauvegarde.
-    static func backupName(_ folder: URL) -> String? {
-        guard let data = try? Data(contentsOf: folder.appendingPathComponent("Info.plist")),
-              let object = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
-            return nil
-        }
-        return object["Device Name"] as? String
-    }
+
 }

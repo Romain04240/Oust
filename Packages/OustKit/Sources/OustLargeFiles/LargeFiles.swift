@@ -125,6 +125,10 @@ extension LargeFileMatch {
     /// Comme élément de la corbeille d'Oust! : du contenu personnel, à examiner,
     /// qui part à la corbeille du Mac. Jamais coché d'office (RULES.md, règle 4).
     public func cleanupItem(volume: String, guard pathGuard: PathGuard) -> CleanupItem {
+        cleanupItem(volume: volume, protected: !pathGuard.allows(url))
+    }
+
+    package func cleanupItem(volume: String, protected: Bool) -> CleanupItem {
         var item = CleanupItem(
             id: "largefile|\(url.path)", title: url.lastPathComponent, detail: url.deletingLastPathComponent().path,
             paths: [url], category: .largeFiles, owner: volume, ruleID: "largefile.item", safety: .review,
@@ -133,7 +137,7 @@ extension LargeFileMatch {
             fingerprint: Fingerprint(modificationDate: modified, fileID: fileID)
         )
         if let package { item.protect(.insidePackage(name: package)) }
-        if !pathGuard.allows(url) { item.protect(.systemPath) }
+        if protected { item.protect(.systemPath) }
         return item
     }
 }

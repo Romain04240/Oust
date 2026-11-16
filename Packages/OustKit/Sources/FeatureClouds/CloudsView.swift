@@ -543,7 +543,7 @@ private struct FileRow: View {
                         .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                     if let reason = item.protections.first {
                         Tag(Describe.protection(reason), symbol: "lock.fill", tint: Palette.vivid(for: .protected))
-                    } else if group != nil, !inCart, !enabled {
+                    } else if model.canMoveFiles, group != nil, !inCart, !enabled {
                         // Le dernier exemplaire d'un groupe reste (SPEC §7). Le dossier
                         // se tronque d'abord : l'étiquette finissait en « Dernier
                         // exemplaire,… » (revue du 18/10/2026).

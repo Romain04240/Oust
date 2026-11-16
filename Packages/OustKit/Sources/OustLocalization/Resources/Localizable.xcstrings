@@ -4023,13 +4023,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "iOS backups"
+            "value": "Backups by device"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sauvegardes iOS"
+            "value": "Sauvegardes par appareil"
           }
         }
       }
@@ -11808,13 +11808,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Removed with git worktree remove; the branch is kept."
+            "value": "Git worktree available for inspection only."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retiré par git worktree remove ; la branche est conservée."
+            "value": "Worktree Git disponible en lecture seule."
           }
         }
       }
@@ -20818,13 +20818,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Won’t come back: make sure iCloud or a newer backup covers this device."
+            "value": "Oust lists these backups in read-only mode."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ne reviendra pas : vérifiez qu’iCloud ou une sauvegarde plus récente couvre cet appareil."
+            "value": "Oust affiche ces sauvegardes en lecture seule."
           }
         }
       }
@@ -20852,13 +20852,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A local backup of an iPhone or iPad. The most recent is always kept."
+            "value": "A local iPhone or iPad backup. Oust identifies the latest backup for each device when its date and identity are known."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Une sauvegarde locale d’iPhone ou d’iPad. La plus récente est toujours gardée."
+            "value": "Une sauvegarde locale d’iPhone ou d’iPad. Oust signale la plus récente de chaque appareil lorsque son identité et sa date sont établies."
           }
         }
       }
@@ -27353,6 +27353,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Montré pour savoir où est passé l’espace, jamais proposé : Time Machine gère ses sauvegardes, et Photos ne laisse voir à Oust! que la photothèque système."
+          }
+        }
+      }
+    },
+    "system.device_backup_unknown_date": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup date unknown"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date de sauvegarde inconnue"
+          }
+        }
+      }
+    },
+    "system.device_backups_note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read only. Backups stay in place and the estimated gain is zero."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lecture seule. Les sauvegardes restent en place et le gain estimé est nul."
           }
         }
       }

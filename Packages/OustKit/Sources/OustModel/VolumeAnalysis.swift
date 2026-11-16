@@ -44,25 +44,43 @@ extension AppModel {
     /// Choisit le disque à analyser. Les résultats d'un disque déjà analysé
     /// reviennent tels quels ; rien n'est relu tant qu'on n'a pas demandé
     /// « Analyser ».
-    public func selectAnalysisVolume(_ volume: VolumeDescriptor) {
-        guard !isTimeMachine(volume) else { return }
+    @discardableResult
+    public func selectAnalysisVolume(_ volume: VolumeDescriptor) -> Task<Void, Never>? {
+        guard !isTimeMachine(volume) else { return nil }
+        analysisVolumeGainCheck?.cancel()
+        analysisVolumeGainCheck = nil
         analysisVolumeID = volume.isBoot ? nil : volume.id
         // Les gros fichiers suivent l'arbre de l'Explorateur : celui du disque
         // de démarrage est toujours là, celui d'un autre disque après son analyse.
-        guard !explorer.isRunning else { return }
+        guard !explorer.isRunning else { return nil }
+        let check: Task<Void, Never>
         if volume.isBoot {
             if treeVolume?.isBoot == false {
                 explore(volume)
-            } else if let index = displayedExplorerIndex, tree === index.root {
-                let displayed = index.checkedForDisplay(for: DiskIndexModel.options(for: home))
-                if displayed.root !== tree { showExplorerIndex(displayed, volume: volume) }
+                return nil
+            } else {
+                check = Task { await revalidateExplorerGains() }
             }
         } else if let index = volumeIndexes[volume.id] {
-            let options = Self.volumeScanOptions(for: volume, home: home)
-            guard tree !== index.root || treeVolume?.id != volume.id || !index.canReuse(for: options) else { return }
-            let displayed = index.checkedForDisplay(for: options)
-            showExplorerIndex(displayed, volume: volume)
+            let initial = tree
+            let home = home
+            check = Task {
+                let checked = await checkStorageIO {
+                    index.checkedForDisplay(for: Self.volumeScanOptions(for: volume, home: home))
+                }
+                guard !Task.isCancelled else { return }
+                let displayed: ScanIndex
+                if let checked { displayed = checked }
+                else { displayed = await storageIO { index.withholdingGains() } }
+                guard !Task.isCancelled, analysisVolumeID == volume.id,
+                      tree === initial, volumeIndexes[volume.id]?.root === index.root else { return }
+                showExplorerIndex(displayed, volume: volume)
+            }
+        } else {
+            return nil
         }
+        analysisVolumeGainCheck = check
+        return check
     }
 
     /// Choisit ce disque et l'analyse (un disque qu'on vient de brancher).
@@ -205,7 +223,8 @@ extension AppModel {
         return ScanOptions(leafThreshold: 100_000, excludedPaths: excluded,
                            notableNames: RuleEngine.notableNames(fileSystem: fileSystem),
                            readOnlyPreferencesDirectory: DiskIndexModel.preferencesDirectory(for: home),
-                           accountArchivesDirectory: AccountArchivePath.root.path)
+                           accountArchivesDirectory: AccountArchivePath.root.path,
+                           deviceBackupsDirectory: DeviceBackupPath.root(in: home).path)
     }
 
     // MARK: Doublons d'un autre disque

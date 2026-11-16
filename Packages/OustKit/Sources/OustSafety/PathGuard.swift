@@ -88,7 +88,30 @@ public struct PathGuard: Sendable {
         check(url, protectUserLogs: true, protectPreferences: false)
     }
 
-    private func check(_ url: URL, protectUserLogs: Bool, protectPreferences: Bool = true) -> Verdict {
+    /// Utilisé pour les estimations. Le moteur de nettoyage effectue ses propres
+    /// contrôles avec une nouvelle lecture des chemins.
+    package func allowedWorktreesForAnalysis(
+        _ paths: Set<URL>,
+        capture: @escaping @Sendable (String) -> DeviceBackupPath.Snapshot = { DeviceBackupPath.Snapshot.capture($0) }
+    ) async -> Set<URL> {
+        guard !paths.isEmpty else { return [] }
+        return await checkStorageIO { allowedWorktreePaths(paths, capture: capture) } ?? []
+    }
+
+    package func allowedWorktreePaths(
+        _ paths: Set<URL>,
+        capture: @Sendable (String) -> DeviceBackupPath.Snapshot = { DeviceBackupPath.Snapshot.capture($0) }
+    ) -> Set<URL> {
+        let root = DeviceBackupPath.root(in: URL(fileURLWithPath: home, isDirectory: true))
+        let snapshot = capture(root.path)
+        guard !snapshot.uncertain else { return [] }
+        let allowed = Set(paths.filter { check($0, protectUserLogs: true, backupSnapshot: snapshot) == .allowed })
+        guard !allowed.isEmpty, snapshot == capture(root.path) else { return [] }
+        return allowed
+    }
+
+    private func check(_ url: URL, protectUserLogs: Bool, protectPreferences: Bool = true,
+                       backupSnapshot: DeviceBackupPath.Snapshot? = nil) -> Verdict {
         let raw = url.path
         guard raw.hasPrefix("/") else { return .refused("relative") }
         guard !raw.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }) else { return .refused("dot-components") }
@@ -106,6 +129,7 @@ public struct PathGuard: Sendable {
         if !exact.isDisjoint(with: candidates) { return .refused("protected-root") }
         if protectUserLogs && protectsUserLogs(url, resolved: resolvedURL) { return .refused("user-logs") }
         if protectPreferences && protectsPreferences(url, resolved: resolvedURL) { return .refused("user-preferences") }
+        if protectsDeviceBackups(url, resolved: resolvedURL, snapshot: backupSnapshot) { return .refused("device-backups") }
         if protectsAccountArchives(url, resolved: resolvedURL) { return .refused("account-archives") }
         if protectsSafariDownload(url, resolved: resolvedURL) { return .refused("safari-incomplete-download") }
 
@@ -202,6 +226,7 @@ public struct PathGuard: Sendable {
         guard !CloudFile.isSafariDownload(url),
               let resolved = Self.withResolvedParent(url),
               !protectsPreferences(url, resolved: resolved),
+              !protectsDeviceBackups(url, resolved: resolved),
               !protectsAccountArchives(url, resolved: resolved),
               !protectsSafariDownload(url, resolved: resolved, protectAncestors: false) else { return false }
         let path = Self.normalize(raw)
@@ -222,22 +247,37 @@ public struct PathGuard: Sendable {
     }
 
     package func protectsAccountArchives(_ url: URL, resolved: URL) -> Bool {
-        let archive = accountArchiveLocation
-        guard !archive.isUncertain else { return true }
+        Self.protectsDirectoryTree(url, resolved: resolved, root: accountArchivesRoot, directory: accountArchiveLocation)
+    }
+
+    package func protectsDeviceBackups(_ url: URL, resolved: URL) -> Bool {
+        protectsDeviceBackups(url, resolved: resolved, snapshot: nil)
+    }
+
+    private func protectsDeviceBackups(_ url: URL, resolved: URL, snapshot: DeviceBackupPath.Snapshot?) -> Bool {
+        let root = DeviceBackupPath.root(in: URL(fileURLWithPath: home, isDirectory: true))
+        let current = snapshot ?? DeviceBackupPath.Snapshot.capture(root.path)
+        return current.uncertain || current.locations.contains {
+            Self.protectsDirectoryTree(url, resolved: resolved, root: root, directory: $0)
+        }
+    }
+
+    private static func protectsDirectoryTree(_ url: URL, resolved: URL, root: URL, directory: PreferenceDirectory) -> Bool {
+        guard !directory.isUncertain else { return true }
         func normalized(_ path: String) -> String {
             Self.normalize(path).folding(options: .caseInsensitive, locale: nil)
         }
-        let roots = [accountArchivesRoot.path, archive.resolvedPath].compactMap { $0 }.map(normalized)
+        let roots = [root.path, directory.resolvedPath].compactMap { $0 }.map(normalized)
         func related(_ candidate: URL) -> Bool {
             let path = normalized(candidate.path)
             return roots.contains { PathNormalizer.isWithin(path, $0) || PathNormalizer.isWithin($0, path) }
         }
         if related(url) || related(resolved) { return true }
-        guard let canonical = archive.resolvedPath else { return false }
+        guard let canonical = directory.resolvedPath else { return false }
         let target = resolved.resolvingSymlinksInPath()
         if related(target) { return true }
         // APFS peut accepter une autre graphie pour le dossier ou un de ses parents.
-        if archive.matches(resolved.deletingLastPathComponent().path) { return true }
+        if directory.matches(resolved.deletingLastPathComponent().path) { return true }
         guard let entry = FileFacts.of(target.path), entry.mode & S_IFMT == S_IFDIR else { return false }
         var ancestor = URL(fileURLWithPath: canonical, isDirectory: true)
         while ancestor.path != "/" {
@@ -413,11 +453,31 @@ public struct PathGuard: Sendable {
         userLogLocation(url)?.parent
     }
 
+    package func allowedUserLogsForAnalysis(
+        _ paths: Set<URL>,
+        capture: @escaping @Sendable (String) -> DeviceBackupPath.Snapshot = { DeviceBackupPath.Snapshot.capture($0) }
+    ) async -> Set<URL> {
+        guard !paths.isEmpty else { return [] }
+        let root = DeviceBackupPath.root(in: URL(fileURLWithPath: home, isDirectory: true))
+        return await checkStorageIO {
+            let snapshot = capture(root.path)
+            guard !snapshot.uncertain else { return [] }
+            let allowed = Set(paths.filter { userLogLocation($0, backupSnapshot: snapshot) != nil })
+            guard !allowed.isEmpty, snapshot == capture(root.path) else { return [] }
+            return allowed
+        } ?? []
+    }
+
     /// Le dossier de premier niveau peut porter l'identifiant exact du bundle.
     public func userLogLocation(_ url: URL) -> (parent: URL, bundleDirectory: String?)? {
+        userLogLocation(url, backupSnapshot: nil)
+    }
+
+    private func userLogLocation(_ url: URL, backupSnapshot: DeviceBackupPath.Snapshot?)
+        -> (parent: URL, bundleDirectory: String?)? {
         let root = PathNormalizer.normalize(URL(fileURLWithPath: home).appendingPathComponent("Library/Logs").path)
         let literal = PathNormalizer.normalize(url.path)
-        guard literal.hasPrefix(root + "/"), check(url, protectUserLogs: false) == .allowed else { return nil }
+        guard literal.hasPrefix(root + "/"), check(url, protectUserLogs: false, backupSnapshot: backupSnapshot) == .allowed else { return nil }
         let homeURL = URL(fileURLWithPath: home).resolvingSymlinksInPath()
         let expected = PathNormalizer.normalize(homeURL.appendingPathComponent("Library/Logs").path)
         let parent = url.deletingLastPathComponent()
@@ -464,6 +524,7 @@ public struct PathGuard: Sendable {
         guard !CloudFile.isSafariDownload(url),
               let real = Self.withResolvedParent(url), !protectsPreferences(url, resolved: real),
               !protectsAccountArchives(url, resolved: real),
+              !protectsDeviceBackups(url, resolved: real),
               !protectsSafariDownload(url, resolved: real) else { return false }
         let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
         let resolved = Self.normalize((parent as NSString).appendingPathComponent(url.lastPathComponent))

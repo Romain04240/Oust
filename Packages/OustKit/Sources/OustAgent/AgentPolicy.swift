@@ -69,6 +69,7 @@ public enum AgentPolicy {
         // lui-même dans le panneau du disque, jamais un agent.
         case .timeMachineBackup: .notForAgents
         case .manual: .manualOnly
+        case .gitWorktreeRemove: .unavailable
         case .archive: .notForAgents
         // Une photo est du contenu personnel, et Photos demande lui-même
         // confirmation dans son invite : un agent ne la déclenche jamais.
@@ -76,7 +77,7 @@ public enum AgentPolicy {
         // Supprimé aussi dans le nuage et sur les autres appareils de
         // l'utilisateur : ce choix-là reste le sien.
         case .trashFromCloud: .notForAgents
-        case .removeNow, .trash, .gitWorktreeRemove, .simulatorDevice, .simulatorRuntime, .firefoxHistory,
+        case .removeNow, .trash, .simulatorDevice, .simulatorRuntime, .firefoxHistory,
              .cloneOf, .evictLocalCopy, .compressInPlace, .uninstallVersion, .brewCleanup, .containerPrune:
             nil
         }

@@ -52,6 +52,10 @@ package struct PreferenceDirectory: Sendable, Equatable {
             return PreferenceDirectory(identity: nil, isUncertain: errno != ENOENT && errno != ENOTDIR)
         }
         defer { close(fd) }
+        return capturingLocation(openDirectory: fd)
+    }
+
+    package static func capturingLocation(openDirectory fd: Int32) -> PreferenceDirectory {
         var info = stat()
         guard fstat(fd, &info) == 0, let identity = Identity(info) else {
             return PreferenceDirectory(identity: nil, isUncertain: true)

@@ -51,25 +51,51 @@ public final class LargeFilesModel {
 
     /// À appeler quand l'arborescence de l'Explorateur change.
     public func refreshIfNeeded() {
-        if app?.tree !== computedFor || (result == nil && app?.tree != nil) { refresh() }
+        if app?.tree !== computedFor || result == nil { refresh() }
+    }
+
+    public func revalidateGains() async {
+        guard let app else { return }
+        let treeIsCurrent = await app.revalidateExplorerGains()
+        let spotlightIsCurrent = await app.disk.revalidateSpotlightGains()
+        guard !Task.isCancelled else { return }
+        if !treeIsCurrent || !spotlightIsCurrent || app.tree !== computedFor {
+            result = nil
+            refresh()
+        }
+    }
+
+    func invalidateResult() {
+        result = nil
     }
 
     public func refresh() {
         refreshTask?.cancel()
-        guard let tree = app?.tree else {
-            // En attendant l'arbre, ce que Spotlight sait déjà des gros fichiers.
-            let preview = app?.disk.spotlightFiles ?? []
-            result = preview.isEmpty ? nil : LargeFileFinder.preview(preview, filter: filter)
-            computedFor = nil
-            return
-        }
         computing = true
-        let filter = filter
         refreshTask = Task {
-            let found = await Task.detached(priority: .userInitiated) { LargeFileFinder.find(in: tree, filter: filter) }.value
+            guard let app else { computing = false; return }
+            let treeCheck = await app.revalidateExplorerGains()
+            let previewCheck = await app.disk.revalidateSpotlightGains()
             guard !Task.isCancelled else { return }
-            result = found
+            if !treeCheck || !previewCheck || app.tree !== computedFor { result = nil }
+            let filter = filter
+            guard let tree = app.tree else {
+                let preview = app.disk.spotlightFiles
+                result = previewCheck && !preview.isEmpty ? LargeFileFinder.preview(preview, filter: filter) : nil
+                computedFor = nil
+                computing = false
+                return
+            }
             computedFor = tree
+            let found = await Task.detached(priority: .userInitiated) { LargeFileFinder.find(in: tree, filter: filter) }.value
+            let stillCurrent = await app.revalidateExplorerGains()
+            guard !Task.isCancelled else { return }
+            guard stillCurrent, app.tree === tree else {
+                result = nil
+                refresh()
+                return
+            }
+            result = found
             computing = false
         }
     }
@@ -83,7 +109,9 @@ public final class LargeFilesModel {
     public func item(for file: LargeFileMatch) -> CleanupItem {
         guard let app else { return file.cleanupItem(volume: "", guard: PathGuard()) }
         if let known = knownItems(app)[PathNormalizer.normalize(file.url.path)] { return known }
-        return file.cleanupItem(volume: app.treeVolume?.name ?? "", guard: PathGuard(home: app.home))
+        let volume = app.treeVolume?.name ?? ""
+        return app.canMoveFiles ? file.cleanupItem(volume: volume, guard: PathGuard(home: app.home))
+            : file.cleanupItem(volume: volume, protected: true)
     }
 
     /// Les éléments des règles, par chemin. Recalculé seulement quand la liste

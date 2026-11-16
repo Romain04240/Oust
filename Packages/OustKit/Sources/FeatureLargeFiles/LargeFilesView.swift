@@ -50,8 +50,15 @@ public struct LargeFilesView: View {
             }
         }
         .onAppear { largeFiles.refreshIfNeeded() }
-        .onChange(of: model.explorer) { largeFiles.refreshIfNeeded() }
-        .onChange(of: model.disk.spotlightFiles.count) { largeFiles.refresh() }
+        .task {
+            while !Task.isCancelled {
+                await largeFiles.revalidateGains()
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
+            }
+        }
+        .onChange(of: model.tree.map(ObjectIdentifier.init)) { largeFiles.refreshIfNeeded() }
+        .onChange(of: model.disk.spotlightFiles) { largeFiles.refresh() }
     }
 }
 

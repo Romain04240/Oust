@@ -197,9 +197,4 @@ final class ExplorerState {
         }
     }
 
-    // MARK: Export
-
-    func csv() -> String? {
-        analytics?.csv(for: focus)
-    }
 }

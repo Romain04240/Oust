@@ -93,15 +93,19 @@ public final class AppModel {
     public internal(set) var analysis: Phase = .idle
     public internal(set) var items: [String: CleanupItem] = [:]
     @ObservationIgnored private var analysisLocations: [String: AnalyzedItemLocation] = [:]
+    @ObservationIgnored private var backupAnalysisTokens: [String: UUID] = [:]
     @ObservationIgnored private var readOnlyRevalidationTask: Task<Void, Never>?
     public internal(set) var finishedFinders: Set<FinderKind> = []
 
     // MARK: Explorateur
 
     public internal(set) var explorer: Phase = .idle
-    public internal(set) var tree: TreeNode?
+    public internal(set) var tree: TreeNode? {
+        didSet { if oldValue !== tree { largeFiles.invalidateResult() } }
+    }
     public internal(set) var treeVolume: VolumeDescriptor?
     @ObservationIgnored var displayedExplorerIndex: ScanIndex?
+    @ObservationIgnored var explorerGainCheck: (root: TreeNode, work: Task<ScanIndex, Never>)?
     public internal(set) var scanProgress = ScanProgress()
     var scanTask: Task<Void, Never>?
     /// L'analyse gardée de chaque autre disque, par son point de montage : relue
@@ -114,6 +118,7 @@ public final class AppModel {
     /// Le disque que la vue d'ensemble analyse, choisi en haut de celle-ci
     /// (demande de Romain, 18/10/2026) ; `nil` : le disque de démarrage.
     public internal(set) var analysisVolumeID: String?
+    @ObservationIgnored var analysisVolumeGainCheck: Task<Void, Never>?
     /// Quand chaque disque a été analysé par les règles, par son point de montage.
     public internal(set) var volumeAnalysisDates: [String: Date] = [:]
     var analysisReviews: [String: AnalysisReview] = [:]
@@ -209,7 +214,11 @@ public final class AppModel {
     /// règle planifiée peuvent chacune le demander.
     private var started = false
 
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, defaults: UserDefaults = .standard) {
+    public convenience init(home: URL = FileManager.default.homeDirectoryForCurrentUser, defaults: UserDefaults = .standard) {
+        self.init(home: home, defaults: defaults, disk: DiskIndexModel())
+    }
+
+    init(home: URL, defaults: UserDefaults, disk: DiskIndexModel) {
         self.home = home
         self.defaults = defaults
         self.storedPreferences = Preferences.load(home: home, defaults: defaults)
@@ -218,7 +227,7 @@ public final class AppModel {
         let transit = Transit.standard()
         self.transit = transit
         self.engine = CleanupEngine(history: history, transit: transit)
-        self.disk = DiskIndexModel()
+        self.disk = disk
         self.applications = ApplicationsModel()
         self.archive = ArchiveModel()
         self.largeFiles = LargeFilesModel()
@@ -252,7 +261,7 @@ public final class AppModel {
         if engine.supports(.removeNow) {
             transit.resume(volumes: volumes.filter { !$0.isBoot }.map(\.mountURL))
         }
-        Task { await disk.start() }
+        disk.scheduleStartupCache()
         fullDiskAccess = FullDiskAccess.isGranted(home: home)
         await refreshSnapshots()
         await engine.recoverUserLogs()
@@ -379,6 +388,7 @@ public final class AppModel {
             || $0.value.category.section == .photos || $0.value.category.section == .clouds
             || !isOnBootVolume($0.value) }
         analysisLocations = analysisLocations.filter { items[$0.key] != nil }
+        backupAnalysisTokens = backupAnalysisTokens.filter { analysisLocations[$0.key] != nil }
         stopReadOnlyRevalidationIfEmpty()
         // Les sections qui suivent l'arbre de l'Explorateur (gros fichiers)
         // reviennent au disque de démarrage.
@@ -517,6 +527,7 @@ public final class AppModel {
             disk.explore()
             return
         }
+        disk.cancelCacheDisplay()
         // Le parcours partagé continue sans l'Explorateur : les règles
         // l'attendent peut-être.
         if treeVolume?.isBoot != true {
@@ -532,7 +543,6 @@ public final class AppModel {
         // Gardé seulement pour un disque monté, pas pour un dossier choisi ; sur
         // le disque seulement s'il a un UUID.
         let isMounted = volumes.contains { $0.id == volume.id }
-        let store = isMounted ? Self.volumeStore(for: volume) : nil
         scanTask = Task {
             if !rescan, let known = await self.storedAnalysis(for: volume) {
                 guard !progress.isCancelled, self.treeVolume?.id == volume.id else { return }
@@ -547,18 +557,25 @@ public final class AppModel {
             // ordinateur, sans que les événements de ce Mac le sachent.
             // Les mêmes réglages que l'arbre partagé, et de quoi trouver les
             // traces de macOS : les règles du disque y lisent leurs marqueurs.
-            let options = Self.volumeScanOptions(for: volume, home: home)
+            let home = home
+            guard let options = await checkStorageIO({ Self.volumeScanOptions(for: volume, home: home) }),
+                  !progress.isCancelled, self.treeVolume?.id == volume.id else {
+                if !progress.isCancelled, self.treeVolume?.id == volume.id { self.explorer = .idle }
+                return
+            }
             let (scanned, _) = await ScanIndex.refresh(previous, root: volume.scanRoot, options: options, progress: progress)
             guard !progress.isCancelled else { return }
-            await self.refreshVolumesInBackground()
-            guard !progress.isCancelled else { return }
-            let fresh = scanned.checkedForDisplay(for: Self.volumeScanOptions(for: volume, home: home))
+            let fresh = await scanned.revalidatedForDisplay(for: options)
+            guard !progress.isCancelled, self.treeVolume?.id == volume.id else { return }
             if isMounted {
                 self.volumeIndexes[volume.id] = fresh
                 self.liveVolumeScans.insert(volume.id)
             }
             self.showExplorerIndex(fresh, volume: volume)
-            if let store { Task.detached(priority: .utility) { try? store.save(fresh) } }
+            if isMounted {
+                Task.detached(priority: .utility) { try? Self.volumeStore(for: volume)?.save(fresh) }
+            }
+            Task { await self.refreshVolumesInBackground() }
         }
     }
 
@@ -570,6 +587,7 @@ public final class AppModel {
     }
 
     public func cancelExploration() {
+        disk.cancelCacheDisplay()
         scanProgress.cancel()
         scanTask?.cancel()
         explorer = tree == nil ? .idle : .done(Date())
@@ -605,7 +623,7 @@ public final class AppModel {
                                ruleID: "explorer.item", safety: .review, method: .trash, sizes: sizes,
                                lastActivity: modified, rebuild: .irreversible,
                                fingerprint: Fingerprint(modificationDate: nil, fileID: nil))
-        if !PathGuard(home: home).allows(url) { item.protect(.systemPath) }
+        if canMoveFiles && !PathGuard(home: home).allows(url) { item.protect(.systemPath) }
         if let volume = treeVolume, isTimeMachine(volume) { item.protect(.timeMachine) }
         return item
     }
@@ -700,8 +718,10 @@ public final class AppModel {
     func recordAnalyzedItem(_ item: CleanupItem, analysisLocation: AnalyzedItemLocation? = nil,
                             preselect: Bool, policy: PreselectionPolicy) {
         if item.requiresLiveAnalysisLocation {
-            guard let url = item.paths.first, let analysisLocation, analysisLocation.isCurrent(at: url) else { return }
+            guard let url = item.paths.first, let analysisLocation,
+                  item.isDeviceBackup || analysisLocation.isCurrent(at: url) else { return }
             analysisLocations[item.id] = analysisLocation
+            if item.isDeviceBackup { backupAnalysisTokens[item.id] = UUID() }
         }
         items[item.id] = item
         if item.requiresLiveAnalysisLocation { startReadOnlyRevalidation() }
@@ -721,6 +741,7 @@ public final class AppModel {
 
     private func isCurrentAnalyzedItem(_ item: CleanupItem) -> Bool {
         guard item.requiresLiveAnalysisLocation else { return true }
+        if item.isDeviceBackup { return backupAnalysisTokens[item.id] != nil }
         guard let url = item.paths.first else { return false }
         return analysisLocations[item.id]?.isCurrent(at: url) == true
     }
@@ -736,6 +757,7 @@ public final class AppModel {
                 catch { return }
                 guard !Task.isCancelled, let self else { return }
                 self.removeStaleReadOnlyFindings()
+                await self.revalidateBackupFindings()
             }
         }
     }
@@ -746,9 +768,46 @@ public final class AppModel {
             return !isCurrentAnalyzedItem(item)
         })
         guard !obsolete.isEmpty else { return }
-        for id in obsolete { analysisLocations[id] = nil }
+        for id in obsolete {
+            analysisLocations[id] = nil
+            backupAnalysisTokens[id] = nil
+        }
         items = items.filter { !$0.value.requiresLiveAnalysisLocation || !obsolete.contains($0.key) }
         cart.subtract(obsolete)
+        stopReadOnlyRevalidationIfEmpty()
+    }
+
+    private struct BackupFinding: Sendable {
+        let item: CleanupItem
+        let url: URL
+        let location: AnalyzedItemLocation
+        let token: UUID
+    }
+
+    private func revalidateBackupFindings() async {
+        let current = backupAnalysisTokens.compactMap { id, token -> BackupFinding? in
+            guard let item = items[id], let url = item.paths.first, let location = analysisLocations[id] else { return nil }
+            return BackupFinding(item: item, url: url, location: location, token: token)
+        }
+        guard !current.isEmpty else { return }
+        let checked = await checkStorageIO {
+            current.map { finding in
+                finding.location.isCurrent(at: finding.url) ? finding.location.revalidateBackupBadge(finding.item) : nil
+            }
+        }
+        guard !Task.isCancelled else { return }
+        for (offset, finding) in current.enumerated() {
+            let id = finding.item.id
+            guard backupAnalysisTokens[id] == finding.token, items[id] == finding.item else { continue }
+            if let replacement = checked?[offset] {
+                if replacement != finding.item { items[id] = replacement }
+            } else {
+                items[id] = nil
+                backupAnalysisTokens[id] = nil
+                analysisLocations[id] = nil
+                cart.remove(id)
+            }
+        }
         stopReadOnlyRevalidationIfEmpty()
     }
 

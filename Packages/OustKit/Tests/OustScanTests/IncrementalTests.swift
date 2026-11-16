@@ -45,7 +45,8 @@ struct IncrementalTests {
         let fixture = try Fixture()
         let preferences = try fixture.directory("Library/Preferences")
         let options = ScanOptions(threads: 2, leafThreshold: 100_000, readOnlyPreferencesDirectory: preferences.path)
-        let walk = Walk(options: options, progress: ScanProgress(), ownership: Ownership())
+        let walk = Walk(options: options, progress: ScanProgress(), ownership: Ownership(),
+                        deviceBackupDirectory: DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory))
         try FileManager.default.moveItem(at: preferences, to: fixture.root.appendingPathComponent("AnciennesPreferences"))
         let plist = try fixture.file("Library/Preferences/Fictif.plist", bytes: 180_000)
         _ = try fixture.file("Library/Preferences/Petit.plist", bytes: 200)
@@ -265,17 +266,138 @@ struct IncrementalTests {
         let forged = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
                                eventID: previous.eventID, eventDatabase: "base-effacée",
                                scannedAt: previous.scannedAt, fullScanAt: previous.fullScanAt,
-                               skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory,
-                               accountArchiveDirectory: previous.accountArchiveDirectory)
+                               skippedVolumes: [], scannedRootLocation: previous.scannedRootLocation,
+                               preferenceDirectory: previous.preferenceDirectory,
+                               accountArchiveDirectory: previous.accountArchiveDirectory,
+                               deviceBackupDirectory: previous.deviceBackupDirectory)
         let refreshed = await ScanIndex.refresh(forged, root: fixture.root, options: options)
         #expect(refreshed.how == .full(.historyLost))
 
         let old = ScanIndex(root: previous.root, options: previous.options, ownership: previous.ownership,
                             eventID: previous.eventID, eventDatabase: previous.eventDatabase,
                             scannedAt: previous.scannedAt, fullScanAt: Date(timeIntervalSinceNow: -30 * 86_400),
-                            skippedVolumes: [], preferenceDirectory: previous.preferenceDirectory,
-                               accountArchiveDirectory: previous.accountArchiveDirectory)
+                            skippedVolumes: [], scannedRootLocation: previous.scannedRootLocation,
+                               preferenceDirectory: previous.preferenceDirectory,
+                               accountArchiveDirectory: previous.accountArchiveDirectory,
+                               deviceBackupDirectory: previous.deviceBackupDirectory)
         #expect(await ScanIndex.refresh(old, root: fixture.root, options: options).how == .full(.tooOld))
+    }
+
+    @Test("La réutilisation d'un sous-arbre déplacé sous MobileSync conserve l'occupation et annule le gain")
+    func incrementalWithholdsReusedSubtreeGain() async throws {
+        let fixture = try Fixture()
+        let scan = try fixture.directory("Scan")
+        let source = try fixture.directory("Scan/Ordinaire")
+        let branch = try fixture.directory("Scan/Ordinaire/A")
+        let protected = try fixture.directory("Stockage/Device")
+        let backupRoot = try fixture.directory("MobileSync/Backup")
+        try fixture.file("Scan/Ordinaire/A/Sous/fictif.bin", bytes: 400_000)
+        let fm = FileManager.default
+        try fm.createSymbolicLink(at: backupRoot.appendingPathComponent("Appareil"), withDestinationURL: protected)
+        let options = ScanOptions(leafThreshold: 1, deviceBackupsDirectory: backupRoot.path)
+        let old = await ScanIndex.refresh(nil, root: scan, options: options).index
+        #expect((old.root.descendant(atPath: branch.path)?.total.freeable ?? 0) > 0)
+        let destination = protected.appendingPathComponent("Ordinaire")
+        try fm.moveItem(at: source, to: destination)
+        try fm.createSymbolicLink(at: source, withDestinationURL: destination)
+        var changes = FileSystemChanges()
+        changes.directories = [branch.path]
+        let fresh = await old.applying(changes, eventID: old.eventID + 1, database: old.eventDatabase ?? "",
+                                       progress: ScanProgress(), now: Date())
+        let checked = try #require(fresh?.index.root.descendant(atPath: branch.path))
+        #expect(checked.total.allocated > 0 && checked.total.freeable == 0)
+    }
+
+    @Test("La relecture simultanée d’un dossier protégé et de son descendant garde les bons totaux")
+    func overlappingProtectedJobsWithholdGains() async throws {
+        let fixture = try Fixture()
+        let scan = try fixture.directory("Scan")
+        let source = try fixture.directory("Scan/Ordinaire")
+        let branch = try fixture.directory("Scan/Ordinaire/A")
+        let child = try fixture.directory("Scan/Ordinaire/A/Sous")
+        let backup = try fixture.directory("Stockage/Device")
+        let backupRoot = try fixture.directory("MobileSync/Backup")
+        try fixture.file("Scan/Ordinaire/A/Sous/avant.bin", bytes: 400_000)
+        try fixture.file("Scan/Ordinaire/A/Sous/Profondeur/conserver.bin", bytes: 220_000)
+        let fm = FileManager.default
+        try fm.createSymbolicLink(at: backupRoot.appendingPathComponent("Appareil"), withDestinationURL: backup)
+        let options = ScanOptions(threads: 4, leafThreshold: 1, deviceBackupsDirectory: backupRoot.path)
+        let old = await ScanIndex.refresh(nil, root: scan, options: options).index
+        let before = try #require(old.root.descendant(atPath: child.path))
+        #expect(before.total.freeable > 0)
+        let moved = backup.appendingPathComponent("Ordinaire")
+        try fm.moveItem(at: source, to: moved)
+        try fm.createSymbolicLink(at: source, withDestinationURL: moved)
+        try fm.removeItem(at: moved.appendingPathComponent("A/Sous/avant.bin"))
+        try fixture.file("Stockage/Device/Ordinaire/A/Sous/apres.bin", bytes: 610_000)
+
+        var changes = FileSystemChanges()
+        changes.directories = [branch.path, child.path]
+        let result = try #require(await old.applying(changes, eventID: old.eventID + 1, database: old.eventDatabase ?? "",
+                                                        progress: ScanProgress(), now: Date()))
+        #expect(result.how == .incremental(directories: 2))
+        let updated = try #require(result.index.root.descendant(atPath: child.path))
+        let independent = try #require(await Scanner.scan([child], options: options).root)
+        #expect(updated.total == independent.total)
+        #expect(updated.total.allocated > 0 && updated.total.freeable == 0)
+        #expect(updated.files.map(\.name) == ["apres.bin"] && updated.files.allSatisfy { $0.sizes.freeable == 0 })
+        let deep = try #require(updated.child(named: "Profondeur"))
+        #expect(deep.files.map(\.name) == ["conserver.bin"] && deep.files.allSatisfy { $0.sizes.freeable == 0 })
+        #expect(result.index.root.total.freeable == 0 && before.total.freeable > 0)
+    }
+
+    @Test("Un dossier remplacé déclenche un nouveau parcours plutôt qu'un index incomplet")
+    func incrementalRejectsReplacedDirectory() async throws {
+        let fixture = try Fixture()
+        let scan = try fixture.directory("Scan")
+        let child = try fixture.directory("Scan/Dossier")
+        let replacement = try fixture.directory("Remplacement")
+        let backups = try fixture.directory("MobileSync/Backup")
+        try fixture.file("Scan/Dossier/original.bin", bytes: 200_000)
+        try fixture.file("Remplacement/nouveau.bin", bytes: 410_000)
+        let options = ScanOptions(leafThreshold: 1, deviceBackupsDirectory: backups.path)
+        let first = await ScanIndex.refresh(nil, root: scan, options: options).index
+        let fm = FileManager.default
+        try fm.moveItem(at: child, to: fixture.root.appendingPathComponent("Ancien"))
+        try fm.moveItem(at: replacement, to: child)
+        var changes = FileSystemChanges()
+        changes.directories = [child.path]
+        let update = await first.applying(changes, eventID: first.eventID + 1, database: first.eventDatabase ?? "",
+                                          progress: ScanProgress(), now: Date())
+        #expect(update == nil)
+        let fresh = await ScanIndex.refresh(nil, root: scan, options: options).index
+        let measured = try #require(fresh.root.descendant(atPath: child.path))
+        #expect(measured.status == .ok && measured.total.allocated > 0)
+        #expect(measured.files.map(\.name) == ["nouveau.bin"])
+    }
+
+    @Test("Le cache et l'analyse rejettent un alias de racine redirigé après mesure")
+    func redirectedScanRootInvalidatesCache() async throws {
+        let fixture = try Fixture()
+        try fixture.file("Ordinaire/Device/fichier.bin", bytes: 200_000)
+        try fixture.file("Stockage/Device/sauvegarde.bin", bytes: 400_000)
+        let fm = FileManager.default
+        let backup = try fixture.directory("MobileSync/Backup")
+        try fm.createSymbolicLink(atPath: backup.appendingPathComponent("Appareil").path,
+                                  withDestinationPath: "../../Stockage/Device")
+        let alias = fixture.root.appendingPathComponent("Alias")
+        try fm.createSymbolicLink(atPath: alias.path, withDestinationPath: "Ordinaire")
+        let root = alias.appendingPathComponent("Device")
+        let options = ScanOptions(leafThreshold: 1, deviceBackupsDirectory: backup.path)
+        let index = await ScanIndex.refresh(nil, root: root, options: options).index
+        #expect(index.root.total.freeable > 0)
+        let store = TreeStore(directory: try fixture.directory("Index"))
+        try store.save(index)
+        #expect(store.load(rootPath: index.rootPath) != nil)
+
+        try fm.removeItem(at: alias)
+        try fm.createSymbolicLink(atPath: alias.path, withDestinationPath: "Stockage")
+        #expect(store.load(rootPath: index.rootPath) == nil)
+        let checked = await index.revalidatedForDisplay()
+        #expect(checked.root.total.freeable == 0)
+        let rebuilt = await ScanIndex.refresh(index, root: root, options: options)
+        #expect(rebuilt.how == .full(.optionsChanged))
+        #expect(rebuilt.index.root.total.allocated > 0 && rebuilt.index.root.total.freeable == 0)
     }
 
     @Test("Rien n'a bougé : l'arbre est rendu tel quel")

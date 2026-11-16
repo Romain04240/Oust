@@ -151,8 +151,8 @@ Noms ambigus (`build`, `dist`, `vendor`, `bin`) : marqueur + non suivi par git.
 | Type | Méthode |
 |---|---|
 | Régénérable | `removefile(REMOVEFILE_RECURSIVE)`, sans traverser de montage |
-| Personnel | corbeille par le Finder (« Remettre » conservé), repli `trashItem` |
-| Worktree | `git worktree remove` puis `git worktree prune` |
+| Personnel | Corbeille Finder et FileManager désactivée |
+| Worktree | Inventaire en lecture seule, hors panier et à zéro gain |
 | Simulateur | `xcrun simctl delete` / `simctl runtime delete` |
 | Snapshot | `tmutil deletelocalsnapshots <date>` en administrateur |
 | Firefox | SQL `DELETE` + `VACUUM` (l'historique partage le fichier des favoris) |

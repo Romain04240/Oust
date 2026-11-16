@@ -325,29 +325,76 @@ struct CleanupTests {
         #expect(FileManager.default.fileExists(atPath: file.path))
     }
 
-    @Test("Un worktree propre part par git, sa branche reste")
-    func worktreeRemoval() async throws {
+    @Test("Les worktrees restent en lecture seule, y compris leurs inscriptions Git")
+    func worktreeInventoryPreservesFilesAndRegistrations() async throws {
         let bench = try Bench()
         let repo = bench.root.appendingPathComponent("depot")
         try bench.file("depot/README.md")
-        let env = ["GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
-                   "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": "/dev/null"]
+        let env = ["GIT_AUTHOR_NAME": "QA", "GIT_AUTHOR_EMAIL": "qa@example.invalid",
+                   "GIT_COMMITTER_NAME": "QA", "GIT_COMMITTER_EMAIL": "qa@example.invalid",
+                   "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"]
         func git(_ args: String...) async -> CommandResult {
             await Command.run("/usr/bin/git", ["-C", repo.path] + args, environment: env)
         }
-        _ = await git("init", "-q", "-b", "main")
-        _ = await git("add", ".")
-        _ = await git("commit", "-q", "-m", "init")
-        let worktree = repo.appendingPathComponent(".claude/worktrees/agent-x")
-        _ = await git("worktree", "add", "-q", "-b", "worktree-agent-x", worktree.path)
+        try #require(await git("init", "-q", "-b", "main").succeeded)
+        try #require(await git("add", "README.md").succeeded)
+        try #require(await git("commit", "-q", "-m", "fixture").succeeded)
+        let worktree = bench.root.appendingPathComponent("Conserver")
+        let missing = bench.root.appendingPathComponent("Absent")
+        try #require(await git("worktree", "add", "-q", "-b", "fixture-active", worktree.path).succeeded)
+        try #require(await git("worktree", "add", "-q", "--detach", missing.path).succeeded)
+        let activeAdmin = try #require(GitInspector.adminDirectory(ofWorktree: worktree))
+        let staleAdmin = try #require(GitInspector.adminDirectory(ofWorktree: missing))
+        let fm = FileManager.default
+        try fm.moveItem(at: missing, to: bench.root.appendingPathComponent("Déconnecté"))
+        let staleLink = staleAdmin.appendingPathComponent("gitdir")
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000)], ofItemAtPath: staleLink.path)
+        try #require(await git("config", "--local", "gc.worktreePruneExpire", "now").succeeded)
+        let positiveControl = await git("worktree", "prune", "--dry-run", "--verbose", "--expire", "now")
+        #expect(positiveControl.succeeded)
+        #expect((positiveControl.output + positiveControl.errorOutput).contains(staleAdmin.lastPathComponent))
 
+        let before = await git("worktree", "list", "--porcelain")
+        let linkBytes = try Data(contentsOf: staleLink)
+        let activeHead = activeAdmin.appendingPathComponent("HEAD")
+        let headBytes = try Data(contentsOf: activeHead)
+        let file = worktree.appendingPathComponent("README.md")
+        let fileBytes = try Data(contentsOf: file)
+        let mobileSync = DeviceBackupPath.root(in: bench.root)
+        try fm.createDirectory(at: mobileSync, withIntermediateDirectories: true)
+        let guardPaths = PathGuard(home: bench.root)
+        let engine = CleanupEngine(trasher: FolderTrasher(folder: bench.trash), history: nil, pathGuard: guardPaths,
+                                   processes: { ProcessSnapshot(processes: []) }, capacity: { _ in nil },
+                                   allowsPathBasedRemoval: true)
         let item = bench.item(worktree, method: .gitWorktreeRemove(repository: repo.path), safety: .safe)
-        let (_, report) = await bench.run([item])
+        #expect(guardPaths.allows(worktree))
+        #expect(!engine.supports(item.method))
+        for cancelled in [false, true] {
+            let stop = CleanupCancellation()
+            if cancelled { stop.cancel() }
+            var finished: CleanupReport?
+            for await event in engine.run([item], cancellation: stop) {
+                if case .began(_, let expectedBytes) = event { #expect(expectedBytes == 0) }
+                if case .phaseChanged(.deleting, _) = event { Issue.record("Git est entré en phase de suppression") }
+                if case .finished(let report) = event { finished = report }
+            }
+            #expect(finished?.outcomes.map(\.result) == [.skipped(cancelled ? .cancelled : .refusedByGuard)])
+        }
+        let direct = await engine.perform(item, session: UUID(), onDeleting: {
+            Issue.record("Un appel direct a passé le veto Git")
+        })
+        #expect(direct.result == .skipped(.refusedByGuard))
 
-        #expect(report?.outcomes.first?.result == .delegated)
-        #expect(!FileManager.default.fileExists(atPath: worktree.path))
-        let branches = await git("branch", "--list", "worktree-agent-x")
-        #expect(branches.output.contains("worktree-agent-x"))
+        try fm.createSymbolicLink(at: mobileSync.appendingPathComponent("Appareil"), withDestinationURL: worktree)
+        let trash = bench.item(worktree, method: .trash, safety: .review)
+        let outcome = await engine.perform(trash, session: UUID())
+        #expect(outcome.result == .skipped(.refusedByGuard))
+        let after = await git("worktree", "list", "--porcelain")
+        #expect(after.succeeded && after.stdout == before.stdout)
+        #expect(try Data(contentsOf: staleLink) == linkBytes)
+        #expect(try Data(contentsOf: activeHead) == headBytes)
+        #expect(try Data(contentsOf: file) == fileBytes)
+        #expect(!(await git("branch", "--list", "fixture-active")).output.isEmpty)
     }
 
     @Test("Le retrait par Git refuse un worktree qui contient Téléchargements redirigé")

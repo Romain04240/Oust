@@ -142,16 +142,53 @@ struct Candidate: Sendable {
     var location: AnalyzedItemLocation?
 }
 
+struct BackupMetadata: Sendable {
+    let url: URL
+    let facts: FileFacts?
+
+    func isCurrent() -> Bool {
+        let current = FileFacts.of(url.path)
+        guard let facts else { return current == nil }
+        guard let current else { return false }
+        return current.device == facts.device && current.mode == facts.mode
+            && current.isDataless == facts.isDataless && current.isUnchanged(comparedTo: facts)
+    }
+}
+
+struct BackupRanking: Sendable {
+    let root: BackupMetadata
+    let entries: [BackupMetadata]
+
+    func isCurrent() -> Bool { root.isCurrent() && entries.allSatisfy { $0.isCurrent() } }
+}
+
 package struct AnalyzedItemLocation: Sendable {
     let directory: FileFacts
     let entry: FileFacts
+    private let backupMetadata: [BackupMetadata]
+    private let backupRanking: BackupRanking?
+
+    init(directory: FileFacts, entry: FileFacts, backupMetadata: [BackupMetadata] = [], backupRanking: BackupRanking? = nil) {
+        self.directory = directory
+        self.entry = entry
+        self.backupMetadata = backupMetadata
+        self.backupRanking = backupRanking
+    }
 
     package func isCurrent(at url: URL) -> Bool {
         guard let parent = FileFacts.of(url.deletingLastPathComponent().path),
               parent.device == directory.device, parent.inode == directory.inode,
               let current = FileFacts.of(url.path), current.device == entry.device,
               current.mode == entry.mode, current.isDataless == entry.isDataless else { return false }
-        return current.isUnchanged(comparedTo: entry)
+        return current.isUnchanged(comparedTo: entry) && backupMetadata.allSatisfy { $0.isCurrent() }
+    }
+
+    package func revalidateBackupBadge(_ item: CleanupItem) -> CleanupItem {
+        guard let backupRanking, item.protections.contains(.newestKept), !backupRanking.isCurrent() else { return item }
+        var checked = item
+        checked.protections.removeAll { $0 == .newestKept }
+        checked.protect(.unknownState)
+        return checked
     }
 }
 

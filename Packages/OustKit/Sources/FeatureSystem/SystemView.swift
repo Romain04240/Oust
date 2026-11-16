@@ -79,6 +79,7 @@ private struct SystemCategory: View {
             case .protectedOnDisk: Text("system.protected_note", bundle: .oust)
             case .cloudFiles: Text("system.cloud_note", bundle: .oust)
             case .attachments: Text("system.attachments_note", bundle: .oust)
+            case .iosBackups: Text("system.device_backups_note", bundle: .oust)
             case .userLogs: Text("system.user_logs_note", bundle: .oust)
             default: EmptyView()
             }

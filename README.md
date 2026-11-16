@@ -94,10 +94,11 @@ Every item belongs to a safety class:
 | **Review** | Yours to decide (AI models, histories, downloads, similar duplicates). Never preselected. |
 | **Protected** | Not selectable, with the reason shown. |
 
-Deletion only ever goes through one module (`OustClean`), using the right tool when there is
-one (`git worktree remove`, `xcrun simctl`, `tmutil`). The only deletion that bypasses the
-Trash is formatting an external disk, behind its own guards (never an internal or startup disk,
-disk name typed, nothing open on it). See [RULES.md](RULES.md).
+Oust routes supported cleanup operations through `OustClean`, which uses system tools such
+as `xcrun simctl` and `tmutil`. Git worktrees are listed for inspection only, with zero
+reclaimable space. Finder and FileManager Trash operations are disabled. Formatting an
+external disk has its own guards (never an internal or startup disk, disk name typed, nothing
+open on it). See [RULES.md](RULES.md).
 
 ## Build from source
 

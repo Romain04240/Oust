@@ -52,6 +52,7 @@ struct AgentFinder {
 
     func worktrees() async -> [Candidate] {
         let folders = worktreeFolders()
+        let allowed = await PathGuard(home: context.home).allowedWorktreesForAnalysis(Set(folders))
         return await withTaskGroup(of: Candidate?.self) { group in
             var results: [Candidate] = []
             var running = 0
@@ -61,7 +62,7 @@ struct AgentFinder {
                     running -= 1
                     if let result { results.append(result) }
                 }
-                group.addTask { await worktreeCandidate(folder) }
+                group.addTask { await worktreeCandidate(folder, allowed: allowed.contains(folder)) }
                 running += 1
             }
             for await result in group { if let result { results.append(result) } }
@@ -69,21 +70,18 @@ struct AgentFinder {
         }
     }
 
-    func worktreeCandidate(_ folder: URL) async -> Candidate? {
+    func worktreeCandidate(_ folder: URL, allowed: Bool) async -> Candidate? {
         guard let main = GitInspector.mainRepository(ofWorktree: folder) else { return nil }
         let state = await GitInspector.state(ofWorktree: folder)
         let modified = folder.modificationDate
         let recent = modified.map { context.now.timeIntervalSince($0) < 86_400 } ?? false
 
         var notes: [ItemNote] = []
-        var safety: SafetyClass = .safe
         if state?.isMerged == false {
             notes.append(.notMerged)
-            safety = .review
         }
         if recent {
             notes.append(.recentlyModified(days: 1))
-            safety = safety.combined(with: .review)
         }
 
         var item = CleanupItem(
@@ -94,14 +92,14 @@ struct AgentFinder {
             category: .aiAgents,
             owner: main.lastPathComponent,
             ruleID: folder.path.contains("/.codex/") ? "agent.codex_worktree" : "agent.worktree",
-            safety: safety,
+            safety: .protected,
             notes: notes,
             method: .gitWorktreeRemove(repository: main.path),
             lastActivity: modified,
             rebuild: .command("git worktree add", minutes: 1),
             activityScope: folder
         )
-        guard PathGuard(home: context.home).allows(folder) else {
+        guard allowed else {
             item.protect(.systemPath)
             return Candidate(item: item, needsMeasure: false)
         }

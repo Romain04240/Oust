@@ -10,7 +10,7 @@ public enum CleanupMethod: Sendable, Hashable, Codable {
     case removeNow
     /// Corbeille, avec l'emplacement d'origine au journal.
     case trash
-    /// `git worktree remove` depuis le dépôt principal, puis `prune`.
+    /// Inventaire des worktrees et compatibilité des anciens reçus.
     case gitWorktreeRemove(repository: String)
     /// `xcrun simctl delete <udid>`.
     case simulatorDevice(udid: String)
@@ -195,7 +195,8 @@ public struct CleanupItem: Identifiable, Sendable, Hashable {
     public var isInvalidPreference: Bool { category == .preferenceDiagnostics || ruleID == Self.invalidPreferenceRuleID }
 
     public var isAccountArchive: Bool { category == .accountArchives || ruleID == Self.accountArchiveRuleID }
-    package var requiresLiveAnalysisLocation: Bool { isInvalidPreference || isAccountArchive }
+    public var isDeviceBackup: Bool { category == .iosBackups || ruleID == "ios.backup" }
+    package var requiresLiveAnalysisLocation: Bool { isInvalidPreference || isAccountArchive || isDeviceBackup }
 
     /// Compte dans le total affiché en titre : une VM n'est pas du « vide à faire ».
     public var countsInHeadline: Bool {

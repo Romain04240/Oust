@@ -6,11 +6,10 @@ import OustSafety
 struct UserLogsFinder {
     let context: RuleContext
 
-    func find() -> [Candidate] {
+    func find() async -> [Candidate] {
         guard context.volume == nil else { return [] }
         let root = context.path("Library/Logs")
         let guardPaths = PathGuard(home: context.home)
-        guard guardPaths.allowsUserLog(root.appendingPathComponent("test.log")) else { return [] }
         var rootInfo = stat()
         var homeInfo = stat()
         guard lstat(root.path, &rootInfo) == 0, (rootInfo.st_mode & S_IFMT) == S_IFDIR,
@@ -36,8 +35,7 @@ struct UserLogsFinder {
             let name = file.lastPathComponent
             guard (info.st_mode & S_IFMT) == S_IFREG, info.st_nlink == 1,
                   name.lowercased().wholeMatch(of: /.+\.log(?:\.\d+)?(?:\.gz)?/) != nil,
-                  !openPaths.contains(PathNormalizer.normalize(file.path)),
-                  guardPaths.allowsUserLog(file) else { continue }
+                  !openPaths.contains(PathNormalizer.normalize(file.path)) else { continue }
             let modified = Date(timeIntervalSince1970: Double(info.st_mtimespec.tv_sec)
                 + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000)
             guard modified < cutoff else { continue }
@@ -54,6 +52,7 @@ struct UserLogsFinder {
                 fingerprint: Fingerprint(modificationDate: modified, fileID: UInt64(info.st_ino))
             )))
         }
-        return candidates
+        let allowed = await guardPaths.allowedUserLogsForAnalysis(Set(candidates.flatMap(\.item.paths)))
+        return candidates.filter { $0.item.paths.allSatisfy(allowed.contains) }
     }
 }

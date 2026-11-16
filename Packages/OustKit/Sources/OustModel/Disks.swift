@@ -87,13 +87,21 @@ extension AppModel {
     @discardableResult
     public func storedAnalysis(for volume: VolumeDescriptor) async -> ScanIndex? {
         guard !volume.isBoot else { return nil }
-        let options = Self.volumeScanOptions(for: volume, home: home)
-        if let known = volumeIndexes[volume.id], known.canReuse(for: options) { return known }
-        guard let store = Self.volumeStore(for: volume) else { return nil }
-        let root = volume.scanRoot.standardizedFileURL.path
-        guard let loaded = await Task.detached(priority: .userInitiated, operation: { store.load(rootPath: root) }).value,
-              loaded.canReuse(for: options)
-        else { return nil }
+        let home = home
+        let known = volumeIndexes[volume.id]
+        guard let options = await checkStorageIO({ Self.volumeScanOptions(for: volume, home: home) }) else { return nil }
+        let candidate: ScanIndex?
+        if let known, await checkStorageIO({ known.canReuse(for: options) }) == true {
+            candidate = known
+        } else if let store = await checkStorageIO({ Self.volumeStore(for: volume) }) ?? nil {
+            let root = volume.scanRoot.standardizedFileURL.path
+            candidate = await storageIO { store.decodeIndex(rootPath: root) }
+        } else {
+            return nil
+        }
+        guard let loaded = candidate, await checkStorageIO({ loaded.canReuse(for: options) }) == true,
+              !Task.isCancelled,
+              volumeIndexes[volume.id]?.root === known?.root else { return nil }
         volumeIndexes[volume.id] = loaded
         return loaded
     }

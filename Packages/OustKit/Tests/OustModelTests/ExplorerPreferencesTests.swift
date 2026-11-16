@@ -3,13 +3,291 @@ import OustClean
 import OustCore
 import OustRules
 import OustSafety
-import OustScan
+@testable import OustScan
 import OustVolume
 import Testing
 @testable import OustModel
 
 @MainActor
 struct ExplorerPreferencesTests {
+    private func waitForLargeFiles(_ app: AppModel) async throws {
+        for _ in 0..<100 {
+            if !app.largeFiles.computing { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Le calcul des gros fichiers ne s’est pas terminé")
+    }
+
+    @Test("Un accès bloqué expire sans faire attendre le fil principal")
+    func storageCheckTimeout() async {
+        let permit = DispatchSemaphore(value: 0)
+        defer { permit.signal() }
+        let clock = ContinuousClock()
+        let started = clock.now
+        let read = await checkStorageIO {
+            #expect(!Thread.isMainThread)
+            permit.wait()
+            return true
+        }
+        #expect(read == nil)
+        #expect(clock.now - started < .seconds(3))
+    }
+
+    @Test("Les gros fichiers abandonnent une ancienne mesure même si l’Explorateur a déjà changé l’arbre")
+    func anotherViewInvalidatesDeviceBackupGains() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-device-adoption-\(UUID())")
+        let target = home.appendingPathComponent("Stockage/Copie")
+        let root = DeviceBackupPath.root(in: home)
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data(repeating: 7, count: 11_000_000).write(to: target.appendingPathComponent("fichier.bin"))
+        let index = await ScanIndex.refresh(nil, root: home, options: ScanOptions(
+            leafThreshold: 1, deviceBackupsDirectory: root.path)).index
+        let capacity = Capacity(total: 10, available: 5, availableForImportantUsage: 5)
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        app.showExplorerIndex(index, volume: VolumeDescriptor(name: "Fictif", mountURL: home, scanRoot: home,
+                              isBoot: false, isInternal: true, isRemovable: false, capacity: capacity))
+        app.largeFiles.size = .tenMegabytes
+        app.largeFiles.age = .any
+        try await waitForLargeFiles(app)
+        #expect((app.largeFiles.result?.matchBytes ?? 0) > 0)
+        let phase = app.explorer
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Appareil"), withDestinationURL: target)
+        let stable = await app.revalidateExplorerGains()
+        #expect(!stable && app.explorer == phase)
+        #expect(app.largeFiles.result == nil)
+        await app.largeFiles.revalidateGains()
+        #expect((app.largeFiles.result?.matchBytes ?? 0) == 0)
+        try await waitForLargeFiles(app)
+        #expect(app.largeFiles.result?.matchBytes == 0)
+    }
+
+    @Test("La réouverture ne republie pas les gains du disque de démarrage", arguments: [false, true])
+    func bootCacheDoesNotRestoreOldGains(onExternalVolume: Bool) async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-boot-reopen-\(UUID())")
+        let root = home.appendingPathComponent("Disque")
+        let target = root.appendingPathComponent("Copie")
+        let backups = DeviceBackupPath.root(in: home)
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try fm.createDirectory(at: backups, withIntermediateDirectories: true)
+        try Data(repeating: 7, count: 11_000_000).write(to: target.appendingPathComponent("Fictif.bin"))
+        let options = DiskIndexModel.options(for: home)
+        let index = await ScanIndex.refresh(nil, root: root, options: options).index
+        let store = TreeStore(directory: home.appendingPathComponent("Cache"))
+        try store.save(index)
+        let app = AppModel(home: home, defaults: MemoryDefaults(), disk: DiskIndexModel(store: store))
+        let boot = VolumeDescriptor(name: "Fictif", mountURL: root, scanRoot: root, isBoot: true,
+                                   isInternal: true, isRemovable: false,
+                                   capacity: Capacity(total: 1_000_000, available: 500_000, availableForImportantUsage: 500_000))
+        app.volumes = [boot]
+        await app.disk.start()
+        #expect((app.tree?.total.freeable ?? 0) > 0)
+        if onExternalVolume {
+            let otherRoot = home.appendingPathComponent("AutreVolume")
+            try fm.createDirectory(at: otherRoot, withIntermediateDirectories: true)
+            let otherIndex = await ScanIndex.refresh(nil, root: otherRoot, options: ScanOptions()).index
+            let external = VolumeDescriptor(name: "Autre", mountURL: otherRoot, scanRoot: otherRoot, isBoot: false,
+                                           isInternal: false, isRemovable: true, capacity: boot.capacity)
+            _ = await app.disk.refresh().value
+            app.showExplorerIndex(otherIndex, volume: external)
+            app.volumes = [boot, external]
+        }
+        try fm.createSymbolicLink(at: backups.appendingPathComponent("Appareil"), withDestinationURL: target)
+        if !onExternalVolume {
+            _ = await app.revalidateExplorerGains()
+            #expect(app.tree?.total.freeable == 0)
+        }
+        app.explore(boot)
+        #expect((app.tree?.total.freeable ?? 0) == 0)
+        _ = await app.disk.refresh().value
+        #expect(app.tree?.total.freeable == 0)
+    }
+
+    @Test("Un chargement de cache planifié avant Annuler ne peut pas rouvrir l’Explorateur")
+    func cancelledStartupCacheCannotPublish() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-cancel-startup-\(UUID())")
+        let root = home.appendingPathComponent("DisqueFictif")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try Data(repeating: 44, count: 700_000).write(to: root.appendingPathComponent("fictif.bin"))
+        let store = TreeStore(directory: home.appendingPathComponent("Index"))
+        let initial = await ScanIndex.refresh(nil, root: root, options: DiskIndexModel.options(for: home)).index
+        try store.save(initial)
+        let app = AppModel(home: home, defaults: MemoryDefaults(), disk: DiskIndexModel(store: store))
+        let capacity = Capacity(total: 100_000_000, available: 50_000_000, availableForImportantUsage: 50_000_000)
+        let boot = VolumeDescriptor(name: "Fictif", mountURL: root, scanRoot: root, isBoot: true,
+                                    isInternal: true, isRemovable: false, capacity: capacity)
+        app.volumes = [boot]
+        let launch = app.disk.scheduleStartupCache()
+        app.explore(boot)
+        let scan = app.disk.refresh()
+        app.cancelExploration()
+        _ = await scan.value
+        await launch.value
+        #expect(app.explorer == .idle && app.tree == nil && !app.disk.isRefreshing)
+    }
+
+    @Test("Relancer aussitôt après Annuler lance une nouvelle analyse du disque")
+    func immediateRetryAfterCancellingBootScan() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-retry-boot-\(UUID())")
+        let root = home.appendingPathComponent("DisqueFictif")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try Data(repeating: 44, count: 700_000).write(to: root.appendingPathComponent("fictif.bin"))
+        let store = TreeStore(directory: home.appendingPathComponent("Index"))
+        let app = AppModel(home: home, defaults: MemoryDefaults(), disk: DiskIndexModel(store: store))
+        let capacity = Capacity(total: 100_000_000, available: 50_000_000, availableForImportantUsage: 50_000_000)
+        let boot = VolumeDescriptor(name: "Fictif", mountURL: root, scanRoot: root, isBoot: true,
+                                    isInternal: true, isRemovable: false, capacity: capacity)
+        app.volumes = [boot]
+        app.explore(boot)
+        app.cancelExploration()
+        #expect(app.explorer == .idle)
+        app.explore(boot)
+        let result = await app.disk.refresh().value
+        #expect(result != nil && app.tree?.path == root.path)
+        #expect(!app.explorer.isRunning && !app.disk.isRefreshing)
+    }
+
+    @Test("Annuler le retour au disque de démarrage interdit une publication tardive du cache")
+    func cancelledBootCacheDoesNotPublish() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-cancel-cache-\(UUID())")
+        let root = home.appendingPathComponent("Demarrage")
+        let external = home.appendingPathComponent("Externe")
+        for folder in [root, external] { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
+        defer { try? fm.removeItem(at: home) }
+        try Data(repeating: 44, count: 700_000).write(to: root.appendingPathComponent("test.bin"))
+        let initial = await ScanIndex.refresh(nil, root: root, options: DiskIndexModel.options(for: home)).index
+        let other = await ScanIndex.refresh(nil, root: external, options: ScanOptions()).index
+        let store = TreeStore(directory: home.appendingPathComponent("Index"))
+        try store.save(initial)
+        let app = AppModel(home: home, defaults: MemoryDefaults(), disk: DiskIndexModel(store: store))
+        let capacity = Capacity(total: 100_000_000, available: 50_000_000, availableForImportantUsage: 50_000_000)
+        let boot = VolumeDescriptor(name: "Fictif", mountURL: root, scanRoot: root, isBoot: true,
+                                    isInternal: true, isRemovable: false, capacity: capacity)
+        let removable = VolumeDescriptor(name: "Externe", mountURL: external, scanRoot: external, isBoot: false,
+                                         isInternal: false, isRemovable: true, capacity: capacity)
+        app.volumes = [boot]
+        await app.disk.start()
+        _ = await app.disk.refresh().value
+        app.showExplorerIndex(other, volume: removable)
+        app.volumes = [boot, removable]
+        app.explore(boot)
+        let refresh = app.disk.refresh()
+        #expect(app.explorer.isRunning)
+        app.cancelExploration()
+        _ = await refresh.value
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(app.explorer == .idle && app.tree == nil)
+    }
+
+    @Test("Un CSV MobileSync conserve le dossier choisi et publie seulement les octets occupés")
+    func csvWithholdsMobileSyncGains() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-backup-csv-\(UUID())")
+        let target = home.appendingPathComponent("Copie")
+        let backups = DeviceBackupPath.root(in: home)
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try fm.createDirectory(at: backups, withIntermediateDirectories: true)
+        try Data(repeating: 8, count: 180_000).write(to: target.appendingPathComponent("Fictif.bin"))
+        let index = await ScanIndex.refresh(nil, root: home, options: ScanOptions(
+            leafThreshold: 1, deviceBackupsDirectory: backups.path)).index
+        let folder = try #require(index.root.descendant(atPath: target.path))
+        #expect(folder.total.freeable > 0)
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        let boot = VolumeDescriptor(name: "Fictif", mountURL: home, scanRoot: home, isBoot: false,
+                                   isInternal: true, isRemovable: false,
+                                   capacity: Capacity(total: 1_000_000, available: 500_000, availableForImportantUsage: 500_000))
+        app.showExplorerIndex(index, volume: boot)
+        let destination = home.appendingPathComponent("Fictif.csv")
+        let analytics = TreeAnalytics.compute(index.root)
+        let render: (Bool) -> String = { analytics.csv(for: folder, includeGains: $0) }
+        #expect(try await app.exportExplorerCSV(to: destination, for: index.root, render: render))
+        let occupiedOnly = analytics.csv(for: folder, includeGains: false)
+        #expect(occupiedOnly != analytics.csv(for: folder))
+        #expect(try String(contentsOf: destination, encoding: .utf8) == occupiedOnly)
+        let refreshed = try await app.exportExplorerCSV(to: destination, for: index.root, render: render,
+                                                        beforeDestinationCheck: {
+            do { try fm.createSymbolicLink(at: backups.appendingPathComponent("Appareil"), withDestinationURL: target) }
+            catch { Issue.record("Impossible de rediriger la copie fictive") }
+        })
+        #expect(!refreshed)
+        #expect(try String(contentsOf: destination, encoding: .utf8) == occupiedOnly)
+        #expect(app.tree?.total.freeable == 0)
+    }
+
+    @Test("Le CSV préserve une destination remplacée pendant les derniers contrôles")
+    func csvRejectsChangedDestination() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-csv-replaced-\(UUID())")
+        try fm.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        let destination = home.appendingPathComponent("Fictif.csv")
+        try "ancien".write(to: destination, atomically: false, encoding: .utf8)
+        let index = await ScanIndex.refresh(nil, root: home, options: ScanOptions()).index
+        let capacity = Capacity(total: 10, available: 5, availableForImportantUsage: 5)
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        app.showExplorerIndex(index, volume: VolumeDescriptor(name: "Fictif", mountURL: home, scanRoot: home,
+                              isBoot: false, isInternal: true, isRemovable: false, capacity: capacity))
+        let published = try await app.exportExplorerCSV(to: destination, for: index.root, render: { _ in "export" },
+                                                        beforeDestinationCheck: {
+            do { try "concurrent".write(to: destination, atomically: true, encoding: .utf8) }
+            catch { Issue.record("Impossible de remplacer le fichier fictif") }
+        })
+        #expect(!published)
+        #expect(try String(contentsOf: destination, encoding: .utf8) == "concurrent")
+    }
+
+    @Test("La redirection d’une copie retire les gains de Spotlight, des gros fichiers et du CSV en attente")
+    func deviceBackupGainRevalidation() async throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent("oust-device-gains-\(UUID())")
+        let target = home.appendingPathComponent("Stockage/Copie")
+        let root = DeviceBackupPath.root(in: home)
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let payload = target.appendingPathComponent("fichier.bin")
+        try Data(repeating: 7, count: 11_000_000).write(to: payload)
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        let preview = Spotlight.parse(Data((payload.path + "\0").utf8), minimumBytes: 1, deviceBackupsDirectory: root.path)
+        let snapshot = DeviceBackupPath.Snapshot.capture(root.path)
+        app.largeFiles.size = .tenMegabytes
+        app.largeFiles.age = .any
+        await app.disk.publishSpotlightFiles(preview, backupRoots: snapshot)
+        app.largeFiles.refresh()
+        try await waitForLargeFiles(app)
+        #expect((app.largeFiles.result?.matchBytes ?? 0) > 0)
+
+        let index = await ScanIndex.refresh(nil, root: home, options: ScanOptions(
+            leafThreshold: 1, deviceBackupsDirectory: root.path)).index
+        let volume = VolumeDescriptor(name: "Fictif", mountURL: home, scanRoot: home, isBoot: false,
+                                      isInternal: true, isRemovable: false,
+                                      capacity: Capacity(total: 1_000_000, available: 500_000,
+                                                         availableForImportantUsage: 500_000))
+        app.showExplorerIndex(index, volume: volume)
+        let destination = home.appendingPathComponent("Fictif.csv")
+        try "ancienne version".write(to: destination, atomically: false, encoding: .utf8)
+        let exported = try await app.exportExplorerCSV(to: destination, for: index.root, render: { _ in "gain périmé" }, stage: { text, staging in
+            try text.write(to: staging, atomically: false, encoding: .utf8)
+            try fm.createSymbolicLink(at: root.appendingPathComponent("Appareil"), withDestinationURL: target)
+        })
+        #expect(!exported)
+        #expect(try String(contentsOf: destination, encoding: .utf8) == "ancienne version")
+        await app.largeFiles.revalidateGains()
+        #expect(app.disk.spotlightFiles.isEmpty)
+        #expect((app.largeFiles.result?.matchBytes ?? 0) == 0)
+        #expect(app.tree?.total.freeable == 0)
+    }
+
     @Test("Le remplacement d’un CSV préserve le mode du fichier", arguments: [0o600, 0o640])
     func csvReplacementPreservesPermissions(mode: Int) async throws {
         let fm = FileManager.default
@@ -27,7 +305,7 @@ struct ExplorerPreferencesTests {
                                                          availableForImportantUsage: 500_000))
         let app = AppModel(home: home, defaults: MemoryDefaults())
         app.showExplorerIndex(index, volume: volume)
-        #expect(try app.exportExplorerCSV(to: destination, for: index.root, render: { "nouveau" }))
+        #expect(try await app.exportExplorerCSV(to: destination, for: index.root, render: { _ in "nouveau" }))
         #expect(try String(contentsOf: destination, encoding: .utf8) == "nouveau")
         let actual = try fm.attributesOfItem(atPath: destination.path)[.posixPermissions] as? NSNumber
         #expect(actual?.intValue == mode)
@@ -68,7 +346,7 @@ struct ExplorerPreferencesTests {
                                                          availableForImportantUsage: 500_000))
         let app = AppModel(home: home, defaults: MemoryDefaults())
         app.showExplorerIndex(index, volume: volume)
-        let published = try app.exportExplorerCSV(to: destination, for: index.root, render: { "nouveau" }, stage: { text, temporary in
+        let published = try await app.exportExplorerCSV(to: destination, for: index.root, render: { _ in "nouveau" }, stage: { text, temporary in
             try text.write(to: temporary, atomically: false, encoding: .utf8)
             if fixture == .absent {
                 try addACL("everyone deny execute", at: temporary)
@@ -114,13 +392,13 @@ struct ExplorerPreferencesTests {
         let destination = home.appendingPathComponent("Fictif.csv")
         let csv = TreeAnalytics.compute(index.root).csv(for: index.root)
         #expect(index.root.total.freeable > 0)
-        #expect(try app.exportExplorerCSV(to: destination, for: index.root, render: { csv }))
+        #expect(try await app.exportExplorerCSV(to: destination, for: index.root, render: { _ in csv }))
         #expect(try String(contentsOf: destination, encoding: .utf8) == csv)
 
         let old = "Vérification d’un CSV préexistant"
         try old.write(to: destination, atomically: false, encoding: .utf8)
         var staged: URL?
-        let changed = try app.exportExplorerCSV(to: destination, for: index.root, render: {
+        let changed = try await app.exportExplorerCSV(to: destination, for: index.root, render: { _ in
             if !afterStaging {
                 do { try fm.createSymbolicLink(at: archives, withDestinationURL: target) }
                 catch { Issue.record("Redirection fictive impossible : \(error)") }
@@ -142,7 +420,7 @@ struct ExplorerPreferencesTests {
         #expect(safe.total.allocated == index.root.total.allocated && safe.total.freeable == 0)
         let safeCSV = TreeAnalytics.compute(safe).csv(for: safe)
         #expect(safeCSV != csv)
-        #expect(try app.exportExplorerCSV(to: destination, for: safe, render: { safeCSV }))
+        #expect(try await app.exportExplorerCSV(to: destination, for: safe, render: { _ in safeCSV }))
         #expect(try String(contentsOf: destination, encoding: .utf8) == safeCSV)
     }
 
@@ -193,17 +471,18 @@ struct ExplorerPreferencesTests {
                                       capacity: Capacity(total: 1_000_000, available: 500_000,
                                                          availableForImportantUsage: 500_000))
         app.showExplorerIndex(index, volume: volume)
-        #expect(app.revalidateExplorerGains() && app.tree === index.root)
+        #expect(await app.revalidateExplorerGains() && app.tree === index.root)
         try fm.removeItem(at: archives)
         try fm.createSymbolicLink(at: archives, withDestinationURL: target)
 
-        #expect(!app.revalidateExplorerGains())
+        let revalidated = await app.revalidateExplorerGains()
+        #expect(!revalidated)
         let displayed = try #require(app.tree?.descendant(atPath: target.path))
         #expect(displayed.total.allocated == original.total.allocated)
         #expect(displayed.total.freeable == 0 && displayed.files.first?.sizes.freeable == 0)
         #expect(app.tree?.total.freeable == 0)
         #expect(original.total.freeable > 0)
-        #expect(app.revalidateExplorerGains() && app.treeVolume?.id == volume.id)
+        #expect(await app.revalidateExplorerGains() && app.treeVolume?.id == volume.id)
     }
 
     @Test("Sélectionner un volume ne republie pas le gain de l'ancienne cible", arguments: [true, false])
@@ -233,14 +512,14 @@ struct ExplorerPreferencesTests {
         let app = AppModel(home: home, defaults: MemoryDefaults())
         app.volumeIndexes[volume.id] = old
         if wasSelected {
-            app.selectAnalysisVolume(volume)
+            await app.selectAnalysisVolume(volume)?.value
             #expect(app.tree?.descendant(atPath: second.path)?.total.freeable == priorGain)
         }
 
         try fm.removeItem(at: preferences)
         try fm.createSymbolicLink(at: preferences, withDestinationURL: second)
         #expect(!old.hasCurrentProtectionRoots)
-        app.selectAnalysisVolume(volume)
+        await app.selectAnalysisVolume(volume)?.value
         #expect(app.treeVolume?.id == volume.id)
         #expect(app.tree?.descendant(atPath: second.path)?.total.freeable == 0)
         #expect(app.tree?.total.allocated == old.root.total.allocated)

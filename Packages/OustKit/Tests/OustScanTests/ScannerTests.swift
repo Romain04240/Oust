@@ -6,6 +6,48 @@ import Testing
 @Suite("Le parcours compte juste")
 struct ScannerTests {
 
+    @Test("Une sauvegarde d’appareil imbriquée ou redirigée occupe de la place et ne promet aucun gain")
+    func deviceBackupDirectory() async throws {
+        let fixture = try Fixture()
+        let file = try fixture.file("stockage/copied/device/payload.bin", bytes: 250_000)
+        let ordinary = try fixture.file("ordinaire.bin", bytes: 250_000, byte: 0x42)
+        let parent = try fixture.directory("Library/Application Support/MobileSync")
+        let backups = parent.appendingPathComponent("Backup")
+        try FileManager.default.createSymbolicLink(at: backups,
+                                                  withDestinationURL: fixture.root.appendingPathComponent("stockage/copied"))
+        let options = ScanOptions(leafThreshold: 1, deviceBackupsDirectory: backups.path)
+        let result = await Scanner.scan([fixture.root], options: options)
+        let tree = try #require(result.root)
+        let backup = try #require(tree.descendant(atPath: file.deletingLastPathComponent().path))
+        #expect(backup.total.allocated == Fixture.allocated(file))
+        #expect(backup.total.freeable == 0)
+        #expect(tree.total.freeable == Fixture.allocated(ordinary))
+        let spotlight = Spotlight.parse(Data((file.path + "\0" + ordinary.path + "\0").utf8), minimumBytes: 1,
+                                        deviceBackupsDirectory: backups.path)
+        #expect(spotlight.first { $0.path == file.path }?.sizes.freeable == 0)
+        #expect(spotlight.first { $0.path == ordinary.path }?.sizes.freeable == Fixture.allocated(ordinary))
+    }
+
+    @Test("Un lien individuel ajouté après le scan invalide les gains et s’applique au nouveau parcours")
+    func redirectedDeviceInvalidatesIndex() async throws {
+        let fixture = try Fixture()
+        let file = try fixture.file("stockage/appareil/payload.bin", bytes: 260_000)
+        let backups = try fixture.directory("MobileSync/Backup")
+        let options = ScanOptions(leafThreshold: 1, deviceBackupsDirectory: backups.path)
+        let initial = await ScanIndex.refresh(nil, root: fixture.root, options: options).index
+        #expect(initial.root.total.freeable > 0)
+        try FileManager.default.createSymbolicLink(at: backups.appendingPathComponent("device"),
+                                                  withDestinationURL: file.deletingLastPathComponent())
+        #expect(!initial.hasCurrentProtectionRoots)
+        #expect(initial.checkedForDisplay().root.total.freeable == 0)
+        let current = await ScanIndex.refresh(initial, root: fixture.root, options: options).index
+        let backup = try #require(current.root.descendant(atPath: file.deletingLastPathComponent().path))
+        #expect(backup.total.allocated > 0 && backup.total.freeable == 0)
+        let spotlight = Spotlight.parse(Data((file.path + "\0").utf8), minimumBytes: 1,
+                                         deviceBackupsDirectory: backups.path)
+        #expect(spotlight.first?.sizes.freeable == 0)
+    }
+
     @Test("La taille allouée est celle que rapporte stat")
     func allocatedMatchesStat() async throws {
         let fixture = try Fixture()

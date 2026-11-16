@@ -12,6 +12,10 @@ extension CloudEntry {
     /// resté en ligne (règle 9). Ce qu'il pèse dans le nuage se lit dans la
     /// section, à part.
     public func cleanupItem(account: CloudAccount?, guard pathGuard: PathGuard) -> CleanupItem {
+        cleanupItem(account: account, pathRefused: !containsSafariDownload && !pathGuard.allowsCloudTrash(url))
+    }
+
+    package func cleanupItem(account: CloudAccount?, pathRefused: Bool) -> CleanupItem {
         var item = CleanupItem(
             id: "cloudfile|\(url.path)", title: name, detail: place(account: account),
             paths: [url], category: .cloudItems, owner: account.map(\.displayName) ?? "", ruleID: "clouds.file",
@@ -19,7 +23,7 @@ extension CloudEntry {
             sizes: Sizes(allocated: localSize, freeable: freeable), lastActivity: modified, rebuild: .cloudTrash,
             fingerprint: Fingerprint(modificationDate: modified, fileID: fileID)
         )
-        if containsSafariDownload || !pathGuard.allowsCloudTrash(url) { item.protect(.systemPath) }
+        if containsSafariDownload || pathRefused { item.protect(.systemPath) }
         // Listé, mais rien à cocher : le Finder refuserait, après une alerte qui
         // bloque le nettoyage (essai du 18/10/2026 ; Romain : carte « déconnecté »).
         switch account?.connection {

@@ -175,8 +175,8 @@ struct AgentTests {
         let available = try #require(items.first { $0.title == "Ordinaire" })
         #expect(locked.protections == [.systemPath] && locked.sizes.freeable == 0)
         #expect(!locked.isSelectable && !PreselectionPolicy().preselects(locked, now: context.now))
-        #expect(available.isSelectable && available.sizes.freeable > 0)
-        #expect(PreselectionPolicy().preselects(available, now: context.now))
+        #expect(!available.isSelectable && available.sizes.allocated > 0 && available.sizes.freeable == 0)
+        #expect(!PreselectionPolicy().preselects(available, now: context.now))
     }
 
     @Test("Les historiques Claude anciens sont proposés, les récents jamais")

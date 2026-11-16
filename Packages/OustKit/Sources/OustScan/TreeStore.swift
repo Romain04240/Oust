@@ -16,7 +16,7 @@ public struct TreeStore: Sendable {
     /// Changer ce numéro à chaque évolution du format : un ancien index est alors
     /// ignoré (et le disque reparcouru), jamais mal relu.
     // Les anciennes versions comptaient des fichiers protégés dans les gains.
-    static let version: UInt64 = 7
+    static let version: UInt64 = 10
     static let magic = Array("OUSTIDX".utf8)
 
     public init(directory: URL) {
@@ -59,6 +59,11 @@ public struct TreeStore: Sendable {
 
     /// L'index de cette racine, s'il existe et se relit en entier.
     public func load(rootPath: String) -> ScanIndex? {
+        guard let index = decodeIndex(rootPath: rootPath), index.hasCurrentProtectionRoots else { return nil }
+        return index
+    }
+
+    package func decodeIndex(rootPath: String) -> ScanIndex? {
         let header = Self.magic.count + 1 + 8
         guard let file = try? Data(contentsOf: url(for: rootPath), options: .mappedIfSafe), file.count > header,
               Array(file.prefix(Self.magic.count)) == Self.magic,
@@ -75,8 +80,7 @@ public struct TreeStore: Sendable {
         }
         guard decoded == raw.count else { return nil }
         var reader = BinaryReader(raw)
-        guard let index = ScanIndex.decode(from: &reader), index.rootPath == rootPath, reader.isAtEnd,
-              index.hasCurrentProtectionRoots else {
+        guard let index = ScanIndex.decode(from: &reader), index.rootPath == rootPath, reader.isAtEnd else {
             return nil
         }
         return index
@@ -99,8 +103,18 @@ extension ScanIndex {
         writer.strings(options.notableNames.sorted())
         writer.string(options.readOnlyPreferencesDirectory ?? "")
         writer.string(options.accountArchivesDirectory ?? "")
+        writer.string(options.deviceBackupsDirectory ?? "")
+        Self.encodeProtectionRoot(scannedRootLocation, into: &writer)
         Self.encodeProtectionRoot(preferences, into: &writer)
         Self.encodeProtectionRoot(accountArchiveDirectory, into: &writer)
+        Self.encodeProtectionRoot(deviceBackupDirectory.directory, into: &writer)
+        writer.bool(deviceBackupDirectory.uncertain)
+        let redirects = deviceBackupDirectory.redirects
+        writer.unsigned(UInt64(redirects.count))
+        for name in redirects.keys.sorted() {
+            writer.string(name)
+            if let location = redirects[name] { Self.encodeProtectionRoot(location, into: &writer) }
+        }
         writer.unsigned(eventID)
         writer.string(eventDatabase ?? "")
         writer.date(scannedAt)
@@ -182,9 +196,19 @@ extension ScanIndex {
               let notable = reader.strings(),
               let readOnlyPreferencesDirectory = reader.string(),
               let accountArchivesDirectory = reader.string(),
+              let deviceBackupsDirectory = reader.string(),
+              let scannedRootLocation = decodeProtectionRoot(from: &reader),
               let preferences = decodeProtectionRoot(from: &reader),
-              let archives = decodeProtectionRoot(from: &reader)
+              let archives = decodeProtectionRoot(from: &reader),
+              let backups = decodeProtectionRoot(from: &reader),
+              let backupUncertainty = reader.bool(),
+              let redirectCount = reader.unsigned(), redirectCount <= 100_000
         else { return nil }
+        var backupRedirects: [String: PreferenceDirectory] = [:]
+        for _ in 0..<redirectCount {
+            guard let name = reader.string(), let location = decodeProtectionRoot(from: &reader),
+                  backupRedirects.updateValue(location, forKey: name) == nil else { return nil }
+        }
         guard let eventID = reader.unsigned(),
               let database = reader.string(),
               let scannedAt = reader.date() ?? nil,
@@ -195,7 +219,8 @@ extension ScanIndex {
                                   measurePrivateSizes: measurePrivateSizes, excludedPaths: Set(excluded),
                                   notableNames: Set(notable),
                                   readOnlyPreferencesDirectory: readOnlyPreferencesDirectory.isEmpty ? nil : readOnlyPreferencesDirectory,
-                                  accountArchivesDirectory: accountArchivesDirectory.isEmpty ? nil : accountArchivesDirectory)
+                                  accountArchivesDirectory: accountArchivesDirectory.isEmpty ? nil : accountArchivesDirectory,
+                                  deviceBackupsDirectory: deviceBackupsDirectory.isEmpty ? nil : deviceBackupsDirectory)
 
         var root: TreeNode?
         // Les dossiers dont on attend encore des enfants.
@@ -266,7 +291,7 @@ extension ScanIndex {
         return ScanIndex(root: root, options: options, ownership: Ownership(links: maps[0], clones: maps[1]),
                          eventID: eventID, eventDatabase: database.isEmpty ? nil : database,
                          scannedAt: scannedAt, fullScanAt: fullScanAt, skippedVolumes: skipped,
-                         preferenceDirectory: preferences, accountArchiveDirectory: archives)
+                         scannedRootLocation: scannedRootLocation, preferenceDirectory: preferences, accountArchiveDirectory: archives, deviceBackupDirectory: DeviceBackupPath.Snapshot(directory: backups, redirects: backupRedirects, uncertain: backupUncertainty))
     }
 }
 

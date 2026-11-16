@@ -411,7 +411,7 @@ struct AgentPolicyTests {
         #expect(AgentPolicy.verdict(for: item(.review, method: .photoAsset(localIdentifier: "ABC/L0/001")))
                 == .refused(.notForAgents))
         #expect(MethodReport(.localSnapshot(date: "d")).requiresAdministrator)
-        #expect(AgentPolicy.verdict(for: item(.rebuilds, method: .gitWorktreeRemove(repository: "/r"))) == .allowed)
+        #expect(AgentPolicy.verdict(for: item(.rebuilds, method: .gitWorktreeRemove(repository: "/r"))) == .refused(.unavailable))
     }
 
     @Test("La lignée du processus, et ce qu'elle ne protège pas")

@@ -22,6 +22,7 @@ public struct ScanOptions: Sendable, Hashable {
     /// Les plist directs de ce dossier comptent uniquement comme espace occupé.
     public var readOnlyPreferencesDirectory: String?
     public var accountArchivesDirectory: String?
+    public var deviceBackupsDirectory: String?
 
     public init(
         threads: Int = min(12, max(4, ProcessInfo.processInfo.activeProcessorCount)),
@@ -30,7 +31,8 @@ public struct ScanOptions: Sendable, Hashable {
         excludedPaths: Set<String> = [],
         notableNames: Set<String> = [],
         readOnlyPreferencesDirectory: String? = nil,
-        accountArchivesDirectory: String? = nil
+        accountArchivesDirectory: String? = nil,
+        deviceBackupsDirectory: String? = nil
     ) {
         self.threads = threads
         self.leafThreshold = leafThreshold
@@ -39,6 +41,7 @@ public struct ScanOptions: Sendable, Hashable {
         self.notableNames = notableNames
         self.readOnlyPreferencesDirectory = readOnlyPreferencesDirectory
         self.accountArchivesDirectory = accountArchivesDirectory
+        self.deviceBackupsDirectory = deviceBackupsDirectory
     }
 
     /// Pour mesurer des éléments : pas de feuilles, juste des totaux.
@@ -82,6 +85,7 @@ public struct ScanResult: Sendable {
     /// Absent quand la cible a changé pendant la mesure et que les gains ont été écartés.
     let preferenceDirectory: PreferenceDirectory?
     let accountArchiveDirectory: PreferenceDirectory
+    let deviceBackupDirectory: DeviceBackupPath.Snapshot
 
     public var root: TreeNode? { roots.first }
 }
@@ -120,14 +124,16 @@ public enum Scanner {
         configureProcessIOPolicy()
         let started = Date()
         let ownership = Ownership()
-        let walk = Walk(options: options, progress: progress, ownership: ownership)
+        let backups = await checkStorageIO { DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory) }
+        let walk = Walk(options: options, progress: progress, ownership: ownership, deviceBackupDirectory: backups ?? .unknown)
         let nodes = await walk.run(roots: roots.map { $0.standardizedFileURL.path })
-        let stablePreferences = walk.hasCurrentProtectionRoots
+        let stableProtectionRoots = await checkStorageIO { walk.hasCurrentProtectionRoots } == true
+        let stablePreferences = stableProtectionRoots && !walk.sawStaleDirectories
         if !stablePreferences { for node in nodes { node.suppressFreeable() } }
         return ScanResult(roots: nodes, duration: Date().timeIntervalSince(started),
                           skippedVolumes: walk.skippedVolumes, ownership: ownership,
                           preferenceDirectory: stablePreferences ? walk.preferenceDirectory : nil,
-                          accountArchiveDirectory: walk.accountArchiveDirectory)
+                          accountArchiveDirectory: walk.accountArchiveDirectory, deviceBackupDirectory: walk.deviceBackupDirectory)
     }
 
     /// Mesure des éléments sans garder leur arborescence.
@@ -217,11 +223,16 @@ final class Walk: @unchecked Sendable {
     private let notablePrefixes: [String]
     let preferenceDirectory: PreferenceDirectory
     let accountArchiveDirectory: PreferenceDirectory
+    let deviceBackupDirectory: DeviceBackupPath.Snapshot
     private let extendedSupported = Atomic<Bool>(true)
+    private let staleDirectories = Atomic<Bool>(false)
+    var sawStaleDirectories: Bool { staleDirectories.load(ordering: .relaxed) }
     private let skipped = Mutex<[String]>([])
     /// Les nœuds relus, pour ne recalculer que leurs totaux et ceux de leurs
     /// ancêtres.
     private let touched = Mutex<[TreeNode]>([])
+    /// Les branches dont les gains seront annulés après la fin des relectures.
+    private let protectedReuse = Mutex<[TreeNode]>([])
     /// Les sous-dossiers abandonnés lors d'une relecture partielle (disparus,
     /// renommés, remplacés).
     private let dropped = Mutex<[TreeNode]>([])
@@ -229,7 +240,8 @@ final class Walk: @unchecked Sendable {
     var skippedVolumes: [String] { skipped.withLock { $0 } }
     var touchedFileIDs: Set<UInt64> { Set(touched.withLock { $0.map(\.fileID) }) }
 
-    init(options: ScanOptions, progress: ScanProgress, ownership: Ownership) {
+    init(options: ScanOptions, progress: ScanProgress, ownership: Ownership,
+         deviceBackupDirectory: DeviceBackupPath.Snapshot) {
         self.options = options
         self.progress = progress
         self.ownership = ownership
@@ -239,11 +251,14 @@ final class Walk: @unchecked Sendable {
             .map { String($0.dropLast()) }.sorted()
         self.preferenceDirectory = PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
         self.accountArchiveDirectory = PreferenceDirectory.capturingLocation(at: options.accountArchivesDirectory)
+        self.deviceBackupDirectory = deviceBackupDirectory
     }
 
     var hasCurrentProtectionRoots: Bool {
-        preferenceDirectory == PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
+        !deviceBackupDirectory.uncertain
+            && preferenceDirectory == PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
             && accountArchiveDirectory == PreferenceDirectory.capturingLocation(at: options.accountArchivesDirectory)
+            && deviceBackupDirectory == DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory)
     }
 
     private func protectsPreferences(_ matches: (PreferenceDirectory) -> Bool) -> Bool {
@@ -287,6 +302,7 @@ final class Walk: @unchecked Sendable {
                     node.ownFiles = Sizes(allocated: allocated, freeable: privateSize)
                 }
                 if SafariDownloadPath.containsPackage(path)
+                    || protectsDeviceBackup(path, physical: physicalBackupPath(path))
                     || (options.readOnlyPreferencesDirectory != nil && PreferenceDirectory.isPlist(node.name)
                         && protectsPreferences({ $0.matches((path as NSString).deletingLastPathComponent) }))
                     || (options.accountArchivesDirectory != nil && AccountArchivePath.isDiskImage(node.name)
@@ -325,6 +341,17 @@ final class Walk: @unchecked Sendable {
                 thread.qualityOfService = .userInitiated
                 thread.start()
             }
+        }
+        // Les relectures partielles peuvent porter sur un dossier et son descendant.
+        // Seul ce passage, après la fin des workers, modifie plusieurs niveaux.
+        let protected = protectedReuse.withLock { $0 }
+        let protectedIDs = Set(protected.map(ObjectIdentifier.init))
+        for node in protected {
+            var parent = node.parent
+            while let ancestor = parent, !protectedIDs.contains(ObjectIdentifier(ancestor)) {
+                parent = ancestor.parent
+            }
+            if parent == nil { node.suppressFreeable() }
         }
         // Chaque nœud relu et ses ancêtres devront être recomptés. Marqués ici,
         // une fois tous les threads finis : un seul écrivain.
@@ -382,6 +409,19 @@ final class Walk: @unchecked Sendable {
         if !abandoned.isEmpty { dropped.withLock { $0.append(contentsOf: abandoned) } }
     }
 
+    private func physicalBackupPath(_ path: String) -> String? {
+        guard options.deviceBackupsDirectory != nil, !deviceBackupDirectory.uncertain,
+              let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(validatingCString: resolved)
+    }
+
+    private func protectsDeviceBackup(_ path: String, physical: String?) -> Bool {
+        guard let root = options.deviceBackupsDirectory else { return false }
+        return deviceBackupDirectory.contains(path, root: root)
+            || physical.map { deviceBackupDirectory.contains($0, root: root) } != false
+    }
+
     // MARK: Un dossier
 
     private func process(_ job: Job, buffer: UnsafeMutableRawBufferPointer, abandoned: inout [TreeNode]) -> [Job] {
@@ -392,22 +432,30 @@ final class Walk: @unchecked Sendable {
         let openError: Int32
         if fd < 0 {
             openError = errno
-        } else if insideSafariDownload {
+        } else if insideSafariDownload || options.deviceBackupsDirectory != nil {
             var info = stat()
             openError = fstat(fd, &info) == 0 && info.st_dev == job.device && UInt64(info.st_ino) == node.fileID
-                && info.st_flags & Attr.sfDataless == 0 ? 0 : ESTALE
+                && (!insideSafariDownload || info.st_flags & Attr.sfDataless == 0) ? 0 : ESTALE
         } else {
             openError = 0
         }
         defer { if fd >= 0 { close(fd) } }
         guard openError == 0 else {
             let code = openError
+            if code == ESTALE { staleDirectories.store(true, ordering: .relaxed) }
             node.status = .inaccessible(code: code)
             if let known = job.shallow { abandoned.append(contentsOf: known.values.map(\.node)) }
             node.children = []
             node.resetOwnContent()
             return []
         }
+        let physical: String?
+        if options.deviceBackupsDirectory != nil, !deviceBackupDirectory.uncertain {
+            physical = PreferenceDirectory.capturingLocation(openDirectory: fd).resolvedPath
+        } else {
+            physical = nil
+        }
+        let insideDeviceBackup = protectsDeviceBackup(job.path, physical: physical)
         var insideReadOnlyPreferences: Bool?
         var insideAccountArchives: Bool?
         // Relu avec succès : un dossier refusé hier peut être lisible aujourd'hui.
@@ -480,7 +528,7 @@ final class Walk: @unchecked Sendable {
             if looksLikeArchive, insideAccountArchives == nil {
                 insideAccountArchives = protectsAccountArchives { $0.matches(openDirectory: fd) }
             }
-            let protected = insideSafariDownload || SafariDownloadPath.hasPackageExtension(entry.name)
+            let protected = insideSafariDownload || insideDeviceBackup || SafariDownloadPath.hasPackageExtension(entry.name)
                 || (isPlist && insideReadOnlyPreferences == true)
                 || (looksLikeArchive && insideAccountArchives == true)
             let sizes = Sizes(allocated: allocated, freeable: protected ? 0 : freeable)
@@ -522,7 +570,11 @@ final class Walk: @unchecked Sendable {
             lseek(fd, 0, SEEK_SET)
             status = BulkReader.read(directoryFD: fd, extended: false, buffer: buffer, visit: visit)
         }
+        if let physical, PreferenceDirectory.capturingLocation(openDirectory: fd).resolvedPath != physical {
+            staleDirectories.store(true, ordering: .relaxed)
+        }
         node.children = keptOrNew
+        if insideDeviceBackup, !known.isEmpty { protectedReuse.withLock { $0.append(node) } }
         node.files.sort { $0.sizes.allocated > $1.sizes.allocated }
         if !known.isEmpty {
             let kept = Set(keptOrNew.map(ObjectIdentifier.init))

@@ -47,7 +47,7 @@ struct PreferencePresentationTests {
             try fm.createSymbolicLink(at: home, withDestinationURL: otherHome)
         }
         #expect(!index.hasCurrentProtectionRoots)
-        app.selectAnalysisVolume(volume)
+        await app.selectAnalysisVolume(volume)?.value
         #expect(app.treeVolume?.id == volume.id)
         #expect(app.tree?.descendant(atPath: b.path)?.total.freeable == 0)
         #expect(app.tree?.total.allocated == index.root.total.allocated)

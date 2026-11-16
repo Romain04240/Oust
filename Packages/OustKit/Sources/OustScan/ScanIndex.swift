@@ -20,14 +20,20 @@ public struct ScanIndex: Sendable {
     /// disparu) ne s'accumulent pas.
     public let fullScanAt: Date
     public let skippedVolumes: [String]
+    let scannedRootLocation: PreferenceDirectory
     let preferenceDirectory: PreferenceDirectory?
     let accountArchiveDirectory: PreferenceDirectory
+    let deviceBackupDirectory: DeviceBackupPath.Snapshot
 
     public var rootPath: String { root.path }
 
     package var hasCurrentProtectionRoots: Bool {
-        preferenceDirectory == PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
+        !deviceBackupDirectory.uncertain
+            && (options.deviceBackupsDirectory == nil || (scannedRootLocation.identity != nil
+                && scannedRootLocation == PreferenceDirectory.capturingLocation(at: rootPath)))
+            && preferenceDirectory == PreferenceDirectory.capturingLocation(at: options.readOnlyPreferencesDirectory)
             && accountArchiveDirectory == PreferenceDirectory.capturingLocation(at: options.accountArchivesDirectory)
+            && deviceBackupDirectory == DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory)
     }
 
     package var hasWithheldGains: Bool { preferenceDirectory == nil }
@@ -38,11 +44,24 @@ public struct ScanIndex: Sendable {
 
     package func checkedForDisplay(for options: ScanOptions? = nil) -> ScanIndex {
         guard !hasWithheldGains, !canReuse(for: options ?? self.options) else { return self }
+        return withholdingGains()
+    }
+
+    package func revalidatedForDisplay(for options: ScanOptions? = nil) async -> ScanIndex {
+        guard !hasWithheldGains else { return self }
+        if await checkStorageIO({ canReuse(for: options ?? self.options) }) == true { return self }
+        return await Task.detached { withholdingGains() }.value
+    }
+
+    package var hasDeviceBackupProtection: Bool { options.deviceBackupsDirectory != nil }
+
+    package func withholdingGains() -> ScanIndex {
+        guard !hasWithheldGains else { return self }
         let safeRoot = root.clone()
         safeRoot.suppressFreeable()
         return ScanIndex(root: safeRoot, options: self.options, ownership: ownership, eventID: eventID, eventDatabase: eventDatabase,
-                         scannedAt: scannedAt, fullScanAt: fullScanAt, skippedVolumes: skippedVolumes, preferenceDirectory: nil,
-                         accountArchiveDirectory: accountArchiveDirectory)
+                         scannedAt: scannedAt, fullScanAt: fullScanAt, skippedVolumes: skippedVolumes, scannedRootLocation: scannedRootLocation, preferenceDirectory: nil,
+                         accountArchiveDirectory: accountArchiveDirectory, deviceBackupDirectory: deviceBackupDirectory)
     }
 }
 
@@ -76,7 +95,7 @@ extension ScanIndex {
         guard let previous, previous.rootPath == rootPath else {
             return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.noIndex))
         }
-        guard previous.canReuse(for: options) else {
+        guard await checkStorageIO({ previous.canReuse(for: options) }) == true else {
             return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.optionsChanged))
         }
         guard now.timeIntervalSince(previous.fullScanAt) < maximumAge else {
@@ -93,15 +112,17 @@ extension ScanIndex {
         if changes.historyLost {
             return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.historyLost))
         }
-        guard previous.hasCurrentProtectionRoots else {
+        guard await checkStorageIO({ previous.hasCurrentProtectionRoots }) == true else {
             return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.optionsChanged))
         }
         if changes.directories.isEmpty && changes.recursive.isEmpty {
             let index = ScanIndex(root: previous.root, options: options, ownership: previous.ownership,
                                   eventID: start, eventDatabase: database, scannedAt: now,
                                   fullScanAt: previous.fullScanAt, skippedVolumes: previous.skippedVolumes,
+                                  scannedRootLocation: previous.scannedRootLocation,
                                   preferenceDirectory: previous.preferenceDirectory,
-                                  accountArchiveDirectory: previous.accountArchiveDirectory)
+                                  accountArchiveDirectory: previous.accountArchiveDirectory,
+                                  deviceBackupDirectory: previous.deviceBackupDirectory)
             return (index, .unchanged)
         }
         guard let updated = await previous.applying(changes, eventID: start, database: database,
@@ -116,12 +137,24 @@ extension ScanIndex {
         // sera rejoué la prochaine fois, au pire relu deux fois.
         let start = FileSystemEvents.currentEventID
         let database = FileSystemEvents.database(for: rootPath)
+        let location = options.deviceBackupsDirectory == nil ? PreferenceDirectory(nil) :
+            await checkStorageIO { PreferenceDirectory.capturingLocation(at: rootPath) } ?? PreferenceDirectory(nil)
         let result = await Scanner.scan([URL(fileURLWithPath: rootPath)], options: options, progress: progress)
         let root = result.roots[0]
+        let stableRoot: Bool
+        if options.deviceBackupsDirectory == nil {
+            stableRoot = true
+        } else {
+            let current = await checkStorageIO { PreferenceDirectory.capturingLocation(at: rootPath) }
+            stableRoot = location == current && location.identity?.inode == root.fileID
+                && location.identity?.device == root.measurementDevice && !location.isUncertain
+            if !stableRoot { root.suppressFreeable() }
+        }
         return ScanIndex(root: root, options: options, ownership: result.ownership, eventID: start,
                          eventDatabase: database, scannedAt: now, fullScanAt: now,
-                         skippedVolumes: result.skippedVolumes, preferenceDirectory: result.preferenceDirectory,
-                         accountArchiveDirectory: result.accountArchiveDirectory)
+                         skippedVolumes: result.skippedVolumes, scannedRootLocation: location,
+                         preferenceDirectory: stableRoot ? result.preferenceDirectory : nil,
+                         accountArchiveDirectory: result.accountArchiveDirectory, deviceBackupDirectory: result.deviceBackupDirectory)
     }
 
     /// Relit les dossiers signalés, sur une copie de l'arbre.
@@ -129,7 +162,7 @@ extension ScanIndex {
     /// `nil` quand il y a tant à relire qu'un parcours complet ira aussi vite.
     func applying(_ changes: FileSystemChanges, eventID: UInt64, database: String, progress: ScanProgress,
                   now: Date) async -> (index: ScanIndex, how: IndexRefresh)? {
-        guard hasCurrentProtectionRoots else { return nil }
+        guard await checkStorageIO({ hasCurrentProtectionRoots }) == true else { return nil }
         let root = root.clone()
         let ownership = ownership.copy()
         var info = stat()
@@ -216,10 +249,15 @@ extension ScanIndex {
             jobs.append(Walk.Job(node: node, path: node.path, device: device, shallow: known))
         }
 
-        let walk = Walk(options: options, progress: progress, ownership: ownership)
-        guard walk.preferenceDirectory == preferenceDirectory, walk.accountArchiveDirectory == accountArchiveDirectory else { return nil }
+        guard let backups = await checkStorageIO({ DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory) }),
+              !backups.uncertain else { return nil }
+        let walk = Walk(options: options, progress: progress, ownership: ownership, deviceBackupDirectory: backups)
+        guard walk.preferenceDirectory == preferenceDirectory, walk.accountArchiveDirectory == accountArchiveDirectory,
+              walk.deviceBackupDirectory == deviceBackupDirectory else { return nil }
         dropped += await walk.run(jobs: jobs, root: root)
-        guard !progress.isCancelled, walk.hasCurrentProtectionRoots else { return nil }
+        guard !walk.sawStaleDirectories,
+              await checkStorageIO({ walk.hasCurrentProtectionRoots && hasCurrentProtectionRoots }) == true,
+              !progress.isCancelled else { return nil }
 
         // Les dossiers disparus ne comptent plus leurs liens physiques et leurs
         // clones ; un dossier simplement déplacé garde son inode, donc les siens.
@@ -235,7 +273,7 @@ extension ScanIndex {
         let skipped = Array(Set(skippedVolumes).union(walk.skippedVolumes)).sorted()
         let index = ScanIndex(root: root, options: options, ownership: ownership, eventID: eventID,
                               eventDatabase: database, scannedAt: now, fullScanAt: fullScanAt,
-                              skippedVolumes: skipped, preferenceDirectory: preferenceDirectory, accountArchiveDirectory: accountArchiveDirectory)
+                              skippedVolumes: skipped, scannedRootLocation: scannedRootLocation, preferenceDirectory: preferenceDirectory, accountArchiveDirectory: accountArchiveDirectory, deviceBackupDirectory: deviceBackupDirectory)
         return (index, .incremental(directories: jobs.count))
     }
 }
@@ -246,7 +284,7 @@ extension ScanOptions {
         leafThreshold == other.leafThreshold && measurePrivateSizes == other.measurePrivateSizes
             && excludedPaths == other.excludedPaths && notableNames == other.notableNames
             && readOnlyPreferencesDirectory == other.readOnlyPreferencesDirectory
-            && accountArchivesDirectory == other.accountArchivesDirectory
+            && accountArchivesDirectory == other.accountArchivesDirectory && deviceBackupsDirectory == other.deviceBackupsDirectory
     }
 }
 

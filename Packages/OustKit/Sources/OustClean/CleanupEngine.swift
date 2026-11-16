@@ -11,9 +11,8 @@ import Synchronization
 ///
 /// Quatre éléments au plus à la fois, chacun revalidé juste avant d'agir et
 /// annoncé au moment où il part : l'interface le voit toujours partir un par
-/// un. Ce qu'un même outil traite (un dépôt git, simctl, Homebrew) passe à la
-/// file, un à la fois : deux `git worktree remove` simultanés sur un dépôt se
-/// disputeraient son verrou.
+/// un. Ce qu'un même outil traite (simctl, Homebrew) passe à la file pour
+/// éviter que plusieurs opérations se disputent le même verrou.
 public struct CleanupEngine: Sendable {
     let trasher: any Trasher
     private let allowsPathBasedRemoval: Bool
@@ -106,6 +105,8 @@ public struct CleanupEngine: Sendable {
         case .trash, .archive, .trashFromCloud: trasher.isAvailable
         // L'éviction par URL ne peut pas être liée à l'identité validée.
         case .evictLocalCopy: false
+        // Git résout ses propres chemins après le contrôle. L'inventaire reste disponible.
+        case .gitWorktreeRemove: false
         // Le transit et la suppression sur place résolvent des chemins après
         // le contrôle. Seuls les bancs isolés activent cette implémentation.
         case .removeNow, .cloneOf, .compressInPlace: allowsPathBasedRemoval
@@ -137,7 +138,8 @@ public struct CleanupEngine: Sendable {
         let selectable = items.filter {
             $0.isSelectable && (!($0.category == .userLogs || $0.ruleID == "logs.user") || $0.method == .trash)
         }
-        emit(.began(total: selectable.count, expectedBytes: selectable.reduce(0) { $0 + $1.sizes.freeable }))
+        let expectedBytes = selectable.filter { supports($0.method) }.reduce(0) { $0 + $1.sizes.freeable }
+        emit(.began(total: selectable.count, expectedBytes: expectedBytes))
         emit(.phaseChanged(.preparing, itemIDs: []))
         let volumes = Self.volumes(of: items)
         let before = Self.available(on: volumes, capacity: capacity)
@@ -240,8 +242,10 @@ public struct CleanupEngine: Sendable {
                             return (item, CleanupOutcome(sessionID: session, date: Date(), item: item,
                                                          result: .skipped(.cancelled), bytes: 0))
                         }
-                        emit(.phaseChanged(.deleting, itemIDs: [item.id]))
-                        return (item, await perform(item, session: session))
+                        let outcome = await perform(item, session: session, isCancelled: isCancelled) {
+                            emit(.phaseChanged(.deleting, itemIDs: [item.id]))
+                        }
+                        return (item, outcome)
                     }
                 }
                 guard running > 0, let done = await group.next() else { break }
@@ -310,20 +314,7 @@ public struct CleanupEngine: Sendable {
     /// (RULES.md, règle 2).
     func revalidate(_ item: CleanupItem, snapshot: ProcessSnapshot) async -> SkipReason? {
         guard supports(item.method) else { return .refusedByGuard }
-        for path in item.paths {
-            guard !pathGuard.protectsUserLogs(path) else { return .refusedByGuard }
-            // L'éviction ne supprime rien, mais ne vaut que dans le nuage ; un
-            // fichier d'un nuage ne part que s'il est bien un document de
-            // l'utilisateur (jamais la racine d'un compte) ; tout le reste passe
-            // la garde ordinaire.
-            let allowed = switch item.method {
-            case .trashFromCloud: pathGuard.allowsCloudTrash(path)
-            default: pathGuard.allows(path)
-            }
-            guard allowed else { return .refusedByGuard }
-            var info = stat()
-            if lstat(path.path, &info) != 0 { return .vanished }
-        }
+        if let pathRefusal = revalidatePaths(item) { return pathRefusal }
         if let first = item.paths.first, let fingerprint = item.fingerprint {
             var info = stat()
             lstat(first.path, &info)
@@ -381,33 +372,52 @@ public struct CleanupEngine: Sendable {
                 return .changedSinceScan
             }
         }
-        if case .gitWorktreeRemove = item.method, let worktree = item.paths.first {
-            guard let state = await GitInspector.state(ofWorktree: worktree) else { return .nowProtected(.unknownState) }
-            if state.uncommitted > 0 { return .nowProtected(.uncommittedChanges(count: state.uncommitted)) }
-            if !state.uniqueSensitiveFiles.isEmpty { return .nowProtected(.uniqueIgnoredFiles(state.uniqueSensitiveFiles)) }
-            if state.isLocked { return .nowProtected(.gitLocked) }
+        return nil
+    }
+
+    private func revalidatePaths(_ item: CleanupItem) -> SkipReason? {
+        for path in item.paths {
+            guard !pathGuard.protectsUserLogs(path) else { return .refusedByGuard }
+            let allowed = switch item.method {
+            case .trashFromCloud: pathGuard.allowsCloudTrash(path)
+            default: pathGuard.allows(path)
+            }
+            guard allowed else { return .refusedByGuard }
+            var info = stat()
+            if lstat(path.path, &info) != 0 { return .vanished }
         }
         return nil
     }
 
+    private func pathsForExecution(_ paths: [URL]) -> [URL]? {
+        var resolvedPaths: [URL] = []
+        for path in paths {
+            guard !pathGuard.protectsUserLogs(path), let resolved = PathGuard.withResolvedParent(path),
+                  !pathGuard.protectsUserLogs(resolved),
+                  !pathGuard.protectsPreferences(path, resolved: resolved),
+                  !pathGuard.protectsAccountArchives(path, resolved: resolved),
+                  !pathGuard.protectsSafariDownload(path, resolved: resolved),
+                  !pathGuard.protectsDeviceBackups(path, resolved: resolved)
+            else { return nil }
+            resolvedPaths.append(resolved)
+        }
+        return resolvedPaths
+    }
+
     // MARK: Exécution
 
-    func perform(_ item: CleanupItem, session: UUID) async -> CleanupOutcome {
+    func perform(_ item: CleanupItem, session: UUID,
+                 isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
+                 onDeleting: @Sendable () -> Void = {}) async -> CleanupOutcome {
         func outcome(_ result: OutcomeResult, bytes: Int64 = 0, trashedTo: [String] = []) -> CleanupOutcome {
             CleanupOutcome(sessionID: session, date: Date(), item: item, result: result,
                            bytes: result.succeeded ? bytes : 0, trashedTo: trashedTo)
         }
         guard supports(item.method) else { return outcome(.skipped(.refusedByGuard)) }
-        var resolvedPaths: [URL] = []
-        for path in item.paths {
-            guard !pathGuard.protectsUserLogs(path), let resolved = PathGuard.withResolvedParent(path),
-                  !pathGuard.protectsUserLogs(resolved),
-                  !pathGuard.protectsPreferences(path, resolved: resolved),
-                  !pathGuard.protectsAccountArchives(path, resolved: resolved),
-                  !pathGuard.protectsSafariDownload(path, resolved: resolved)
-            else { return outcome(.skipped(.refusedByGuard)) }
-            resolvedPaths.append(resolved)
-        }
+        guard let resolvedPaths = pathsForExecution(item.paths) else { return outcome(.skipped(.refusedByGuard)) }
+        guard !isCancelled() else { return outcome(.skipped(.cancelled)) }
+        onDeleting()
+        guard !isCancelled() else { return outcome(.skipped(.cancelled)) }
         let freeable = item.sizes.freeable
 
         switch item.method {
@@ -434,12 +444,8 @@ public struct CleanupEngine: Sendable {
             }
             return outcome(.trashed, bytes: freeable, trashedTo: destinations)
 
-        case .gitWorktreeRemove(let repository):
-            guard let worktree = item.paths.first else { return outcome(.skipped(.vanished)) }
-            if let error = await ToolActions.removeWorktree(worktree, repository: repository) {
-                return outcome(.failed(message: error))
-            }
-            return outcome(.delegated, bytes: freeable)
+        case .gitWorktreeRemove:
+            return outcome(.skipped(.refusedByGuard))
 
         case .simulatorDevice(let udid):
             if let error = await ToolActions.deleteSimulator(udid: udid) { return outcome(.failed(message: error)) }

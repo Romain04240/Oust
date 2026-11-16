@@ -6,18 +6,6 @@ import SQLite3
 /// Les méthodes confiées à un outil (SPEC §6.1).
 enum ToolActions {
 
-    /// `git worktree remove`, sans `--force` : si git trouve quelque chose à
-    /// perdre (fichier modifié ou non suivi), il refuse, et c'est ce qu'on veut.
-    /// La branche reste : le travail de l'agent n'est pas perdu.
-    static func removeWorktree(_ worktree: URL, repository: String) async -> String? {
-        let remove = await Command.run("/usr/bin/git", ["-C", repository, "worktree", "remove", worktree.path], timeout: 300)
-        guard remove.succeeded else {
-            return remove.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "git worktree remove"
-        }
-        _ = await Command.run("/usr/bin/git", ["-C", repository, "worktree", "prune"], timeout: 60)
-        return nil
-    }
-
     static func deleteSimulator(udid: String) async -> String? {
         let result = await Command.run("/usr/bin/xcrun", ["simctl", "delete", udid], timeout: 300)
         return result.succeeded ? nil : (result.errorOutput.nilIfEmpty ?? "simctl delete")

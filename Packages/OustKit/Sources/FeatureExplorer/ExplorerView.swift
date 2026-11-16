@@ -221,7 +221,7 @@ private struct ExplorerContent: View {
             if let state { content(state) } else { Color.clear }
         }
         .task(id: ObjectIdentifier(root)) {
-            while model.revalidateExplorerGains() {
+            while await model.revalidateExplorerGains() {
                 do { try await Task.sleep(for: .seconds(1)) }
                 catch { return }
             }
@@ -440,12 +440,18 @@ private struct Toolbar: View {
 
     /// Le contenu du dossier ouvert, en CSV.
     private func export() {
-        guard model.revalidateExplorerGains() else { return }
+        guard let analytics = state.analytics else { return }
+        let root = state.root
+        let folder = state.focus
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "Oust - \(state.focus.name).csv"
+        panel.nameFieldStringValue = "Oust - \(folder.name).csv"
         if panel.runModal() == .OK, let url = panel.url {
-            _ = try? model.exportExplorerCSV(to: url, for: state.root, render: state.csv)
+            Task {
+                _ = try? await model.exportExplorerCSV(to: url, for: root, render: { includeGains in
+                    analytics.csv(for: folder, includeGains: includeGains)
+                })
+            }
         }
     }
 }

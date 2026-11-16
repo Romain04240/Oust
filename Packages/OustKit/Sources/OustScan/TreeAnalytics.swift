@@ -203,7 +203,7 @@ public struct TreeAnalytics: Sendable {
     /// Le contenu d'un dossier en CSV : une ligne par sous-dossier et gros
     /// fichier, séparateur point-virgule pour qu'Excel et Numbers en français
     /// l'ouvrent sans réglage.
-    public func csv(for node: TreeNode) -> String {
+    public func csv(for node: TreeNode, includeGains: Bool = true) -> String {
         func field(_ path: String) -> String {
             // Le nom habituel (`/Users/…`), pas celui du volume de données.
             let text = path.hasPrefix("/System/Volumes/Data/") ? String(path.dropFirst("/System/Volumes/Data".count)) : path
@@ -214,14 +214,14 @@ public struct TreeAnalytics: Sendable {
         let total = Double(max(1, node.total.allocated))
         for child in node.children {
             lines.append([
-                field(child.path), "dossier", String(child.total.allocated), String(child.total.freeable),
+                field(child.path), "dossier", String(child.total.allocated), String(includeGains ? child.total.freeable : 0),
                 String(format: "%.4f", Double(child.total.allocated) / total), String(child.fileCount),
                 String(folders(in: child)), child.latestModification.map(formatter.string(from:)) ?? "",
             ].joined(separator: ";"))
         }
         for file in node.files {
             lines.append([
-                field(node.path + "/" + file.name), "fichier", String(file.sizes.allocated), String(file.sizes.freeable),
+                field(node.path + "/" + file.name), "fichier", String(file.sizes.allocated), String(includeGains ? file.sizes.freeable : 0),
                 String(format: "%.4f", Double(file.sizes.allocated) / total), "1", "0",
                 file.modified.map(formatter.string(from:)) ?? "",
             ].joined(separator: ";"))

@@ -68,7 +68,7 @@ public struct ItemRow: View {
                     }
                     // Le moins important de la ligne : c'est lui qui raccourcit
                     // en premier quand la place manque, pas les pastilles.
-                    if !item.isIncompleteSafariDownload && !item.isInvalidPreference && !item.isAccountArchive {
+                    if !item.isIncompleteSafariDownload && !item.isInvalidPreference && !item.isAccountArchive && !item.isDeviceBackup {
                         Text(verbatim: item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild))
                             .font(Typography.caption).foregroundStyle(.secondary).lineLimit(1)
                             .layoutPriority(-1)
@@ -76,6 +76,10 @@ public struct ItemRow: View {
                 }
                 if let detail = item.detail, detail != item.title {
                     Text(verbatim: detail).font(Typography.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                }
+                if item.isDeviceBackup && item.lastActivity == nil {
+                    Text("system.device_backup_unknown_date", bundle: .oust)
+                        .font(Typography.caption).foregroundStyle(.secondary)
                 }
                 if item.category == .userLogs, let modified = item.lastActivity {
                     Text(verbatim: L10n.string("system.user_log_modified", Formatters.relative(modified)))
@@ -89,7 +93,7 @@ public struct ItemRow: View {
                         Text(verbatim: L10n.string("system.safari_download_occupied", Formatters.compactBytes(item.sizes.allocated)))
                             .font(Typography.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
-                } else if item.isAccountArchive || item.category == .cloudFiles {
+                } else if item.isAccountArchive || item.isDeviceBackup || item.category == .cloudFiles {
                     Text(verbatim: L10n.string("system.safari_download_occupied", Formatters.compactBytes(item.sizes.allocated)))
                         .font(Typography.caption.monospacedDigit()).foregroundStyle(.secondary)
                 } else if item.method.isSnapshot {
@@ -102,7 +106,7 @@ public struct ItemRow: View {
                 } else if !item.isInvalidPreference {
                     Text(verbatim: Formatters.compactBytes(item.sizes.freeable)).font(Typography.size)
                 }
-                if !item.isIncompleteSafariDownload, !item.isInvalidPreference, !item.isAccountArchive, item.category != .cloudFiles, item.sizes.retained > 0 {
+                if !item.isIncompleteSafariDownload, !item.isInvalidPreference, !item.isAccountArchive, !item.isDeviceBackup, item.category != .cloudFiles, item.sizes.retained > 0 {
                     Text(verbatim: L10n.string("row.retained", Formatters.compactBytes(item.sizes.retained)))
                         .font(Typography.caption).foregroundStyle(.secondary)
                 }
@@ -162,7 +166,7 @@ public struct Explanation: View {
                 SafetyBadge(item.safety)
             }
             section("explain.what", Describe.ruleWhat(item.ruleID))
-            if item.isIncompleteSafariDownload || item.isInvalidPreference || item.isAccountArchive {
+            if item.isIncompleteSafariDownload || item.isInvalidPreference || item.isAccountArchive || item.isDeviceBackup {
                 section("explain.back", Describe.ruleBack(item.ruleID))
             } else {
                 section("explain.back", Describe.ruleBack(item.ruleID) + " " + (item.method.isSnapshot ? L10n.string("snapshot.irreversible") : Describe.rebuild(item.rebuild)))
@@ -182,10 +186,10 @@ public struct Explanation: View {
                     }
                 }
             }
-            if (item.isIncompleteSafariDownload || item.isAccountArchive), item.sizes.allocated > 0 {
+            if (item.isIncompleteSafariDownload || item.isAccountArchive || item.isDeviceBackup), item.sizes.allocated > 0 {
                 Text(verbatim: L10n.string("system.safari_download_occupied", Formatters.bytes(item.sizes.allocated)))
                     .font(Typography.caption).foregroundStyle(.secondary)
-            } else if !item.isIncompleteSafariDownload && !item.isInvalidPreference && !item.isAccountArchive {
+            } else if !item.isIncompleteSafariDownload && !item.isInvalidPreference && !item.isAccountArchive && !item.isDeviceBackup {
                 Text(verbatim: L10n.string("explain.sizes", Formatters.bytes(item.sizes.allocated), Formatters.bytes(item.sizes.freeable)))
                     .font(Typography.caption).foregroundStyle(.secondary)
             }

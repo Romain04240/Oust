@@ -132,7 +132,7 @@ public enum RuleEngine {
         case .toolVersions: await ToolVersionsFinder(context: context).find()
         case .toolCleanups: await ToolCleanupsFinder(context: context).find()
         case .appCaches: await AppCachesFinder(context: context).find()
-        case .userLogs: UserLogsFinder(context: context).find()
+        case .userLogs: await UserLogsFinder(context: context).find()
         case .preferenceDiagnostics: PreferenceDiagnosticsFinder(context: context).find()
         case .accountArchives: AccountArchivesFinder(context: context).find()
         case .personalFiles: await PersonalFilesFinder(context: context).find()
@@ -160,6 +160,11 @@ public enum RuleEngine {
         let candidates = candidates.filter(isCurrent)
         let paths = candidates.filter(\.needsMeasure).flatMap(\.item.paths)
         let measures = paths.isEmpty ? [:] : await measurer.measure(Array(Set(paths)))
+        let worktrees = candidates.flatMap { candidate -> [URL] in
+            if case .gitWorktreeRemove = candidate.item.method { return candidate.item.paths }
+            return []
+        }
+        let allowedWorktrees = await pathGuard.allowedWorktreesForAnalysis(Set(worktrees))
         return candidates.compactMap { candidate in
             guard isCurrent(candidate) else { return nil }
             var item = candidate.item
@@ -179,10 +184,12 @@ public enum RuleEngine {
                        measure.directoryDevice == location.entry.device, measure.directoryFileID == location.entry.inode {
                         item.sizes = Sizes(allocated: sizes.allocated, freeable: 0)
                     }
+                } else if item.isDeviceBackup || item.category == .userLogs {
+                    item.sizes = Sizes(allocated: sizes.allocated, freeable: 0)
                 } else {
                     item.sizes = sizes
                 }
-                if item.lastActivity == nil { item.lastActivity = latest }
+                if item.lastActivity == nil, !item.isDeviceBackup { item.lastActivity = latest }
                 if inaccessible && sizes.allocated == 0 { item.protect(.needsFullDiskAccess) }
             }
             if item.fingerprint == nil, let first = item.paths.first {
@@ -191,19 +198,18 @@ public enum RuleEngine {
                                                fileID: Self.inode(of: first))
             }
             // Téléchargements a pu être redirigé pendant l'attente de la mesure.
-            if case .gitWorktreeRemove = item.method, !item.paths.allSatisfy(pathGuard.allows) {
-                item.protect(.systemPath)
-                item.sizes = .zero
-            }
-            if !item.isIncompleteSafariDownload, !item.isAccountArchive, item.category != .cloudFiles, item.sizes.allocated > 0, item.sizes.freeable < item.sizes.allocated * 9 / 10 {
+            if case .gitWorktreeRemove = item.method {
+                if !item.paths.allSatisfy(allowedWorktrees.contains) { item.protect(.systemPath) }
+                item.sizes.freeable = 0
+            } else if item.category != .userLogs, !item.isIncompleteSafariDownload, !item.isAccountArchive, !item.isDeviceBackup, item.category != .cloudFiles, item.sizes.allocated > 0, item.sizes.freeable < item.sizes.allocated * 9 / 10 {
                 item.notes.append(.partlyShared)
             }
             // Un élément vide n'apprend rien à personne.
-            if candidate.needsMeasure && item.sizes.allocated == 0 && item.protections.isEmpty { return nil }
+            if candidate.needsMeasure && item.sizes.allocated == 0 && item.protections.isEmpty && !item.isDeviceBackup { return nil }
             // Le seuil vaut aussi pour le protégé : cinquante caches ouverts de
             // quelques kilo-octets n'apprennent rien non plus.
             if item.sizes.allocated < candidate.minimumAllocated { return nil }
-            return item
+            return candidate.location?.revalidateBackupBadge(item) ?? item
         }
     }
 

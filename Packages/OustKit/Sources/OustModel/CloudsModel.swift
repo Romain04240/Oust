@@ -188,7 +188,13 @@ public final class CloudsModel {
 
     public func item(for file: CloudEntry) -> CleanupItem {
         if let cached = itemCache[file.id] { return cached }
-        let item = file.cleanupItem(account: account(file.accountID), guard: PathGuard(home: app?.home ?? URL(fileURLWithPath: NSHomeDirectory())))
+        let account = account(file.accountID)
+        let item: CleanupItem
+        if let app, app.canMoveFiles {
+            item = file.cleanupItem(account: account, guard: PathGuard(home: app.home))
+        } else {
+            item = file.cleanupItem(account: account, pathRefused: false)
+        }
         itemCache[file.id] = item
         return item
     }
