@@ -1,6 +1,214 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "analysis_review.available": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available space measured on this volume: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espace libre mesuré sur ce disque : %@"
+          }
+        }
+      }
+    },
+    "analysis_review.close": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close review"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fermer la revue"
+          }
+        }
+      }
+    },
+    "analysis_review.edit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit selection"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifier la sélection"
+          }
+        }
+      }
+    },
+    "analysis_review.empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This analysis found no items to review."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette analyse n’a trouvé aucun élément à revoir."
+          }
+        }
+      }
+    },
+    "analysis_review.estimated": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated gain for this review: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gain estimé pour cette revue : %@"
+          }
+        }
+      }
+    },
+    "analysis_review.expired": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These results are no longer available. Run the analysis again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ces résultats ne sont plus disponibles. Relancez l’analyse."
+          }
+        }
+      }
+    },
+    "analysis_review.measure_unknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available space could not be measured."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’espace libre n’a pas pu être mesuré."
+          }
+        }
+      }
+    },
+    "analysis_review.open": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review results"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revoir les résultats"
+          }
+        }
+      }
+    },
+    "analysis_review.read_only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read-only review. Confirming shows a summary without deleting anything or moving it to the Trash."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revue en lecture seule. La validation affiche un récapitulatif sans supprimer ni mettre à la Corbeille."
+          }
+        }
+      }
+    },
+    "analysis_review.reclaimed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Space reclaimed by this review: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espace libéré par cette revue : %@"
+          }
+        }
+      }
+    },
+    "analysis_review.selected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected items: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Éléments sélectionnés : %@"
+          }
+        }
+      }
+    },
+    "analysis_review.selection_changed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The results changed. Check the remaining selection."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les résultats ont changé. Vérifiez la sélection restante."
+          }
+        }
+      }
+    },
+    "analysis_review.validate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm selection"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valider la sélection"
+          }
+        }
+      }
+    },
     "about.copyright": {
       "extractionState": "manual",
       "localizations": {

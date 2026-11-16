@@ -146,6 +146,13 @@ extension AppModel {
         guard !isTimeMachine(volume) else { return }
         analysis = .running
         analyzingVolumeID = volume.id
+        analysisReviews.removeValue(forKey: volume.id)
+        let reviewLocation = AnalysisReview.Location(volume.scanRoot)
+        defer {
+            analyzingVolumeID = nil
+            analysis = .done(Date())
+        }
+        var reviewIDs = Set<String>()
         finishedFinders = []
         let firstTime = !cart.contains { items[$0].map { belongs($0, to: volume) } ?? false }
         items = items.filter { !Self.volumeCategories.contains($0.value.category) || !belongs($0.value, to: volume) }
@@ -159,17 +166,20 @@ extension AppModel {
                                   tree: { root }, volume: scope)
         let policy = PreselectionPolicy(recencyDays: preferences.recencyDays)
         for await batch in RuleEngine.run(context, finders: FinderKind.volumeFinders, measurer: .tree { root }) {
+            guard analyzingVolumeID == volume.id else { return }
             for var item in batch.items {
                 if Self.titledByRule.contains(item.ruleID) { item.title = L10n.string("rule.\(item.ruleID).title") }
                 recordAnalyzedItem(item, preselect: firstTime, policy: policy)
+                reviewIDs.insert(item.id)
             }
             finishedFinders.insert(batch.finder)
         }
         cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
         refreshVolumes()
+        guard analyzingVolumeID == volume.id, volumes.contains(where: { $0.id == volume.id }),
+              reviewLocation?.matches(volume.scanRoot) != false else { return }
+        saveAnalysisReview(for: volume, location: reviewLocation, ids: reviewIDs)
         volumeAnalysisDates[volume.id] = Date()
-        analyzingVolumeID = nil
-        analysis = .done(Date())
     }
 
     /// L'arbre du disque à jour, montré dans l'Explorateur pendant qu'il se fait.
@@ -246,7 +256,9 @@ extension AppModel {
         cart.subtract(gone)
         let id = url.standardizedFileURL.path
         if analysisVolumeID.map(PathNormalizer.normalize) == root { analysisVolumeID = nil }
+        if analyzingVolumeID == id { analyzingVolumeID = nil }
         volumeAnalysisDates.removeValue(forKey: id)
+        analysisReviews.removeValue(forKey: id)
         volumeIndexes.removeValue(forKey: id)
         liveVolumeScans.remove(id)
         timeMachineMounts.remove(root)

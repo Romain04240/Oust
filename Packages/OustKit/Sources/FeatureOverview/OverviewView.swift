@@ -7,6 +7,7 @@ import OustModel
 /// La vue d'ensemble : où est passé l'espace, ce qu'on peut rendre, d'un coup d'œil.
 public struct OverviewView: View {
     @Bindable var model: AppModel
+    @State private var review: AnalysisReview?
 
     public init(model: AppModel) {
         self.model = model
@@ -22,7 +23,7 @@ public struct OverviewView: View {
             // lieu d'attendre tout en bas avec un simple « Explorer ».
             VolumePicker(model: model)
             if let volume = model.analyzedVolume {
-                HeroCard(model: model, volume: volume)
+                HeroCard(model: model, volume: volume) { review = model.analysisReview(for: volume) }
                 let phase = model.analysisPhase(for: volume)
                 if phase.hasRun || phase.isRunning {
                     CategoryGrid(model: model, volume: volume)
@@ -33,6 +34,7 @@ public struct OverviewView: View {
                 }
             }
         }
+        .sheet(item: $review) { AnalysisReviewView(model: model, review: $0) }
     }
 }
 
@@ -63,6 +65,7 @@ public struct AnalyzeButton: View {
 private struct HeroCard: View {
     let model: AppModel
     let volume: VolumeDescriptor
+    let showReview: () -> Void
 
     @State private var breakdown = StorageBreakdown()
     @State private var showsStorageDetails = false
@@ -129,6 +132,10 @@ private struct HeroCard: View {
                             // Une analyse à la fois : celle d'un autre disque tourne peut-être.
                             .disabled(model.analysis.isRunning)
                         } else {
+                            if model.analysisReview(for: volume) != nil {
+                                Button(action: showReview) { Text("analysis_review.open", bundle: .oust) }
+                                    .buttonStyle(PrimaryButtonStyle(section: .overview, eclat: true))
+                            }
                             if !model.cart.isEmpty {
                                 Button { model.section = .cart } label: {
                                     // Sans montant quand rien ne revient ici (fichiers du cloud

@@ -73,7 +73,7 @@ public final class AppModel {
 
     // MARK: Volumes
 
-    public private(set) var volumes: [VolumeDescriptor] = [] {
+    public internal(set) var volumes: [VolumeDescriptor] = [] {
         didSet { watch.updateBoot(bootVolume) }
     }
     public private(set) var snapshots: [LocalSnapshot] = []
@@ -116,6 +116,7 @@ public final class AppModel {
     public internal(set) var analysisVolumeID: String?
     /// Quand chaque disque a été analysé par les règles, par son point de montage.
     public internal(set) var volumeAnalysisDates: [String: Date] = [:]
+    var analysisReviews: [String: AnalysisReview] = [:]
     /// Le disque dont l'analyse par règles tourne en ce moment.
     public internal(set) var analyzingVolumeID: String?
     /// Les destinations Time Machine branchées : jamais proposées à l'analyse.
@@ -362,7 +363,11 @@ public final class AppModel {
             return
         }
         analysis = .running
-        analyzingVolumeID = bootVolume?.id
+        let reviewVolume = bootVolume
+        analyzingVolumeID = reviewVolume?.id
+        let reviewLocation = reviewVolume.flatMap { AnalysisReview.Location($0.scanRoot) }
+        if let reviewVolume { analysisReviews.removeValue(forKey: reviewVolume.id) }
+        var reviewIDs = Set<String>()
         finishedFinders = []
         // On ne coche d'office que la première fois pour ce disque : ce qui est
         // coché sur un disque externe ne compte pas.
@@ -391,11 +396,13 @@ public final class AppModel {
         refreshBrowsers()
         for await batch in RuleEngine.run(context, measurer: .tree(tree)) {
             recordAnalyzedBatch(batch, preselect: firstTime, policy: policy)
+            reviewIDs.formUnion(batch.items.map(\.id))
             finishedFinders.insert(batch.finder)
         }
         cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
         await refreshSnapshots()
         refreshVolumes()
+        if let reviewVolume { saveAnalysisReview(for: reviewVolume, location: reviewLocation, ids: reviewIDs) }
         if let boot = bootVolume { volumeAnalysisDates[boot.id] = Date() }
         analyzingVolumeID = nil
         analysis = .done(Date())
