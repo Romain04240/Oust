@@ -1,4 +1,5 @@
 import Foundation
+import OustCore
 import OustDuplicates
 import OustRules
 
@@ -17,10 +18,12 @@ public struct Preferences: Sendable, Equatable {
     /// qui le choisit.
     public var duplicateAutoSelect: Bool
     public internal(set) var duplicateExclusions: DuplicateExclusions
+    public private(set) var sidebarPins: [AppSection]
 
     public init(projectRoots: [URL], historyRetentionDays: Int = 30, recencyDays: Int = 7,
                 duplicateMinimumMegabytes: Int = 1, archiveInactiveMonths: Int = 6, compressionAgeMonths: Int = 6,
-                duplicateAutoSelect: Bool = false, duplicateExclusions: DuplicateExclusions = .init()) {
+                duplicateAutoSelect: Bool = false, duplicateExclusions: DuplicateExclusions = .init(),
+                sidebarPins: [AppSection] = []) {
         self.projectRoots = projectRoots
         self.historyRetentionDays = historyRetentionDays
         self.recencyDays = recencyDays
@@ -29,6 +32,25 @@ public struct Preferences: Sendable, Equatable {
         self.compressionAgeMonths = compressionAgeMonths
         self.duplicateAutoSelect = duplicateAutoSelect
         self.duplicateExclusions = duplicateExclusions
+        var seen = Set<AppSection>()
+        self.sidebarPins = sidebarPins.filter { Self.canPin($0) && seen.insert($0).inserted }
+    }
+
+    public mutating func toggleSidebarPin(_ section: AppSection) {
+        guard Self.canPin(section) else { return }
+        if let index = sidebarPins.firstIndex(of: section) {
+            sidebarPins.remove(at: index)
+        } else {
+            sidebarPins.append(section)
+        }
+    }
+
+    public func orderedSidebarTools(_ tools: [AppSection]) -> [AppSection] {
+        sidebarPins.filter(tools.contains) + tools.filter { !sidebarPins.contains($0) }
+    }
+
+    private static func canPin(_ section: AppSection) -> Bool {
+        section != .overview && section != .cart && section != .history
     }
 
     static let rootsKey = "projectRoots"
@@ -38,6 +60,7 @@ public struct Preferences: Sendable, Equatable {
     static let archiveKey = "archiveInactiveMonths"
     static let compressionKey = "compressionAgeMonths"
     static let duplicateAutoSelectKey = "duplicateAutoSelect"
+    static let sidebarPinsKey = "sidebarPins"
 
     static let duplicateExclusionsKey = "duplicateExclusions.v1"
 
@@ -60,7 +83,8 @@ public struct Preferences: Sendable, Equatable {
             archiveInactiveMonths: defaults.object(forKey: archiveKey) as? Int ?? 6,
             compressionAgeMonths: defaults.object(forKey: compressionKey) as? Int ?? 6,
             duplicateAutoSelect: defaults.bool(forKey: duplicateAutoSelectKey),
-            duplicateExclusions: exclusions
+            duplicateExclusions: exclusions,
+            sidebarPins: defaults.stringArray(forKey: sidebarPinsKey)?.compactMap(AppSection.init(rawValue:)) ?? []
         )
     }
 
@@ -72,6 +96,7 @@ public struct Preferences: Sendable, Equatable {
         defaults.set(archiveInactiveMonths, forKey: Self.archiveKey)
         defaults.set(compressionAgeMonths, forKey: Self.compressionKey)
         defaults.set(duplicateAutoSelect, forKey: Self.duplicateAutoSelectKey)
+        defaults.set(sidebarPins.map(\.rawValue), forKey: Self.sidebarPinsKey)
         if duplicateExclusions.isReadable, let data = try? JSONEncoder().encode(duplicateExclusions.folders) {
             defaults.set(data, forKey: Self.duplicateExclusionsKey)
         }

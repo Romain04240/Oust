@@ -126,7 +126,7 @@ private struct Sidebar: View {
     // même public, même question (« qu'est-ce qui pèse, là-dedans ? »), et
     // iCloud y est déjà.
     private let sections: [AppSection] = [
-        .overview, .advice, .applications, .browsers, .system, .timeMachine, .explorer, .largeFiles, .duplicates, .photos, .clouds, .developer,
+        .advice, .applications, .browsers, .system, .timeMachine, .explorer, .largeFiles, .duplicates, .photos, .clouds, .developer,
         .transfer, .archive,
     ]
 
@@ -135,7 +135,17 @@ private struct Sidebar: View {
         // quitte la recherche (revue du 18/10/2026 : « Vue d'ensemble » restait en surbrillance).
         List(selection: Binding(get: { model.isSearching ? nil : model.section },
                                 set: { if let value = $0 { model.searchText = ""; model.section = value } })) {
-            ForEach(sections) { row($0) }
+            row(.overview)
+            ForEach(model.preferences.orderedSidebarTools(sections)) { section in
+                row(section)
+                    .contextMenu {
+                        Button {
+                            model.preferences.toggleSidebarPin(section)
+                        } label: {
+                            Text(model.preferences.sidebarPins.contains(section) ? "sidebar.unpin" : "sidebar.pin", bundle: .oust)
+                        }
+                    }
+            }
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
@@ -153,6 +163,10 @@ private struct Sidebar: View {
             HStack {
                 Text(LocalizedStringKey(section.localizationKey), bundle: .oust)
                 Spacer()
+                if model.preferences.sidebarPins.contains(section) {
+                    Image(systemName: "pin.fill").font(Typography.caption)
+                        .accessibilityHidden(true)
+                }
                 if section == .developer || section == .overview, model.analysis.isRunning {
                     ProgressView().controlSize(.mini)
                 }

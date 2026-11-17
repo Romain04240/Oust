@@ -18,6 +18,7 @@ public struct MenuBarPanel: View {
     @State private var ejecting: Set<String> = []
     /// Le refus de macOS au dernier essai, par disque.
     @State private var ejectFailures: [String: String] = [:]
+    @State private var battery: BatterySummary?
     @Environment(\.openSettings) private var openSettings
 
     public init(model: AppModel) {
@@ -36,6 +37,20 @@ public struct MenuBarPanel: View {
                 PanelRow(symbol: "calendar.badge.clock") {
                     Text(verbatim: retention).font(Typography.caption).lineLimit(1).truncationMode(.middle)
                         .foregroundStyle(.secondary)
+                }
+            }
+            if let battery {
+                PanelRow(symbol: "battery.75percent") {
+                    HStack(spacing: Spacing.small) {
+                        Text("menubar.battery", bundle: .oust).font(Typography.body.weight(.semibold))
+                        if let percent = battery.maximumCapacity {
+                            Text(verbatim: L10n.string("menubar.battery_capacity", Formatters.count(percent)))
+                        }
+                        if let cycles = battery.cycleCount {
+                            Text(verbatim: L10n.string("menubar.battery_cycles", Formatters.count(cycles)))
+                        }
+                    }
+                    .font(Typography.caption).monospacedDigit()
                 }
             }
             Divider()
@@ -67,6 +82,12 @@ public struct MenuBarPanel: View {
             if SettingsWindow.opener == nil { SettingsWindow.opener = openSettings }
             model.refreshVolumes()
             Task { await model.watch.refreshDisk() }
+        }
+        .task {
+            battery = nil
+            let summary = await BatterySummary.read()
+            guard !Task.isCancelled else { return }
+            battery = summary
         }
     }
 

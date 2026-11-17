@@ -312,6 +312,7 @@ private struct Header: View {
                         if app.isAppStore {
                             Text("applications.app_store", bundle: .oust).font(Typography.caption)
                         }
+                        AppArchitectureLabel(url: app.url).id(app)
                     }
                     .foregroundStyle(Palette.onGradient)
                     Spacer(minLength: 0)
@@ -352,6 +353,25 @@ private struct Header: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.vivid(for: .review))
                 }
             }
+        }
+    }
+}
+
+private struct AppArchitectureLabel: View {
+    let url: URL
+    @State private var architecture: AppArchitecture?
+
+    var body: some View {
+        Group {
+            if let architecture {
+                Text(LocalizedStringKey(architecture.localizationKey), bundle: .oust)
+                    .font(Typography.caption)
+            }
+        }
+        .task {
+            let current = await AppArchitecture.indexed(for: url)
+            guard !Task.isCancelled else { return }
+            architecture = current
         }
     }
 }
