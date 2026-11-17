@@ -27391,6 +27391,134 @@
         }
       }
     },
+    "system.login_diagnostics_checking": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking login items…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification des ouvertures de session…"
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_detail": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read only. Checks the recorded paths of apps set to open at login."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lecture seule. Vérifie les chemins enregistrés des applications configurées pour s’ouvrir à la connexion."
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No login items flagged for review."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune ouverture de session signalée."
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_indeterminate": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App absent at the recorded path. Original volume unknown."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Application absente au chemin enregistré. Volume d’origine indéterminé."
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_refresh": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check again"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifier à nouveau"
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_settings": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Login Items settings"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir les réglages de connexion"
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Login Items to Check"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvertures de session à vérifier"
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Login items could not be checked."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de vérifier les ouvertures de session."
+          }
+        }
+      }
+    },
     "system.safari_download_occupied": {
       "extractionState": "manual",
       "localizations": {

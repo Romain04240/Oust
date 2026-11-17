@@ -32,6 +32,9 @@ public struct SystemView: View {
             ForEach(Self.categories, id: \.self) { category in
                 SystemCategory(model: model, category: category)
             }
+            if model.analyzedVolume?.isBoot != false {
+                LoginDiagnosticsCard()
+            }
         }
     }
 
