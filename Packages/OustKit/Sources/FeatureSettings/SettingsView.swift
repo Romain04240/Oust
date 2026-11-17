@@ -21,6 +21,7 @@ public struct SettingsView: View {
             Tab(value: SettingsTab.general) { GeneralSettingsTab(model: model) } label: { label(.general) }
             Tab(value: SettingsTab.analysis) { AnalysisSettingsTab(model: model) } label: { label(.analysis) }
             Tab(value: SettingsTab.watch) { WatchSettingsTab(model: model) } label: { label(.watch) }
+            Tab(value: SettingsTab.battery) { BatterySettingsTab(watch: model.watch) } label: { label(.battery) }
             Tab(value: SettingsTab.advanced) { AdvancedSettingsTab(model: model) } label: { label(.advanced) }
         }
         .onAppear { model.recheckFullDiskAccess() }

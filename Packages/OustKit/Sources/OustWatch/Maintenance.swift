@@ -133,6 +133,8 @@ public struct MaintenanceFinding: Sendable, Equatable {
     public var items: [CleanupItem]
     /// Le disque de démarrage au moment de l'entretien, pour le contour de la pastille.
     public var capacity: Capacity?
+    /// Faux si une partie du gain n'a pas pu être vérifiée à l'affichage.
+    public var measurementIsComplete = true
 
     public init(date: Date = Date(), items: [CleanupItem], capacity: Capacity? = nil) {
         self.date = date

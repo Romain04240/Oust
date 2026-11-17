@@ -55,8 +55,9 @@ enum Notifier {
     }
 
     /// Une notification qui mène où l'on veut, un onglet des Réglages compris.
+    @discardableResult
     static func post(id: String, title: String, body: String, opening destination: Destination, sound: Bool,
-                     action: String? = nil, focus: String? = nil) async {
+                     action: String? = nil, focus: String? = nil) async -> Bool {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -67,8 +68,10 @@ enum Notifier {
         do {
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
             log.notice("Notification posée : \(id, privacy: .public)")
+            return true
         } catch {
             log.error("Notification \(id, privacy: .public) en échec : \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 

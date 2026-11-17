@@ -12,6 +12,7 @@ public struct ScanOptions: Sendable, Hashable {
     public var leafThreshold: Int64
     /// Demander la part privée des fichiers qui partagent des blocs.
     public var measurePrivateSizes: Bool
+    package var bindMeasurementsToRoots = false
     /// Chemins à ne pas parcourir.
     public var excludedPaths: Set<String>
     /// Petits fichiers à retenir par leur nom (marqueurs de projets) : les règles
@@ -82,12 +83,14 @@ public struct ScanResult: Sendable {
     /// Qui compte chaque lien physique et chaque clone : de quoi réanalyser un
     /// dossier plus tard sans compter deux fois ni oublier.
     let ownership: Ownership
-    /// Absent quand la cible a changé pendant la mesure et que les gains ont été écartés.
+    /// Absent lorsque le contrôle des dossiers protégés ou des dossiers lus
+    /// a invalidé les gains de toute l'analyse.
     let preferenceDirectory: PreferenceDirectory?
     let accountArchiveDirectory: PreferenceDirectory
     let deviceBackupDirectory: DeviceBackupPath.Snapshot
 
     public var root: TreeNode? { roots.first }
+    package var freeableEstimatesAreValid: Bool { preferenceDirectory != nil }
 }
 
 /// Ce que mesure `Scanner.measure` pour un élément.
@@ -126,7 +129,10 @@ public enum Scanner {
         let ownership = Ownership()
         let backups = await checkStorageIO { DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory) }
         let walk = Walk(options: options, progress: progress, ownership: ownership, deviceBackupDirectory: backups ?? .unknown)
-        let nodes = await walk.run(roots: roots.map { $0.standardizedFileURL.path })
+        // Foundation peut réécrire /private/var en /var. Pour une ouverture
+        // sans suivi de liens, garder le chemin physique donné par l'appelant.
+        let rootPaths = roots.map { options.bindMeasurementsToRoots ? $0.path : $0.standardizedFileURL.path }
+        let nodes = await walk.run(roots: rootPaths)
         let stableProtectionRoots = await checkStorageIO { walk.hasCurrentProtectionRoots } == true
         let stablePreferences = stableProtectionRoots && !walk.sawStaleDirectories
         if !stablePreferences { for node in nodes { node.suppressFreeable() } }
@@ -278,6 +284,7 @@ final class Walk: @unchecked Sendable {
         var nodes: [TreeNode] = []
         var jobs: [Job] = []
         for path in rootPaths {
+            if progress.isCancelled { break }
             var info = stat()
             let exists = lstat(path, &info) == 0
             let node = TreeNode(name: (path as NSString).lastPathComponent, parent: nil,
@@ -288,6 +295,7 @@ final class Walk: @unchecked Sendable {
                 node.recomputeTotals()
                 continue
             }
+            if options.bindMeasurementsToRoots { node.verifiedMeasurementDevice = info.st_dev }
             if info.st_mode & S_IFMT == S_IFDIR {
                 node.measurementDevice = info.st_dev
                 node.ownLatestModification = Self.date(info.st_mtimespec)
@@ -298,7 +306,14 @@ final class Walk: @unchecked Sendable {
                 node.ownFiles = Sizes(private: allocated)
                 node.ownFileCount = 1
                 node.ownLatestModification = Self.date(info.st_mtimespec)
-                if options.measurePrivateSizes, let privateSize = BulkReader.privateSize(path: path) {
+                if options.bindMeasurementsToRoots {
+                    guard let sizes = boundFileSizes(path: path, expected: info) else {
+                        node.status = .inaccessible(code: ESTALE)
+                        node.resetOwnContent()
+                        continue
+                    }
+                    node.ownFiles = sizes
+                } else if options.measurePrivateSizes, let privateSize = BulkReader.privateSize(path: path) {
                     node.ownFiles = Sizes(allocated: allocated, freeable: privateSize)
                 }
                 if SafariDownloadPath.containsPackage(path)
@@ -315,6 +330,23 @@ final class Walk: @unchecked Sendable {
         await process(jobs)
         for node in nodes { node.refreshTotals() }
         return nodes
+    }
+
+    private func boundFileSizes(path: String, expected: stat) -> Sizes? {
+        guard expected.st_mode & S_IFMT == S_IFREG, expected.st_flags & Attr.sfDataless == 0 else { return nil }
+        let fd = open(path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var actual = stat()
+        guard fstat(fd, &actual) == 0, actual.st_mode & S_IFMT == S_IFREG,
+              actual.st_dev == expected.st_dev, actual.st_ino == expected.st_ino,
+              actual.st_birthtimespec.tv_sec == expected.st_birthtimespec.tv_sec,
+              actual.st_birthtimespec.tv_nsec == expected.st_birthtimespec.tv_nsec,
+              actual.st_flags & Attr.sfDataless == 0 else { return nil }
+        let allocated = Int64(actual.st_blocks) * 512
+        let privateSize = options.measurePrivateSizes
+            ? BulkReader.blockSharing(descriptor: fd, allocated: allocated).privateSize : nil
+        return Sizes(allocated: allocated, freeable: privateSize ?? allocated)
     }
 
     /// Relit des dossiers d'une arborescence existante (réanalyse incrémentale).
@@ -428,11 +460,12 @@ final class Walk: @unchecked Sendable {
         progress.addDirectory()
         let node = job.node
         let insideSafariDownload = SafariDownloadPath.containsPackage(job.path)
-        let fd = open(job.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        let noFollow = options.bindMeasurementsToRoots ? O_NOFOLLOW_ANY : O_NOFOLLOW
+        let fd = open(job.path, O_RDONLY | O_DIRECTORY | noFollow | O_CLOEXEC)
         let openError: Int32
         if fd < 0 {
             openError = errno
-        } else if insideSafariDownload || options.deviceBackupsDirectory != nil {
+        } else if insideSafariDownload || options.bindMeasurementsToRoots || options.deviceBackupsDirectory != nil {
             var info = stat()
             openError = fstat(fd, &info) == 0 && info.st_dev == job.device && UInt64(info.st_ino) == node.fileID
                 && (!insideSafariDownload || info.st_flags & Attr.sfDataless == 0) ? 0 : ESTALE

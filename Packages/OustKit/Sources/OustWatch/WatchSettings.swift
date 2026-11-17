@@ -12,19 +12,24 @@ public struct WatchSettings: Sendable, Hashable, Codable {
     /// Le monogramme en couleur dans la barre de menus plutôt qu'en blanc
     /// (Romain, 18/10/2026). Désactivé par défaut, comme le veut macOS.
     public static let menuBarColorKey = "watch.menuBarIconInColor"
+    public static let menuBarDriveIconKey = "watch.menuBarUsesDriveIcon"
+    public static let menuBarContentsKey = "watch.menuBarContents"
 
     public var alertsLowDisk: Bool
     /// L'alerte part en capsule ; en plus, une notification de macOS si on le veut.
     public var alsoNotifies: Bool
     public var threshold: LowDiskThreshold
     public var policies: [RetentionPolicy]
+    public var batteryAlerts: BatteryAlertSettings
 
     public init(alertsLowDisk: Bool = true, alsoNotifies: Bool = false, threshold: LowDiskThreshold = .standard,
-                policies: [RetentionPolicy] = RetentionFamily.allCases.map { RetentionPolicy(family: $0) }) {
+                policies: [RetentionPolicy] = RetentionFamily.allCases.map { RetentionPolicy(family: $0) },
+                batteryAlerts: BatteryAlertSettings = .init()) {
         self.alertsLowDisk = alertsLowDisk
         self.alsoNotifies = alsoNotifies
         self.threshold = threshold
         self.policies = policies
+        self.batteryAlerts = batteryAlerts
     }
 
     /// Un réglage absent (fichier d'une version plus ancienne) prend sa valeur
@@ -36,6 +41,7 @@ public struct WatchSettings: Sendable, Hashable, Codable {
         alsoNotifies = try container.decodeIfPresent(Bool.self, forKey: .alsoNotifies) ?? defaults.alsoNotifies
         threshold = try container.decodeIfPresent(LowDiskThreshold.self, forKey: .threshold) ?? defaults.threshold
         policies = try container.decodeIfPresent([RetentionPolicy].self, forKey: .policies) ?? defaults.policies
+        batteryAlerts = (try? container.decode(BatteryAlertSettings.self, forKey: .batteryAlerts)) ?? defaults.batteryAlerts
     }
 
     /// La règle d'une famille ; désactivée si elle n'a jamais été enregistrée.

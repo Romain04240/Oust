@@ -18,11 +18,13 @@ public struct MenuBarPanel: View {
     @State private var ejecting: Set<String> = []
     /// Le refus de macOS au dernier essai, par disque.
     @State private var ejectFailures: [String: String] = [:]
-    @State private var battery: BatterySummary?
+    @Bindable var navigation: MenuBarNavigation
     @Environment(\.openSettings) private var openSettings
+    @State private var contentHeight: CGFloat = 250
 
-    public init(model: AppModel) {
+    init(model: AppModel, navigation: MenuBarNavigation) {
         self.model = model
+        self.navigation = navigation
     }
 
     static let width: CGFloat = 460
@@ -30,46 +32,20 @@ public struct MenuBarPanel: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: Spacing.medium) {
             header
-            volumes
-            Divider()
-            bin
-            if let retention = retentionLine {
-                PanelRow(symbol: "calendar.badge.clock") {
-                    Text(verbatim: retention).font(Typography.caption).lineLimit(1).truncationMode(.middle)
-                        .foregroundStyle(.secondary)
-                }
+            Picker(selection: $navigation.page) {
+                Text("menubar.storage", bundle: .oust).tag(MenuBarPage.storage)
+                Text("menubar.battery", bundle: .oust).tag(MenuBarPage.battery)
+            } label: { Text("menubar.title", bundle: .oust) }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            ScrollView {
+                page
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
             }
-            if let battery {
-                PanelRow(symbol: "battery.75percent") {
-                    HStack(spacing: Spacing.small) {
-                        Text("menubar.battery", bundle: .oust).font(Typography.body.weight(.semibold))
-                        if let percent = battery.maximumCapacity {
-                            Text(verbatim: L10n.string("menubar.battery_capacity", Formatters.count(percent)))
-                        }
-                        if let cycles = battery.cycleCount {
-                            Text(verbatim: L10n.string("menubar.battery_cycles", Formatters.count(cycles)))
-                        }
-                    }
-                    .font(Typography.caption).monospacedDigit()
-                }
-            }
-            Divider()
-            // Les trois commandes sur une ligne : le panneau est assez large
-            // (Romain, 18/10/2026).
-            HStack(spacing: Spacing.small) {
-                Button { open(nil) } label: {
-                    Label { Text("menubar.open", bundle: .oust) } icon: { Image(systemName: "macwindow") }
-                }
-                .buttonStyle(.borderedProminent)
-                Spacer(minLength: Spacing.small)
-                Button { SettingsWindow.show(model: model) } label: {
-                    Label { Text("menu.settings", bundle: .oust) } icon: { Image(systemName: "gearshape") }
-                }
-                Button { confirmQuit() } label: {
-                    Label { Text("menubar.quit", bundle: .oust) } icon: { Image(systemName: "power") }
-                }
-            }
-            .controlSize(.regular)
+            .frame(height: max(1, min(contentHeight, navigation.height - 104)))
+            .id(navigation.page)
         }
         .padding(Spacing.large)
         .frame(width: Self.width)
@@ -80,14 +56,30 @@ public struct MenuBarPanel: View {
             // Lancé à la connexion, sans fenêtre : le panneau est la première
             // vue à connaître l'ouverture des Réglages.
             if SettingsWindow.opener == nil { SettingsWindow.opener = openSettings }
-            model.refreshVolumes()
-            Task { await model.watch.refreshDisk() }
         }
-        .task {
-            battery = nil
-            let summary = await BatterySummary.read()
-            guard !Task.isCancelled else { return }
-            battery = summary
+        .task(id: navigation.presented && navigation.page == .storage) {
+            guard navigation.presented, navigation.page == .storage else { return }
+            model.refreshVolumes()
+            await model.watch.refreshDisk()
+        }
+    }
+
+    @ViewBuilder private var page: some View {
+        if navigation.page == .storage {
+            VStack(alignment: .leading, spacing: Spacing.medium) {
+                volumes
+                Divider()
+                bin
+                if let retention = retentionLine {
+                    PanelRow(symbol: "calendar.badge.clock") {
+                        Text(verbatim: retention).font(Typography.caption).lineLimit(1).truncationMode(.middle)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } else {
+            BatteryMenuPanel(watch: model.watch, presented: navigation.presented,
+                             batteryPresentedAt: navigation.batteryPresentedAt)
         }
     }
 
@@ -97,12 +89,17 @@ public struct MenuBarPanel: View {
         HStack {
             Text(verbatim: "Oust!").font(Typography.headline)
             Spacer()
-            if model.watch.isLow, let threshold = model.watch.thresholdBytes {
+            if navigation.page == .storage, model.watch.isLow, let threshold = model.watch.thresholdBytes {
                 Label { Text(verbatim: L10n.string("menubar.low", Formatters.compactBytes(threshold))) }
                     icon: { Image(systemName: "exclamationmark.triangle.fill") }
                     .font(Typography.caption)
                     .foregroundStyle(Palette.color(for: .review))
             }
+            Button(action: navigation.commands) {
+                Image(systemName: "ellipsis.circle")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(Text("menubar.commands", bundle: .oust))
         }
     }
 
@@ -165,31 +162,23 @@ public struct MenuBarPanel: View {
 
     // MARK: Corbeille
 
-    /// La corbeille d'Oust! sur une ligne. « Faire le vide… » ouvre la corbeille
-    /// dans la fenêtre : on y revoit ce qui part et on confirme ; rien ne se vide
-    /// d'ici (SPEC §6.3).
+    /// Le bouton ouvre la corbeille d'Oust! dans la fenêtre pour la confirmation.
     private var bin: some View {
-        PanelRow(symbol: AppSection.cart.symbol,
-                 tint: model.cart.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Palette.eclatSolid)) {
-            HStack(spacing: Spacing.small) {
-                Text("menubar.bin", bundle: .oust).font(Typography.body.weight(.semibold))
-                Text(verbatim: binContent)
-                    .font(Typography.body)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        VStack(alignment: .leading, spacing: Spacing.small) {
+            PanelRow(symbol: AppSection.cart.symbol,
+                     tint: model.cart.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Palette.eclatSolid)) {
+                HStack(spacing: Spacing.small) {
+                    Text("menubar.bin", bundle: .oust).font(Typography.body.weight(.semibold))
+                    Text(verbatim: binContent).monospacedDigit().foregroundStyle(.secondary)
+                }
             }
-        } trailing: {
             Button { open(.cart) } label: {
-                Text("menubar.bin_review", bundle: .oust)
-                    .font(Typography.body.weight(.semibold))
-                    .foregroundStyle(model.cart.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Palette.onEclat))
-                    .padding(.horizontal, Spacing.medium)
-                    .padding(.vertical, Spacing.tight)
-                    .background(model.cart.isEmpty ? AnyShapeStyle(Color.primary.opacity(0.08)) : AnyShapeStyle(Palette.eclat),
-                                in: Capsule())
+                Label { Text("menubar.bin_review", bundle: .oust) } icon: { Image(systemName: "trash") }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
             .disabled(model.cart.isEmpty)
         }
     }
@@ -220,22 +209,8 @@ public struct MenuBarPanel: View {
         return L10n.string("menubar.retention_next", L10n.string(next.0.localizationKey), Formatters.relative(next.1))
     }
 
-    /// Quitter arrête la veille : on le dit avant (Romain, 18/10/2026). Depuis le
-    /// panneau seulement : ⌘Q dans l'app reste direct, et Réglages Système doit
-    /// pouvoir quitter Oust! sans question pour appliquer un accès.
-    private func confirmQuit() {
-        let alert = NSAlert()
-        alert.messageText = L10n.string("menubar.quit_title")
-        var detail = L10n.string("menubar.quit_detail")
-        if model.cleaning == .running { detail += " " + L10n.string("menubar.quit_cleaning") }
-        alert.informativeText = detail
-        alert.addButton(withTitle: L10n.string("menubar.quit_confirm"))
-        alert.addButton(withTitle: L10n.string("common.cancel"))
-        NSApp.activate()
-        if alert.runModal() == .alertFirstButtonReturn { NSApp.terminate(nil) }
-    }
-
     private func open(_ section: AppSection?) {
+        navigation.close()
         if let section {
             model.searchText = ""
             model.section = section

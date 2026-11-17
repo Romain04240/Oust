@@ -1,4 +1,5 @@
 import SwiftUI
+import OustLocalization
 import OustModel
 
 /// Veille : ce qu'Oust! fait seul, fenêtre fermée. Les sections viennent de
@@ -7,8 +8,6 @@ struct WatchSettingsTab: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        SettingsForm {
-            WatchSettingsSections(model: model)
-        }
+        SettingsForm { WatchSettingsSections(model: model) }
     }
 }

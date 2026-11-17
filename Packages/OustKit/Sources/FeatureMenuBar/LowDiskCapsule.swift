@@ -4,6 +4,7 @@ import OustCore
 import OustDesignSystem
 import OustLocalization
 import OustModel
+import OustWatch
 
 /// L'alerte disque bas en pastille, à la manière de Juicy pour la batterie
 /// (Romain, 18/10/2026) : une pastille compacte qui flotte sous la barre des
@@ -13,7 +14,8 @@ import OustModel
 ///
 /// La pastille dit aussi autre chose que le disque bas : l'entretien planifié,
 /// d'autres veilles ensuite. Elles passent un `CapsuleMessage` à `show(_:open:)` ;
-/// une seule pastille à la fois, la dernière arrivée remplace la précédente.
+/// une seule pastille à la fois. Une information ordinaire laisse
+/// l'avertissement déjà affiché finir.
 ///
 /// Première version, refusée : une capsule raccrochée au bord de l'écran,
 /// autour de l'encoche, sur trois lignes. « Trop grosse », et Juicy flotte.
@@ -26,6 +28,15 @@ public final class CapsulePresenter {
 
     private var panel: CapsulePanel?
     private let state = CapsuleState()
+    private var pendingBattery: (@MainActor () -> Void)?
+    private var activeBattery: (@MainActor () -> Void)?
+    private enum PendingMessage {
+        case ready(CapsuleMessage, @MainActor () -> Void)
+        case maintenance(current: @MainActor () async -> MaintenanceFinding?,
+                         open: @MainActor (MaintenanceFinding) -> Void)
+    }
+    private var pendingMessages: [PendingMessage] = []
+    private var preparingMaintenance = false
 
     /// Combien de temps la capsule reste, si on ne la survole pas.
     static let lifetime: Duration = .seconds(7)
@@ -35,10 +46,66 @@ public final class CapsulePresenter {
         show(.lowDisk(alert), open: open)
     }
 
+    public func showBattery(_ alert: BatteryAlert,
+                            current: @escaping @MainActor () -> BatteryAlert?,
+                            open: @escaping @MainActor () -> Void) {
+        let message = CapsuleMessage.battery(alert)
+        let retry: @MainActor () -> Void = { [weak self] in
+            guard let freshAlert = current() else { return }
+            self?.showBattery(freshAlert, current: current, open: open)
+        }
+        if state.isShown, let active = state.message, active.priority.rawValue >= message.priority.rawValue {
+            pendingBattery = retry
+        } else if let freshAlert = current() {
+            pendingBattery = nil
+            activeBattery = display(.battery(freshAlert), open: open) ? retry : nil
+        }
+    }
+
     /// N'importe quel message, sous la même forme ; `open` répond au clic.
     public func show(_ message: CapsuleMessage, open: @escaping @MainActor () -> Void) {
+        if state.isShown, let active = state.message, active.priority.rawValue > message.priority.rawValue {
+            pendingMessages.append(.ready(message, open))
+            return
+        }
+        if display(message, open: open) {
+            if pendingBattery == nil { pendingBattery = activeBattery }
+            activeBattery = nil
+        }
+    }
+
+    public func showMaintenance(current: @escaping @MainActor () async -> MaintenanceFinding?,
+                                open: @escaping @MainActor (MaintenanceFinding) -> Void) {
+        pendingMessages.append(.maintenance(current: current, open: open))
+        showNextMessage()
+    }
+
+    private func showNextMessage() {
+        guard !state.isShown, !preparingMaintenance, !pendingMessages.isEmpty else { return }
+        let next = pendingMessages.removeFirst()
+        switch next {
+        case .ready(let message, let open):
+            show(message, open: open)
+        case .maintenance(let current, let open):
+            preparingMaintenance = true
+            Task { [weak self] in
+                let finding = await current()
+                guard let self else { return }
+                self.preparingMaintenance = false
+                if self.state.isShown {
+                    // Une autre pastille a pris la place pendant la lecture.
+                    self.pendingMessages.insert(next, at: 0)
+                } else {
+                    if let finding { self.show(.maintenance(finding)) { open(finding) } }
+                    self.showNextMessage()
+                }
+            }
+        }
+    }
+
+    private func display(_ message: CapsuleMessage, open: @escaping @MainActor () -> Void) -> Bool {
         let screen = Self.targetScreen()
-        guard let screen else { return }
+        guard let screen else { return false }
         let geometry = CapsuleGeometry(screen: screen)
         let panel = self.panel ?? makePanel()
         self.panel = panel
@@ -56,10 +123,19 @@ public final class CapsulePresenter {
             .announcement: message.announcement,
             .priority: NSAccessibilityPriorityLevel.high.rawValue,
         ])
+        return true
     }
 
     public func dismiss() {
-        state.withdraw { [weak self] in self?.panel?.orderOut(nil) }
+        activeBattery = nil
+        state.withdraw { [weak self] in
+            guard let self else { return }
+            self.panel?.orderOut(nil)
+            let pending = self.pendingBattery
+            self.pendingBattery = nil
+            pending?()
+            self.showNextMessage()
+        }
     }
 
     private func makePanel() -> CapsulePanel {

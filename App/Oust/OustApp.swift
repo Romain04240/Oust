@@ -83,8 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     /// La barre de menus (SPEC §10, phase 3) : les disques, la corbeille,
     /// l'analyse et la fenêtre, d'un clic. Masquable dans les Réglages.
-    private lazy var menuBar = MenuBarController(model: model,
-                                                 icon: MenuBarIcon.image(colored: model.watch.menuBarIconInColor))
+    private lazy var menuBar = MenuBarController(model: model, icon: storageIcon)
+    private var storageIcon: NSImage {
+        MenuBarIcon.image(colored: model.watch.menuBarIconInColor, drive: model.watch.menuBarUsesDriveIcon)
+    }
     private var router: NotificationRouter?
     private var observers: [any NSObjectProtocol] = []
 
@@ -111,11 +113,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MainWindow.show()
             }
         }
+        model.watch.onBatteryAlert = { [weak self] alert in
+            guard let cycle = self?.model.watch.batteryAlertCycle else { return }
+            CapsulePresenter.shared.showBattery(alert, current: { [weak self] in
+                self?.model.watch.currentBatteryAlert(matching: alert, cycle: cycle)
+            }) { [weak self] in
+                guard let self else { return }
+                self.menuBar.showBattery { [weak self] in
+                    guard let self else { return }
+                    SettingsWindow.show(.battery, model: self.model)
+                }
+            }
+        }
         // L'entretien planifié : ce qu'il a trouvé, en pastille ; un clic ouvre
         // la corbeille avec ces éléments, pour la revue et la confirmation.
         model.watch.maintenance.onFinding = { finding in
-            CapsulePresenter.shared.show(.maintenance(finding)) {
-                model.watch.maintenance.review(finding)
+            CapsulePresenter.shared.showMaintenance(current: {
+                await MaintenanceModel.capsuleFinding(finding, home: model.home)
+            }) { current in
+                model.watch.maintenance.review(current)
                 MainWindow.show()
             }
         }
@@ -139,8 +155,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MainWindow.show()
             }
         }
-        model.watch.onMenuBarIconChange = { [weak self] colored in
-            self?.menuBar.setIcon(MenuBarIcon.image(colored: colored))
+        model.watch.onMenuBarIconChange = { [weak self] in
+            guard let self else { return }
+            self.menuBar.setIcon(self.storageIcon)
         }
         model.watch.onMenuBarChange = { [weak self] visible in
             self?.menuBar.setVisible(visible)

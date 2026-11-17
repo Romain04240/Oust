@@ -123,8 +123,23 @@ public struct PathGuard: Sendable {
         // mener ailleurs) ; le dernier élément ne l'est pas : supprimer un lien
         // supprime le lien, pas sa cible.
         guard let resolvedURL = Self.withResolvedParent(url) else { return .refused("unresolved-parent") }
+        return checkResolved(url, resolvedURL: resolvedURL, protectUserLogs: protectUserLogs,
+                             protectPreferences: protectPreferences, backupSnapshot: backupSnapshot)
+    }
+
+    /// Rend le chemin physique sur lequel porte le verdict, pour que le scanner
+    /// puisse ouvrir ce même chemin sans suivre de nouveaux liens.
+    package func allowedMeasurementPath(_ url: URL) -> URL? {
+        guard let resolved = Self.withResolvedParent(url),
+              checkResolved(url, resolvedURL: resolved, protectUserLogs: true,
+                            protectPreferences: true, backupSnapshot: nil) == .allowed else { return nil }
+        return resolved
+    }
+
+    private func checkResolved(_ url: URL, resolvedURL: URL, protectUserLogs: Bool,
+                               protectPreferences: Bool, backupSnapshot: DeviceBackupPath.Snapshot?) -> Verdict {
         let resolved = Self.normalize(resolvedURL.path)
-        let literal = Self.normalize(raw)
+        let literal = Self.normalize(url.path)
         let candidates = Set([resolved, literal])
         if !exact.isDisjoint(with: candidates) { return .refused("protected-root") }
         if protectUserLogs && protectsUserLogs(url, resolved: resolvedURL) { return .refused("user-logs") }

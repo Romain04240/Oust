@@ -3,6 +3,7 @@ import OustCore
 import OustDesignSystem
 import OustLocalization
 import OustModel
+import OustWatch
 
 /// Général : le démarrage, la barre des menus et son icône, les promesses.
 struct GeneralSettingsTab: View {
@@ -29,14 +30,29 @@ struct GeneralSettingsTab: View {
                     Text("settings.general.show_menubar", bundle: .oust)
                     Text("settings.general.menubar_detail", bundle: .oust)
                 }
-                LabeledContent {
-                    MenuBarIconPicker(colored: Binding(get: { watch.menuBarIconInColor },
-                                                       set: { watch.menuBarIconInColor = $0 }))
+                Picker(selection: Binding(get: { watch.menuBarContents }, set: { watch.menuBarContents = $0 })) {
+                    ForEach(MenuBarContents.allCases) { mode in
+                        Text(LocalizedStringKey(mode.localizationKey), bundle: .oust).tag(mode)
+                    }
                 } label: {
-                    Text("settings.general.icon", bundle: .oust)
-                    Text("settings.general.icon_detail", bundle: .oust)
+                    Text("settings.general.menubar_contents", bundle: .oust)
                 }
                 .disabled(!watch.showsMenuBar)
+                Group {
+                    Toggle(isOn: Binding(get: { watch.menuBarUsesDriveIcon }, set: { watch.menuBarUsesDriveIcon = $0 })) {
+                        Text("settings.general.icon_drive", bundle: .oust)
+                    }
+                    if !watch.menuBarUsesDriveIcon {
+                        LabeledContent {
+                            MenuBarIconPicker(colored: Binding(get: { watch.menuBarIconInColor },
+                                                               set: { watch.menuBarIconInColor = $0 }))
+                        } label: {
+                            Text("settings.general.icon", bundle: .oust)
+                            Text("settings.general.icon_detail", bundle: .oust)
+                        }
+                    }
+                }
+                .disabled(!watch.showsMenuBar || !watch.menuBarContents.showsStorage)
             } header: {
                 Text("settings.general.menubar", bundle: .oust)
             }

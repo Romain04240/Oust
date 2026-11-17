@@ -30,6 +30,6 @@ struct NavigationTests {
     @Test("Les Réglages ne sont plus une section de la fenêtre")
     func settingsIsNotASection() {
         #expect(AppSection(rawValue: "settings") == nil)
-        #expect(SettingsTab.allCases.map(\.rawValue) == ["general", "analysis", "watch", "advanced"])
+        #expect(SettingsTab.allCases.map(\.rawValue) == ["general", "analysis", "watch", "battery", "advanced"])
     }
 }

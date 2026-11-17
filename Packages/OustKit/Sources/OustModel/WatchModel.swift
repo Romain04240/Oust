@@ -56,17 +56,48 @@ public final class WatchModel {
     /// Prévenu quand la barre de menus apparaît ou disparaît : l'app pose ou
     /// retire l'icône, et sans elle garde son icône dans le Dock.
     @ObservationIgnored public var onMenuBarChange: (@MainActor (Bool) -> Void)?
+    public var menuBarContents: MenuBarContents {
+        didSet {
+            guard menuBarContents != oldValue else { return }
+            defaults.set(menuBarContents.rawValue, forKey: WatchSettings.menuBarContentsKey)
+            onMenuBarChange?(showsMenuBar)
+        }
+    }
     /// Le monogramme aux couleurs de l'icône plutôt qu'en image modèle.
     public var menuBarIconInColor: Bool {
         didSet {
             guard menuBarIconInColor != oldValue else { return }
             defaults.set(menuBarIconInColor, forKey: WatchSettings.menuBarColorKey)
-            onMenuBarIconChange?(menuBarIconInColor)
+            onMenuBarIconChange?()
         }
     }
-    @ObservationIgnored public var onMenuBarIconChange: (@MainActor (Bool) -> Void)?
+    public var menuBarUsesDriveIcon: Bool {
+        didSet {
+            guard menuBarUsesDriveIcon != oldValue else { return }
+            defaults.set(menuBarUsesDriveIcon, forKey: WatchSettings.menuBarDriveIconKey)
+            onMenuBarIconChange?()
+        }
+    }
+    @ObservationIgnored public var onMenuBarIconChange: (@MainActor () -> Void)?
     /// Montre l'alerte disque bas en capsule (l'app pose le panneau).
     @ObservationIgnored public var onLowDisk: (@MainActor (LowDiskAlert) -> Void)?
+    public private(set) var battery: BatteryReading?
+    @ObservationIgnored public var onBatteryAlert: (@MainActor (BatteryAlert) -> Void)?
+    @ObservationIgnored private var batteryObserver: BatteryPowerObserver?
+    @ObservationIgnored private var batteryAlerts = BatteryAlertTracker()
+    @ObservationIgnored private var batteryAsleep = false
+    @ObservationIgnored private var sleepObserver: (any NSObjectProtocol)?
+    public private(set) var batteryDevices: [BatteryDevice]?
+    public private(set) var batteryDevicesReadAt: ContinuousClock.Instant?
+    public private(set) var batteryDevicePreferences: [BatteryDevicePreference] = []
+    @ObservationIgnored private var deviceAlerts = DeviceBatteryAlertTracker()
+    @ObservationIgnored private var deviceRead: Task<Void, Never>?
+    @ObservationIgnored private var deviceReadCycle = 0
+    @ObservationIgnored private var deviceDelivery: Task<Void, Never>?
+    @ObservationIgnored private var deviceDeliveryRequested = false
+    @ObservationIgnored private var deviceLoop: Task<Void, Never>?
+    public private(set) var batteryAlertCycle = 0
+    static let batteryDevicesKey = "watch.batteryDevices"
     /// L'entretien planifié : il analyse et montre, sans rien supprimer.
     public let maintenance: MaintenanceModel
 
@@ -87,8 +118,15 @@ public final class WatchModel {
         self.settings = WatchSettings.decode(defaults.data(forKey: Self.settingsKey))
         self.showsMenuBar = defaults.object(forKey: WatchSettings.menuBarKey) as? Bool ?? true
         self.menuBarIconInColor = defaults.bool(forKey: WatchSettings.menuBarColorKey)
+        self.menuBarUsesDriveIcon = defaults.object(forKey: WatchSettings.menuBarDriveIconKey) as? Bool
+            ?? (defaults.object(forKey: WatchSettings.menuBarColorKey) == nil)
+        self.menuBarContents = defaults.string(forKey: WatchSettings.menuBarContentsKey)
+            .flatMap(MenuBarContents.init(rawValue:)) ?? .storage
         self.state = WatchState.decode(defaults.data(forKey: Self.stateKey))
         self.maintenance = MaintenanceModel(defaults: defaults)
+        if let data = defaults.data(forKey: Self.batteryDevicesKey), let saved = try? JSONDecoder().decode([BatteryDevicePreference].self, from: data) {
+            self.batteryDevicePreferences = saved
+        }
         maintenance.watch = self
     }
 
@@ -99,6 +137,8 @@ public final class WatchModel {
     public func start() {
         guard loop == nil else { return }
         refreshLoginItem()
+        refreshBattery()
+        batteryObserver = BatteryPowerObserver { [weak self] in self?.refreshBattery() }
         // Les corbeilles du Mac : une application qu'on y jette, et ses restes.
         app?.trashedApps.start()
         loop = Task { [weak self] in
@@ -107,11 +147,155 @@ public final class WatchModel {
                 try? await Task.sleep(for: Self.interval)
             }
         }
+        deviceLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                if self?.batteryDevicePreferences.contains(where: { $0.threshold != nil }) == true {
+                    await self?.refreshBatteryDevices()
+                }
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
         // Au réveil, une règle a pu venir à échéance et le disque s'être rempli.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in await self?.tick() }
+            MainActor.assumeIsolated {
+                self?.batteryAsleep = false
+                self?.batteryAlerts.resetBaseline()
+                self?.batteryAlertCycle += 1
+                self?.refreshBattery()
+                Task { await self?.tick() }
+            }
+        }
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.batteryAsleep = true
+                self?.batteryAlerts.resetBaseline()
+                self?.deviceAlerts = DeviceBatteryAlertTracker()
+                self?.batteryDevices = nil
+                self?.batteryDevicesReadAt = nil
+                self?.deviceReadCycle += 1
+            }
+        }
+    }
+
+    private func refreshBattery() {
+        guard !batteryAsleep else { return }
+        let reading = BatteryReading.current()
+        if battery.map({ $0.state == .onBattery }) != reading.map({ $0.state == .onBattery }) {
+            batteryAlertCycle += 1
+        }
+        battery = reading
+        if let alert = batteryAlerts.observe(reading, settings: settings.batteryAlerts) { onBatteryAlert?(alert) }
+    }
+
+    public func currentBatteryAlert(matching alert: BatteryAlert, cycle: Int) -> BatteryAlert? {
+        guard cycle == batteryAlertCycle, !batteryAsleep, let reading = battery else { return nil }
+        return alert.updated(for: reading, settings: settings.batteryAlerts)
+    }
+
+    public var orderedBatteryDevices: [BatteryDevice] {
+        BatteryDevicePreference.ordered(batteryDevices ?? [], using: batteryDevicePreferences)
+    }
+
+    public func batteryPreference(for id: String) -> BatteryDevicePreference {
+        batteryDevicePreferences.first { $0.id == id } ?? BatteryDevicePreference(id: id)
+    }
+
+    private func storeBatteryPreferences(_ preferences: [BatteryDevicePreference]) {
+        batteryDevicePreferences = preferences
+        defaults.set(try? JSONEncoder().encode(preferences), forKey: Self.batteryDevicesKey)
+    }
+
+    public func setBatteryPreference(_ preference: BatteryDevicePreference) {
+        guard batteryDevices?.contains(where: { $0.id == preference.id }) == true else { return }
+        let previous = batteryPreference(for: preference.id)
+        guard previous != preference else { return }
+        let preferences = orderedBatteryDevices.map { $0.id == preference.id ? preference : batteryPreference(for: $0.id) }
+        let active = Set(preferences.map(\.id))
+        storeBatteryPreferences(preferences + batteryDevicePreferences.filter { !active.contains($0.id) })
+        if preference.threshold != previous.threshold { deviceAlerts.invalidate(preference.id) }
+        if preference.threshold != nil, previous.threshold == nil {
+            Task {
+                notifications = await Notifier.ensurePermission()
+                scheduleDeviceDelivery()
+            }
+        }
+    }
+
+    public func moveBatteryDevice(_ id: String, by offset: Int) {
+        var preferences = orderedBatteryDevices.map { batteryPreference(for: $0.id) }
+        guard let index = preferences.firstIndex(where: { $0.id == id }),
+              preferences.indices.contains(index + offset) else { return }
+        preferences.swapAt(index, index + offset)
+        let active = Set(preferences.map(\.id))
+        storeBatteryPreferences(preferences + batteryDevicePreferences.filter { !active.contains($0.id) })
+    }
+
+    public func hasFreshBatteryDevices(since start: ContinuousClock.Instant?) -> Bool {
+        guard let start, let read = batteryDevicesReadAt else { return false }
+        return read >= start && ContinuousClock.now - read <= .seconds(22)
+    }
+
+    public func refreshBatteryDevices(since start: ContinuousClock.Instant? = nil) async {
+        if let running = deviceRead {
+            await running.value
+            guard let start, !hasFreshBatteryDevices(since: start) else { return }
+        }
+        guard !Task.isCancelled, !batteryAsleep else { return }
+        if deviceRead == nil {
+            deviceRead = Task { [weak self] in
+                guard let self else { return }
+                defer { self.deviceRead = nil }
+                await self.readBatteryDevices()
+            }
+        }
+        await deviceRead?.value
+    }
+
+    private func readBatteryDevices() async {
+        let cycle = deviceReadCycle
+        let startedAt = ContinuousClock.now
+        let fresh = await BatteryDevice.read()
+        guard !Task.isCancelled, cycle == deviceReadCycle, !batteryAsleep else { return }
+        batteryDevices = fresh
+        batteryDevicesReadAt = fresh == nil ? nil : startedAt
+        if !deviceAlerts.observe(fresh ?? [], preferences: batteryDevicePreferences).isEmpty {
+            scheduleDeviceDelivery()
+        }
+    }
+
+    private func scheduleDeviceDelivery() {
+        deviceDeliveryRequested = true
+        guard deviceDelivery == nil else { return }
+        deviceDelivery = Task { [weak self] in
+            guard let self else { return }
+            defer { self.deviceDelivery = nil }
+            repeat {
+                self.deviceDeliveryRequested = false
+                await self.deliverDeviceAlerts()
+            } while self.deviceDeliveryRequested && !Task.isCancelled
+        }
+    }
+
+    private func deliverDeviceAlerts() async {
+        let cycle = deviceReadCycle
+        guard await Notifier.permission() == .allowed, cycle == deviceReadCycle,
+              let snapshot = batteryDevicesReadAt, ContinuousClock.now - snapshot <= .seconds(45) else { return }
+        for id in (batteryDevices ?? []).map(\.id) {
+            guard cycle == deviceReadCycle, snapshot == batteryDevicesReadAt,
+                  let device = batteryDevices?.first(where: { $0.id == id && $0.connected }),
+                  let alert = deviceAlerts.pendingAlert(for: id),
+                  let level = device.level, level <= alert.threshold else { continue }
+            let preference = batteryPreference(for: device.id)
+            guard preference.threshold == alert.threshold else { continue }
+            let name = preference.alias.isEmpty ? device.name : preference.alias
+            let posted = await Notifier.post(id: "fr.meaillais.oust.battery-device.\(device.id)", title: name,
+                                body: L10n.string("watch.battery_device_notification", Formatters.count(level)),
+                                opening: .settings(.battery), sound: true)
+            if posted, cycle == deviceReadCycle { deviceAlerts.acknowledge(id, alert: alert) }
         }
     }
 
@@ -129,6 +313,11 @@ public final class WatchModel {
     }
 
     private func settingsChanged(from old: WatchSettings) {
+        if settings.batteryAlerts != old.batteryAlerts {
+            batteryAlertCycle += 1
+            batteryAlerts = BatteryAlertTracker()
+            refreshBattery()
+        }
         if settings.alsoNotifies, !old.alsoNotifies {
             // Cocher la notification, c'est le bon moment pour demander la
             // permission : l'utilisateur sait pourquoi on la demande.

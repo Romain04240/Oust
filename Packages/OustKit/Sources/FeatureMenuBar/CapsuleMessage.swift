@@ -13,6 +13,7 @@ import OustWatch
 ///
 ///     [symbole]  label  FIGURE mot  [✓ note sûre]
 public struct CapsuleMessage: Sendable, Equatable {
+    public enum Priority: Int, Sendable { case normal, batteryWarning, warning }
     /// Le symbole de tête (SF Symbols).
     public var symbol: String
     /// Ce dont parle la pastille : « Espace disque · Macintosh HD », « Entretien ».
@@ -28,9 +29,10 @@ public struct CapsuleMessage: Sendable, Equatable {
     public var announcement: String
     /// Ce que fait un clic, pour VoiceOver.
     public var hint: String
+    public var priority: Priority
 
     public init(symbol: String, label: String, figure: String? = nil, word: String, safeNote: String? = nil,
-                gauge: CapsuleGauge, announcement: String, hint: String) {
+                gauge: CapsuleGauge, announcement: String, hint: String, priority: Priority = .normal) {
         self.symbol = symbol
         self.label = label
         self.figure = figure
@@ -39,6 +41,7 @@ public struct CapsuleMessage: Sendable, Equatable {
         self.gauge = gauge
         self.announcement = announcement
         self.hint = hint
+        self.priority = priority
     }
 }
 
@@ -68,8 +71,24 @@ extension CapsuleMessage {
             safeNote: alert.safeTotal.flatMap { $0 > 0 ? L10n.string("watch.capsule.safe", Formatters.compactBytes($0)) : nil },
             gauge: CapsuleGauge(filled: alert.capacity.occupiedFraction),
             announcement: alert.title + ". " + alert.message,
-            hint: L10n.string("watch.capsule.hint")
+            hint: L10n.string("watch.capsule.hint"), priority: .warning
         )
+    }
+
+    public static func battery(_ alert: BatteryAlert) -> CapsuleMessage {
+        let reading: BatteryReading
+        let low: Bool
+        switch alert {
+        case .low(let value): reading = value; low = true
+        case .charged(let value): reading = value; low = false
+        }
+        let figure = L10n.string("menubar.battery_percent", Formatters.count(reading.level))
+        let title = L10n.string(low ? "watch.battery_capsule.low" : "watch.battery_capsule.charged")
+        return CapsuleMessage(symbol: reading.symbol, label: title, figure: figure, word: "",
+                              gauge: CapsuleGauge(filled: Double(reading.level) / 100),
+                              announcement: title + " " + figure,
+                              hint: L10n.string("watch.battery_capsule.hint"),
+                              priority: low ? .batteryWarning : .normal)
     }
 
     /// L'entretien : « Entretien · 12 Go à récupérer » (Romain : « à récupérer »,
@@ -79,14 +98,28 @@ extension CapsuleMessage {
     public static func maintenance(_ finding: MaintenanceFinding) -> CapsuleMessage {
         let gauge = finding.gauge
         let total = finding.total
-        let announcement = total > 0
-            ? L10n.string("maintenance.capsule.announcement", Formatters.bytes(total))
-            : L10n.string("maintenance.capsule.announcement_clean")
+        let word: String
+        let announcement: String
+        if !finding.measurementIsComplete {
+            if total > 0 {
+                word = L10n.string("maintenance.capsule.partial")
+                announcement = L10n.string("maintenance.capsule.announcement_partial", Formatters.bytes(total))
+            } else {
+                word = L10n.string("maintenance.capsule.unavailable")
+                announcement = L10n.string("maintenance.capsule.announcement_unavailable")
+            }
+        } else if total > 0 {
+            word = L10n.string("maintenance.capsule.word")
+            announcement = L10n.string("maintenance.capsule.announcement", Formatters.bytes(total))
+        } else {
+            word = L10n.string("maintenance.capsule.clean")
+            announcement = L10n.string("maintenance.capsule.announcement_clean")
+        }
         return CapsuleMessage(
             symbol: "sparkles",
             label: L10n.string("maintenance.capsule.label"),
             figure: total > 0 ? Formatters.compactBytes(total) : nil,
-            word: L10n.string(total > 0 ? "maintenance.capsule.word" : "maintenance.capsule.clean"),
+            word: word,
             gauge: CapsuleGauge(filled: gauge.filled, giveBack: gauge.giveBack),
             announcement: announcement,
             hint: L10n.string(total > 0 ? "maintenance.capsule.hint" : "maintenance.capsule.hint_clean")

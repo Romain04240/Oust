@@ -5,6 +5,7 @@ import OustBrowsers
 import OustCore
 import OustLocalization
 import OustRules
+import OustSafety
 import OustScan
 import OustVolume
 import OustWatch
@@ -173,6 +174,172 @@ public final class MaintenanceModel {
         guard let first = item.paths.first else { return true }
         var info = stat()
         return lstat(first.path, &info) == 0
+    }
+
+    /// La mesure d'origine ne suit pas un cache qui a été vidé ou recréé.
+    public nonisolated static func capsuleFinding(
+        _ finding: MaintenanceFinding, home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) async -> MaintenanceFinding? {
+        await capsuleFinding(finding, home: home) { paths, options, progress in
+            await Scanner.scan(paths, options: options, progress: progress)
+        }
+    }
+
+    nonisolated static func capsuleFinding(
+        _ finding: MaintenanceFinding, home: URL,
+        scan: @escaping @Sendable ([URL], ScanOptions, ScanProgress) async -> ScanResult
+    ) async -> MaintenanceFinding? {
+        guard !finding.items.isEmpty else { return finding }
+        let progress = ScanProgress()
+        let (results, continuation) = AsyncStream<MaintenanceFinding?>.makeStream()
+        let work = Task.detached(priority: .utility) {
+            continuation.yield(await measureCapsule(finding, home: home, progress: progress, scan: scan))
+            continuation.finish()
+        }
+        let deadline = Task {
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            progress.cancel()
+            continuation.finish()
+        }
+        defer { progress.cancel(); work.cancel(); deadline.cancel(); continuation.finish() }
+        var iterator = results.makeAsyncIterator()
+        if let result = await iterator.next() ?? nil { return result }
+        guard !Task.isCancelled else { return nil }
+        var unavailable = finding
+        unavailable.items = []
+        unavailable.measurementIsComplete = false
+        return unavailable
+    }
+
+    private struct CapsulePathStamp: Equatable {
+        let device: Int32
+        let inode: UInt64
+        let birth: timespec
+        let modified: timespec
+        let changed: timespec
+
+        init(_ info: stat) {
+            device = info.st_dev
+            inode = UInt64(info.st_ino)
+            birth = info.st_birthtimespec
+            modified = info.st_mtimespec
+            changed = info.st_ctimespec
+        }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            func same(_ lhs: timespec, _ rhs: timespec) -> Bool {
+                lhs.tv_sec == rhs.tv_sec && lhs.tv_nsec == rhs.tv_nsec
+            }
+            return lhs.device == rhs.device && lhs.inode == rhs.inode
+                && same(lhs.birth, rhs.birth) && same(lhs.modified, rhs.modified) && same(lhs.changed, rhs.changed)
+        }
+    }
+
+    private struct CapsuleTarget: Equatable {
+        let path: URL
+        let stamp: CapsulePathStamp
+    }
+
+    private enum CapsulePathProbe {
+        case present(CapsuleTarget), missing, unavailable
+
+        static func read(_ path: URL, guardPaths: PathGuard) -> Self {
+            var info = stat()
+            guard lstat(path.path, &info) == 0 else {
+                return errno == ENOENT || errno == ENOTDIR ? .missing : .unavailable
+            }
+            let kind = info.st_mode & S_IFMT
+            guard [S_IFDIR, S_IFREG].contains(kind),
+                  let resolved = guardPaths.allowedMeasurementPath(path) else { return .unavailable }
+            let flags = O_EVTONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC
+            let fd = open(resolved.path, flags | (kind == S_IFDIR ? O_DIRECTORY : 0))
+            guard fd >= 0 else { return .unavailable }
+            defer { close(fd) }
+            var actual = stat()
+            let stamp = CapsulePathStamp(info)
+            guard fstat(fd, &actual) == 0, stamp == CapsulePathStamp(actual) else { return .unavailable }
+            return .present(CapsuleTarget(path: resolved, stamp: stamp))
+        }
+    }
+
+    private nonisolated static func measureCapsule(
+        _ finding: MaintenanceFinding, home: URL, progress: ScanProgress,
+        scan: @Sendable ([URL], ScanOptions, ScanProgress) async -> ScanResult
+    ) async -> MaintenanceFinding? {
+        let guardPaths = PathGuard(home: home)
+        var targets: [URL: CapsuleTarget] = [:]
+        var seen: Set<URL> = []
+        var paths: [URL] = []
+        var complete = finding.measurementIsComplete
+        for path in finding.items.flatMap(\.paths) where seen.insert(path).inserted {
+            guard !progress.isCancelled else { return nil }
+            switch CapsulePathProbe.read(path, guardPaths: guardPaths) {
+            case .present(let target):
+                targets[path] = target
+                paths.append(path)
+            case .missing: break
+            case .unavailable: complete = false
+            }
+        }
+        let candidates = finding.items.filter { item in
+            let present = item.paths.compactMap { targets[$0] }
+            guard let first = present.first else { return false }
+            // Le panier conserve l'opération groupée d'origine. Si un chemin
+            // manque, le gain de l'ensemble reste indéterminé.
+            guard present.count == item.paths.count else {
+                complete = false
+                return false
+            }
+            return item.fingerprint?.fileID.map { $0 == first.stamp.inode } ?? true
+        }
+        let wanted = Set(candidates.flatMap(\.paths))
+        paths = paths.filter(wanted.contains)
+        var options = ScanOptions.measuring
+        options.threads = 2
+        options.bindMeasurementsToRoots = true
+        options.readOnlyPreferencesDirectory = PreferenceDirectory.url(in: home).path
+        options.deviceBackupsDirectory = DeviceBackupPath.root(in: home).path
+        var sizes: [URL: Sizes] = [:]
+        let requests = paths.compactMap { path in targets[path].map { (path, $0) } }
+        if !requests.isEmpty {
+            var requested: Set<URL> = []
+            let resolvedPaths = requests.map { $0.1.path }.filter { requested.insert($0).inserted }
+            let measured = await scan(resolvedPaths, options, progress)
+            guard !progress.isCancelled else { return nil }
+            guard measured.freeableEstimatesAreValid else {
+                var unavailable = finding
+                unavailable.items = []
+                unavailable.measurementIsComplete = false
+                return unavailable
+            }
+            if measured.roots.count != resolvedPaths.count || !measured.skippedVolumes.isEmpty { complete = false }
+            let roots = Dictionary(uniqueKeysWithValues: zip(resolvedPaths, measured.roots))
+            for (path, target) in requests {
+                guard !progress.isCancelled else { return nil }
+                guard let node = roots[target.path], node.status == .ok, node.inaccessibleCount == 0,
+                      node.fileID == target.stamp.inode, node.verifiedMeasurementDevice == target.stamp.device,
+                      case .present(let after) = CapsulePathProbe.read(path, guardPaths: guardPaths), after == target
+                else {
+                    complete = false
+                    continue
+                }
+                sizes[path] = node.total
+            }
+        }
+        guard !progress.isCancelled else { return nil }
+        var used: Set<URL> = []
+        var current = finding
+        current.measurementIsComplete = complete
+        current.items = candidates.compactMap { item in
+            guard item.paths.allSatisfy({ sizes[$0] != nil }) else { return nil }
+            var item = item
+            item.sizes = item.paths.compactMap { path in
+                guard let target = targets[path], used.insert(target.path).inserted else { return nil }
+                return sizes[path]
+            }.total()
+            return item.sizes.freeable > 0 ? item : nil
+        }
+        return current
     }
 
     // MARK: - La revue

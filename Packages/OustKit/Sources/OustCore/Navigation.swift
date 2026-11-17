@@ -12,6 +12,7 @@ public enum SettingsTab: String, Sendable, Hashable, Codable, CaseIterable, Iden
     case analysis
     /// Ce qu'Oust! fait seul : alerte disque bas, règles planifiées.
     case watch
+    case battery
     /// Accès complet au disque, démon privilégié.
     case advanced
 
@@ -23,6 +24,7 @@ public enum SettingsTab: String, Sendable, Hashable, Codable, CaseIterable, Iden
         case .general: "gearshape"
         case .analysis: "magnifyingglass"
         case .watch: "bell.badge"
+        case .battery: "battery.75percent"
         case .advanced: "gearshape.2"
         }
     }

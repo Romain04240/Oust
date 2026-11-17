@@ -63,6 +63,8 @@ public final class TreeNode: @unchecked Sendable, Identifiable {
     public let name: String
     public internal(set) weak var parent: TreeNode?
     public let fileID: UInt64
+    /// Périphérique relevé avec l'inode des racines dont la mesure doit être liée à la cible.
+    package var verifiedMeasurementDevice: Int32?
     /// Renseigné quand le dossier est une racine de mesure fraîche.
     var measurementDevice: Int32?
     public internal(set) var status: NodeStatus = .ok

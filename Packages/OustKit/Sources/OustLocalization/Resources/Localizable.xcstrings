@@ -10952,6 +10952,70 @@
         }
       }
     },
+    "maintenance.capsule.partial": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "confirmed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "confirmés"
+          }
+        }
+      }
+    },
+    "maintenance.capsule.unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "reclaimable size unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "gain indisponible"
+          }
+        }
+      }
+    },
+    "maintenance.capsule.announcement_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oust! maintenance. Reclaimable size unavailable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entretien d’Oust! Gain indisponible."
+          }
+        }
+      }
+    },
+    "maintenance.capsule.announcement_partial": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oust! maintenance. %@ confirmed, some items could not be measured."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entretien d’Oust! %@ confirmés, certains éléments restent sans mesure."
+          }
+        }
+      }
+    },
     "maintenance.capsule.clean": {
       "extractionState": "manual",
       "localizations": {
@@ -11428,6 +11492,850 @@
         }
       }
     },
+    "menubar.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oust menu"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Menu Oust"
+          }
+        }
+      }
+    },
+    "menubar.commands": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oust commands"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Commandes d’Oust"
+          }
+        }
+      }
+    },
+    "menubar.battery_input_caption": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measured input"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entrée mesurée"
+          }
+        }
+      }
+    },
+    "menubar.battery_device_level_unknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Level unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niveau indisponible"
+          }
+        }
+      }
+    },
+    "settings.tab.battery": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batterie"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "settings.battery.devices_empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Bluetooth devices found."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun appareil Bluetooth détecté."
+          }
+        }
+      }
+    },
+    "settings.battery.devices_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bluetooth devices unavailable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appareils Bluetooth indisponibles."
+          }
+        }
+      }
+    },
+    "settings.battery.offline": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disconnected"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déconnecté"
+          }
+        }
+      }
+    },
+    "settings.battery.move_up": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move up"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remonter"
+          }
+        }
+      }
+    },
+    "settings.battery.move_down": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move down"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descendre"
+          }
+        }
+      }
+    },
+    "settings.battery.alias": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom name"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nom personnalisé"
+          }
+        }
+      }
+    },
+    "settings.battery.device_alert": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low battery notification"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notification de batterie faible"
+          }
+        }
+      }
+    },
+    "watch.battery_device_notification": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery at %@%%."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batterie à %@ %%."
+          }
+        }
+      }
+    },
+    "menubar.storage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stockage"
+          }
+        }
+      }
+    },
+    "menubar.battery_percent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@%%"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ %%"
+          }
+        }
+      }
+    },
+    "menubar.battery_state.onBattery": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On battery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sur batterie"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "menubar.battery_state.charged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charged"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargée"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "menubar.battery_state.charging": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charging"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En charge"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "menubar.battery_state.onAC": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugged in, not charging"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sur secteur · Pas en charge"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "menubar.battery_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Internal battery unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batterie interne indisponible"
+          }
+        }
+      }
+    },
+    "menubar.battery_until_full": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About %@ min until fully charged"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Environ %@ min avant pleine charge"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "menubar.battery_remaining": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About %@ min remaining"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Environ %@ min restantes"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "menubar.battery_energy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Energy flow"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flux d’énergie"
+          }
+        }
+      }
+    },
+    "menubar.battery_energy_on_battery": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On battery power. Battery wattage unavailable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sur batterie. Puissance de la batterie indisponible."
+          }
+        }
+      }
+    },
+    "menubar.battery_energy_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power readings unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mesures d’alimentation indisponibles"
+          }
+        }
+      }
+    },
+    "menubar.battery_charger": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charger · %@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargeur · %@ W"
+          }
+        }
+      }
+    },
+    "menubar.battery_charger_unknown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Adapter rating unavailable" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Puissance nominale inconnue" } }
+      }
+    },
+    "menubar.battery_input_unknown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Input power unavailable" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Puissance d’entrée indisponible" } }
+      }
+    },
+    "menubar.battery_input_estimate": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Estimated input (voltage × current) · %@ W" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Entrée estimée (tension × intensité) · %@ W" } }
+      }
+    },
+    "menubar.battery_net_charge_estimate": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Into the battery (estimated) · %@ W" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Vers la batterie (estimation) · %@ W" } }
+      }
+    },
+    "menubar.battery_net_discharge_estimate": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "From the battery (estimated) · %@ W" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Fourni par la batterie (estimation) · %@ W" } }
+      }
+    },
+    "menubar.battery_temperature_unavailable": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Battery temperature unavailable" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Température de la batterie indisponible" } }
+      }
+    },
+    "menubar.mac_thermal_state": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Mac thermal state · %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "État thermique du Mac · %@" } }
+      }
+    },
+    "menubar.mac_thermal_nominal": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Normal" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Normal" } }
+      }
+    },
+    "menubar.mac_thermal_fair": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Slightly elevated" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Légèrement élevé" } }
+      }
+    },
+    "menubar.mac_thermal_serious": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "High" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Élevé" } }
+      }
+    },
+    "menubar.mac_thermal_critical": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Critical" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Critique" } }
+      }
+    },
+    "menubar.mac_thermal_unknown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unknown" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Inconnu" } }
+      }
+    },
+    "menubar.battery_charger_details_closed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Details hidden" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Détails masqués" } }
+      }
+    },
+    "menubar.battery_charger_details_open": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Details visible" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Détails affichés" } }
+      }
+    },
+    "menubar.battery_watts": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%@ W" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ W" } }
+      }
+    },
+    "menubar.battery_charger_nominal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adapter rating reported by macOS · %@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puissance nominale signalée par macOS · %@ W"
+          }
+        }
+      }
+    },
+    "menubar.battery_input_power": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measured input · %@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entrée mesurée · %@ W"
+          }
+        }
+      }
+    },
+    "menubar.battery_mac_power": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac consumption · %@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consommation du Mac · %@ W"
+          }
+        }
+      }
+    },
+    "menubar.battery_health": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery health"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "État de la batterie"
+          }
+        }
+      }
+    },
+    "menubar.battery_temperature": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery temperature · %@ °C"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Température de la batterie · %@ °C"
+          }
+        }
+      }
+    },
+    "menubar.battery_devices": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected devices"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appareils connectés"
+          }
+        }
+      }
+    },
+    "menubar.battery_devices_unavailable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No device battery level available"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun niveau de batterie disponible"
+          }
+        }
+      }
+    },
+    "menubar.battery_system_settings": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery settings…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Réglages de la batterie…"
+          }
+        }
+      }
+    },
+    "settings.general.icon_drive": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Use a drive icon for Storage" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Utiliser une icône de disque pour Stockage" } }
+      }
+    },
+    "settings.general.menubar_contents": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Menu bar indicators"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Indicateurs de la barre des menus"
+          }
+        }
+      }
+    },
+    "settings.general.menubar_storage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stockage"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "settings.general.menubar_battery": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batterie"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "settings.general.menubar_both": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage and Battery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stockage et Batterie"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "settings.watch.battery_section": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery alerts"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alertes de batterie"
+          }
+        }
+      }
+    },
+    "settings.watch.battery_low": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low battery alert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alerte de batterie faible"
+          }
+        }
+      }
+    },
+    "settings.watch.battery_charged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charge threshold alert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alerte de seuil de charge"
+          }
+        }
+      }
+    },
+    "settings.watch.battery_low_level": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warn at %@%% when discharging"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signaler à %@ %% en décharge"
+          }
+        }
+      }
+    },
+    "settings.watch.battery_charged_level": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warn at %@%% when charging"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signaler à %@ %% en charge"
+          }
+        }
+      }
+    },
+    "watch.battery_capsule.low": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low battery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batterie faible"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "watch.battery_capsule.charged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charge threshold reached"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seuil de charge atteint"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "watch.battery_capsule.hint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open battery information"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir les informations de batterie"
+          }
+        }
+      }
+    },
     "menubar.battery": {
       "localizations": {
         "en": {
@@ -11516,13 +12424,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Clean up…"
+            "value": "Empty the Bin…"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Faire le vide…"
+            "value": "Vider la Corbeille…"
           }
         }
       }
