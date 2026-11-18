@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OustCore
 import OustSafety
@@ -42,7 +43,10 @@ enum ArtifactTable {
     /// La commande qui rend `node_modules`, d'après le fichier de verrouillage.
     static let nodeInstall: @Sendable (URL) -> RebuildCost = { project in
         let fileManager = FileManager.default
-        let has = { (name: String) in fileManager.fileExists(atPath: project.appendingPathComponent(name).path) }
+        return nodeRebuild { name in fileManager.fileExists(atPath: project.appendingPathComponent(name).path) }
+    }
+
+    static func nodeRebuild(has: (String) -> Bool) -> RebuildCost {
         if has("pnpm-lock.yaml") { return .command("pnpm install", minutes: 2) }
         if has("yarn.lock") { return .command("yarn install", minutes: 2) }
         if has("bun.lockb") || has("bun.lock") { return .command("bun install", minutes: 1) }
@@ -154,15 +158,20 @@ struct ProjectArtifactsFinder {
         // elle sait déjà quels dossiers et quels marqueurs s'y trouvent, sans
         // relire des dizaines de milliers de dossiers (3,5 s ramenées à 0,07 s
         // sur le Mac de Romain, le 18/10/2026).
-        let tree = await context.tree?()
+        let volumeBound = context.volumeAnchor != nil
+        let tree = volumeBound ? nil : await context.tree?()
 
         for root in context.projectRoots {
             var queue: [(url: URL, depth: Int, node: TreeNode?)] = [(root, 0, tree?.descendant(atPath: root.path))]
             var head = 0
             while head < queue.count {
+                guard !Task.isCancelled else { return [] }
                 let (directory, depth, node) = queue[head]
                 head += 1
-                guard let listing = node.map(Self.listing(of:)) ?? Self.listing(of: directory) else { continue }
+                let directoryListing = volumeBound
+                    ? boundListing(of: directory)
+                    : node.map(Self.listing(of:)) ?? Self.listing(of: directory)
+                guard let listing = directoryListing else { continue }
                 let names = listing.names
                 let extensions = listing.extensions
 
@@ -176,7 +185,12 @@ struct ProjectArtifactsFinder {
                     if let rule = ArtifactTable.rules.first(where: { rule in
                         rule.folder == name && rule.markers.contains { names.contains($0) || extensions.contains($0) }
                     }) {
-                        let candidate = makeCandidate(entry, project: directory, rule: rule)
+                        // Sans preuve liée au volume, un nom comme « build » peut désigner des sources.
+                        guard !volumeBound || !rule.ambiguous else { continue }
+                        let rebuild = volumeBound && rule.ruleID == "artifact.node_modules"
+                            ? ArtifactTable.nodeRebuild(has: names.contains)
+                            : rule.rebuild(directory)
+                        let candidate = makeCandidate(entry, project: directory, rule: rule, rebuild: rebuild)
                         if rule.ambiguous {
                             ambiguous.append((candidate, directory))
                         } else {
@@ -187,6 +201,9 @@ struct ProjectArtifactsFinder {
                     if name == "node_modules" { continue }
                     if ArtifactTable.neverDescend.contains(name) { continue }
                     if name.hasPrefix(".") { continue }
+                    if volumeBound && (VolumePackages.isPackage(name) || VolumeProtection.isTimeMachineName(name)) {
+                        continue
+                    }
                     if ["app", "xcodeproj", "xcworkspace", "photoslibrary", "bundle", "framework", "sparsebundle",
                         "backupbundle", "fcpbundle", "utm", "pvm", "vmwarevm"]
                         .contains((name as NSString).pathExtension) {
@@ -264,7 +281,21 @@ struct ProjectArtifactsFinder {
         return Listing(names: Set(entries.map(\.lastPathComponent)), subdirectories: subdirectories)
     }
 
-    private func makeCandidate(_ url: URL, project: URL, rule: ArtifactRule) -> Candidate {
+    private func boundListing(of directory: URL) -> Listing? {
+        guard let entries = context.volumeEntries(in: directory), entries.count < 20_000 else { return nil }
+        var listing = Listing(names: [], subdirectories: [])
+        for (entry, facts) in entries {
+            let name = entry.lastPathComponent
+            if facts.isRegularFile { listing.names.insert(name) }
+            if facts.mode & S_IFMT == S_IFDIR {
+                listing.subdirectories.append(name)
+                if ["xcodeproj", "xcworkspace"].contains(entry.pathExtension) { listing.names.insert(name) }
+            }
+        }
+        return listing
+    }
+
+    private func makeCandidate(_ url: URL, project: URL, rule: ArtifactRule, rebuild: RebuildCost) -> Candidate {
         var item = CleanupItem(
             title: url.lastPathComponent,
             detail: url.deletingLastPathComponent().abbreviated(home: context.home),
@@ -274,7 +305,7 @@ struct ProjectArtifactsFinder {
             ruleID: rule.ruleID,
             safety: rule.safety,
             method: .removeNow,
-            rebuild: rule.rebuild(project),
+            rebuild: rebuild,
             activityScope: context.topLevelProject(containing: project.path) ?? project
         )
         // Un agent, une compilation ou un éditeur dans le projet : on n'y touche pas.
@@ -288,7 +319,7 @@ struct ProjectArtifactsFinder {
     private func projectRoot(of directory: URL, under root: URL) -> URL {
         let relative = directory.path.dropFirst(root.path.count).split(separator: "/")
         guard let first = relative.first else { return directory }
-        return root.appendingPathComponent(String(first))
+        return root.appendingPathComponent(String(first), isDirectory: true)
     }
 
     private func ownerName(_ project: URL) -> String {

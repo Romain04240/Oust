@@ -10,6 +10,12 @@ struct BatterySettingsTab: View {
 
     var body: some View {
         SettingsForm {
+            Picker(selection: $watch.settings.batteryTemperatureUnit) {
+                Text("settings.battery.celsius", bundle: .oust).tag(WatchSettings.TemperatureUnit.celsius)
+                Text("settings.battery.fahrenheit", bundle: .oust).tag(WatchSettings.TemperatureUnit.fahrenheit)
+            } label: {
+                Text("menubar.battery_temperature_short", bundle: .oust)
+            }
             Section {
                 Toggle(isOn: $watch.settings.batteryAlerts.warnsLow) {
                     Text("settings.watch.battery_low", bundle: .oust)

@@ -8,6 +8,7 @@ struct DuplicateExclusionsView: View {
     let model: AppModel
     @State private var invalidFolder = false
     @State private var reset = false
+    @State private var invalidPaths: Set<URL> = []
 
     var body: some View {
         let exclusions = model.preferences.duplicateExclusions
@@ -21,7 +22,7 @@ struct DuplicateExclusionsView: View {
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(verbatim: (folder.url.path as NSString).abbreviatingWithTildeInPath)
-                                    if !folder.isCurrent {
+                                    if invalidPaths.contains(folder.url) {
                                         Text("duplicates.exclusions_check", bundle: .oust)
                                             .font(Typography.caption)
                                     }
@@ -33,6 +34,12 @@ struct DuplicateExclusionsView: View {
                                     Image(systemName: "minus.circle")
                                 }
                                 .accessibilityLabel(Text("duplicates.exclusions_remove", bundle: .oust))
+                            }
+                            .task(id: folder) {
+                                let current = await model.checkDuplicateExclusion(folder)
+                                guard !Task.isCancelled else { return }
+                                if current == true { invalidPaths.remove(folder.url) }
+                                else { invalidPaths.insert(folder.url) }
                             }
                         }
                         Button(action: chooseFolder) {
@@ -52,7 +59,10 @@ struct DuplicateExclusionsView: View {
                 Text("duplicates.exclusions", bundle: .oust)
                     .font(Typography.headline)
             }
-            if model.duplicateExclusionsWaitingForQuickLook {
+            if model.duplicateExclusionsTimedOut {
+                Text("duplicates.exclusions_timeout", bundle: .oust)
+                    .font(Typography.caption)
+            } else if model.duplicateExclusionsWaitingForQuickLook {
                 Text("duplicates.exclusions_wait_quicklook", bundle: .oust)
                     .font(Typography.caption)
             } else if !model.canUseDuplicateQuickLook {
@@ -81,6 +91,6 @@ struct DuplicateExclusionsView: View {
         panel.canChooseFiles = false
         panel.resolvesAliases = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { invalidFolder = !(await model.excludeDuplicateFolder(url)) }
+        Task { invalidFolder = !(await model.excludeDuplicateFolder(url)) && !model.duplicateExclusionsTimedOut }
     }
 }

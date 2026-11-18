@@ -89,7 +89,14 @@ public final class WatchModel {
     @ObservationIgnored private var sleepObserver: (any NSObjectProtocol)?
     public private(set) var batteryDevices: [BatteryDevice]?
     public private(set) var batteryDevicesReadAt: ContinuousClock.Instant?
+    /// Historique d’affichage. Les alertes utilisent exclusivement le relevé courant.
+    public private(set) var lastKnownBatteryDevices: [BatteryDevice] = []
+    public var orderedLastKnownBatteryDevices: [BatteryDevice] {
+        BatteryDevicePreference.ordered(lastKnownBatteryDevices, using: batteryDevicePreferences)
+    }
+
     public private(set) var batteryDevicePreferences: [BatteryDevicePreference] = []
+    @ObservationIgnored private var bootPublishedAt: ContinuousClock.Instant?
     @ObservationIgnored private var deviceAlerts = DeviceBatteryAlertTracker()
     @ObservationIgnored private var deviceRead: Task<Void, Never>?
     @ObservationIgnored private var deviceReadCycle = 0
@@ -262,6 +269,7 @@ public final class WatchModel {
         guard !Task.isCancelled, cycle == deviceReadCycle, !batteryAsleep else { return }
         batteryDevices = fresh
         batteryDevicesReadAt = fresh == nil ? nil : startedAt
+        if let fresh { lastKnownBatteryDevices = fresh }
         if !deviceAlerts.observe(fresh ?? [], preferences: batteryDevicePreferences).isEmpty {
             scheduleDeviceDelivery()
         }
@@ -352,18 +360,32 @@ public final class WatchModel {
     }
 
     /// Le même échantillon alimente la fenêtre et la barre des menus.
-    func updateBoot(_ fresh: VolumeDescriptor?) {
+    @discardableResult
+    func updateBoot(_ fresh: VolumeDescriptor?, measuredAt: ContinuousClock.Instant = .now) -> Bool {
+        if let bootPublishedAt, measuredAt <= bootPublishedAt { return false }
+        bootPublishedAt = measuredAt
         if fresh != boot { boot = fresh }
+        return true
     }
 
     /// Relit le disque tout de suite (le panneau de la barre de menus s'ouvre).
-    public func refreshDisk() async { await checkDisk() }
+    public func refreshDisk() async { await refreshDisk(read: VolumeService.bootVolume) }
+
+    func refreshDisk(read: @escaping @Sendable () async -> VolumeDescriptor?) async {
+        let sample = await Task.detached(priority: .utility) {
+            let measuredAt = ContinuousClock.now
+            return (await read(), measuredAt)
+        }.value
+        guard !Task.isCancelled, let fresh = sample.0 else { return }
+        updateBoot(fresh, measuredAt: sample.1)
+    }
 
     /// Le disque de démarrage et les disques branchés (`WatchedVolumes`), chacun
     /// avec son alerte : une fois par passage sous le seuil, pour chacun.
     func checkDisk() async {
+        let measuredAt = ContinuousClock.now
         let fresh = VolumeService.bootVolume()
-        updateBoot(fresh)
+        updateBoot(fresh, measuredAt: measuredAt)
         guard settings.alertsLowDisk else { return }
         let mounts = await timeMachineMounts()
         // Hors du fil principal : un disque qui tarde à répondre ne fige rien.
@@ -427,10 +449,14 @@ public final class WatchModel {
     /// La pastille telle qu'elle apparaîtrait maintenant (Réglages, « Essayer »),
     /// avec les chiffres du disque relus à l'instant. Ne touche ni au seuil ni à
     /// l'état de l'alerte : un essai ne compte pas comme « déjà prévenu ».
-    public func showAlertPreview() {
-        guard let fresh = VolumeService.bootVolume() else { return }
-        updateBoot(fresh)
-        onLowDisk?(LowDiskAlert(volumeName: fresh.name, capacity: fresh.capacity, safeTotal: safeTotal))
+    public func showAlertPreview() { showAlertPreview(read: VolumeService.bootVolume) }
+
+    func showAlertPreview(read: () -> VolumeDescriptor?) {
+        let measuredAt = ContinuousClock.now
+        guard let fresh = read() else { return }
+        updateBoot(fresh, measuredAt: measuredAt)
+        let displayed = boot ?? fresh
+        onLowDisk?(LowDiskAlert(volumeName: displayed.name, capacity: displayed.capacity, safeTotal: safeTotal))
     }
 
     /// L'UUID du volume, qui survit à un renommage ; à défaut, son point de montage.

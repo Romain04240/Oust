@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OustCore
 import OustSafety
@@ -94,13 +95,16 @@ struct ProAppsFinder {
         _ = await context.tree?()
         // Sur un autre disque, seulement ce qu'on y range soi-même : catalogues
         // Lightroom et Capture One. Les caches fixes vivent dans le dossier personnel.
-        let roots = context.volume.map { [$0.root.path] } ?? [context.home.path, context.sharedFolder.path]
+        let volumeRoot = context.volumeAnchor?.url ?? context.volume?.root
+        let roots = volumeRoot.map { [$0.path] } ?? [context.home.path, context.sharedFolder.path]
         let open = roots.reduce(into: Set<String>()) { $0.formUnion(OpenFiles.paths(under: $1)) }
-        let candidates = (context.volume == nil ? fixedCaches() : []) + (await lightroomPreviews()) + (await captureOne())
+        let candidates = (volumeRoot == nil ? fixedCaches() : []) + (await lightroomPreviews()) + (await captureOne())
         return candidates.map { candidate in
             var candidate = candidate
             let scopes = candidate.item.activityScope.map { [$0] } ?? candidate.item.paths
-            if let owner = AppOwnership.runningOwner(ruleID: candidate.item.ruleID, paths: candidate.item.paths,
+            // Le verrou Lightroom a déjà été revérifié via la racine ouverte.
+            if context.volumeAnchor == nil,
+               let owner = AppOwnership.runningOwner(ruleID: candidate.item.ruleID, paths: candidate.item.paths,
                                                      running: context.runningApps) {
                 candidate.item.protect(.appRunning(name: owner))
             } else if open.contains(where: { file in scopes.contains { PathNormalizer.isWithin(file, $0.path) } }) {
@@ -168,22 +172,55 @@ struct ProAppsFinder {
     func lightroomPreviews() async -> [Candidate] {
         let suffix = " Previews.lrdata"
         let fileManager = FileManager.default
-        let folders = await context.findFolders(fallback: [context.path("Pictures")], depth: 2) { $0.hasSuffix(suffix) }
-        return folders.compactMap { folder in
+        let pictures = context.home.appendingPathComponent("Pictures", isDirectory: true)
+        let folders = await context.findFolders(fallback: [pictures], depth: 2) { $0.hasSuffix(suffix) }
+        return folders.compactMap { folder -> Candidate? in
             let name = String(folder.lastPathComponent.dropLast(suffix.count))
             let parent = folder.deletingLastPathComponent()
-            guard fileManager.fileExists(atPath: parent.appendingPathComponent(name + ".lrcat").path) else { return nil }
-            // « Catalogue Smart Previews.lrdata » à côté de « Catalogue.lrcat » : les aperçus dynamiques.
-            if name.hasSuffix(" Smart"),
-               fileManager.fileExists(atPath: parent.appendingPathComponent(String(name.dropLast(6)) + ".lrcat").path) {
-                return nil
+            let catalog = parent.appendingPathComponent(name + ".lrcat", isDirectory: false)
+            let smartCatalog = parent.appendingPathComponent(String(name.dropLast(6)) + ".lrcat", isDirectory: false)
+            let lock = parent.appendingPathComponent(name + ".lrcat.lock", isDirectory: false)
+            let lockProtection: ProtectionReason?
+            let boundProof: (@Sendable () -> Bool)?
+            let requiresSmartCatalogAbsence = name.hasSuffix(" Smart")
+            if let anchor = context.volumeAnchor {
+                guard let facts = VolumeDirectory.entry(catalog, in: anchor).facts,
+                      facts.isRegularFile, facts.linkCount == 1 else { return nil }
+                if requiresSmartCatalogAbsence {
+                    guard case .missing = VolumeDirectory.entry(smartCatalog, in: anchor) else { return nil }
+                }
+                switch VolumeDirectory.entry(lock, in: anchor) {
+                case .facts: lockProtection = .appRunning(name: "Lightroom Classic")
+                case .missing: lockProtection = nil
+                case .unknown: lockProtection = .unknownState
+                }
+                // Keep the first validated identity. A failed later lookup
+                // must invalidate the proof instead of removing its requirement.
+                if lockProtection == nil {
+                    boundProof = { @Sendable () -> Bool in
+                        guard case .missing = VolumeDirectory.entry(lock, in: anchor),
+                              let current = VolumeDirectory.entry(catalog, in: anchor).facts,
+                              current.device == facts.device, current.mode == facts.mode,
+                              current.isUnchanged(comparedTo: facts) else { return false }
+                        if requiresSmartCatalogAbsence {
+                            guard case .missing = VolumeDirectory.entry(smartCatalog, in: anchor) else { return false }
+                        }
+                        return true
+                    }
+                } else {
+                    boundProof = nil
+                }
+            } else {
+                guard fileManager.fileExists(atPath: catalog.path) else { return nil }
+                if requiresSmartCatalogAbsence, fileManager.fileExists(atPath: smartCatalog.path) { return nil }
+                lockProtection = fileManager.fileExists(atPath: lock.path) ? .appRunning(name: "Lightroom Classic") : nil
+                boundProof = nil
             }
             var previews = candidate(name, detail: parent, paths: [folder], owner: "Lightroom Classic",
                                      rule: "creative.lightroom.previews", safety: .rebuilds, method: .removeNow,
                                      rebuild: .automatic)
-            if fileManager.fileExists(atPath: parent.appendingPathComponent(name + ".lrcat.lock").path) {
-                previews.item.protect(.appRunning(name: "Lightroom Classic"))
-            }
+            if let lockProtection { previews.item.protect(lockProtection) }
+            previews.boundProof = boundProof
             return previews
         }
     }
@@ -196,16 +233,28 @@ struct ProAppsFinder {
     /// (support.captureone.com). Jamais `Settings…`, qui tient les retouches.
     func captureOne() async -> [Candidate] {
         let fileManager = FileManager.default
-        let folders = await context.findFolders(fallback: [context.path("Pictures")], depth: 4) {
+        let pictures = context.home.appendingPathComponent("Pictures", isDirectory: true)
+        let folders = await context.findFolders(fallback: [pictures], depth: 4) {
             $0 == "CaptureOne" || $0.lowercased().hasSuffix(".cocatalog")
         }
         return folders.compactMap { folder in
             let cache = folder.appendingPathComponent("Cache", isDirectory: true)
-            guard fileManager.isDirectory(cache), !cache.isSymbolicLink else { return nil }
             let isCatalog = folder.pathExtension.lowercased() == "cocatalog"
             // Un dossier « CaptureOne » sans réglages à côté n'est pas forcément le sien.
-            if !isCatalog, !fileManager.children(of: folder).contains(where: { $0.lastPathComponent.hasPrefix("Settings") }) {
-                return nil
+            if let anchor = context.volumeAnchor {
+                guard let facts = VolumeDirectory.entry(cache, in: anchor).facts,
+                      facts.mode & S_IFMT == S_IFDIR else { return nil }
+                if !isCatalog {
+                    let hasSettings = context.volumeEntries(in: folder)?.contains {
+                        $0.url.lastPathComponent.hasPrefix("Settings") && $0.facts.mode & S_IFMT == S_IFDIR
+                    }
+                    guard hasSettings == true else { return nil }
+                }
+            } else {
+                guard fileManager.isDirectory(cache), !cache.isSymbolicLink else { return nil }
+                if !isCatalog, !fileManager.children(of: folder).contains(where: {
+                    $0.lastPathComponent.hasPrefix("Settings")
+                }) { return nil }
             }
             let title = isCatalog ? folder.deletingPathExtension().lastPathComponent
                 : folder.deletingLastPathComponent().lastPathComponent

@@ -69,6 +69,48 @@ extension RuleEngine {
 struct VolumeDirectory {
     let url: URL
     let node: TreeNode?
+    var anchor: AnalysisRoot? = nil
+
+    enum Entry {
+        case facts(FileFacts), missing, unknown
+        var facts: FileFacts? {
+            if case .facts(let facts) = self { return facts }
+            return nil
+        }
+    }
+
+    static func entry(_ url: URL, in anchor: AnalysisRoot?) -> Entry {
+        guard let anchor else {
+            if let facts = FileFacts.of(url.path) { return .facts(facts) }
+            return errno == ENOENT ? .missing : .unknown
+        }
+        guard anchor.contains(url) else { return .unknown }
+        if url.path == anchor.url.path {
+            guard let fd = anchor.openDirectory(anchor.url) else { return .unknown }
+            defer { close(fd) }
+            return FileFacts.openFile(fd).map(Entry.facts) ?? .unknown
+        }
+        guard let parent = anchor.openDirectory(url.deletingLastPathComponent()) else { return .unknown }
+        defer { close(parent) }
+        return entry(url.lastPathComponent, in: parent, anchor: anchor)
+    }
+
+    static func entry(_ name: String, in parent: Int32, anchor: AnalysisRoot) -> Entry {
+        guard let facts = FileFacts.at(name, in: parent) else {
+            return errno == ENOENT ? .missing : .unknown
+        }
+        guard facts.device == anchor.identity.directory.device,
+              facts.mode & S_IFMT != S_IFLNK, !facts.isDataless else { return .unknown }
+        if facts.mode & S_IFMT == S_IFDIR {
+            let fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW_ANY | O_RESOLVE_BENEATH | O_CLOEXEC)
+            guard fd >= 0 else { return .unknown }
+            defer { close(fd) }
+            var info = stat()
+            guard fstat(fd, &info) == 0, anchor.matchesMount(of: fd, stat: info),
+                  UInt64(info.st_ino) == facts.inode, info.st_flags & FileFlag.dataless == 0 else { return .unknown }
+        }
+        return .facts(facts)
+    }
 
     /// Les sous-dossiers du volume, et les fichiers connus par leur nom. Un
     /// dossier que le parcours n'a pas ouvert (exclu, refusé) est nommé, pas
@@ -81,11 +123,10 @@ struct VolumeDirectory {
         }
         var directories: [String] = []
         var files: [String] = []
-        for name in Self.names(in: url.path) {
-            var info = stat()
-            guard lstat(url.appendingPathComponent(name).path, &info) == 0 else { continue }
-            switch info.st_mode & S_IFMT {
-            case S_IFDIR where info.st_dev == device: directories.append(name)
+        for name in Self.names(in: url, anchor: anchor) ?? [] {
+            guard let info = Self.entry(url.appendingPathComponent(name, isDirectory: false), in: anchor).facts else { continue }
+            switch info.mode & S_IFMT {
+            case S_IFDIR where info.device == device: directories.append(name)
             case S_IFDIR: continue
             default: files.append(name)
             }
@@ -95,21 +136,37 @@ struct VolumeDirectory {
 
     /// Le contenu d'un dossier par `readdir`. `FileManager` tait les fichiers
     /// AppleDouble (`._nom`) : ce sont justement ceux que l'on cherche.
-    static func names(in path: String) -> [String] {
-        guard let directory = opendir(path) else { return [] }
+    static func names(in url: URL, anchor: AnalysisRoot?) -> [String]? {
+        let opened: UnsafeMutablePointer<DIR>?
+        if let anchor {
+            guard let fd = anchor.openDirectory(url) else { return nil }
+            opened = fdopendir(fd)
+            if opened == nil { close(fd) }
+        } else {
+            opened = opendir(url.path)
+        }
+        guard let directory = opened else { return nil }
         defer { closedir(directory) }
+        return names(in: directory)
+    }
+
+    static func names(in directory: UnsafeMutablePointer<DIR>) -> [String]? {
         var names: [String] = []
-        while let entry = readdir(directory) {
+        while true {
+            guard !Task.isCancelled else { return nil }
+            errno = 0
+            guard let entry = readdir(directory) else { return errno == 0 ? names : nil }
+            StorageOperationContext.reportProgress()
             let name = withUnsafeBytes(of: entry.pointee.d_name) { raw in
-                String(decoding: raw.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
+                String(bytes: raw.prefix(Int(entry.pointee.d_namlen)), encoding: .utf8)
             }
+            guard let name else { return nil }
             if name != "." && name != ".." { names.append(name) }
         }
-        return names
     }
 
     func child(_ name: String) -> VolumeDirectory {
-        VolumeDirectory(url: url.appendingPathComponent(name, isDirectory: true), node: node?.child(named: name))
+        VolumeDirectory(url: url.appendingPathComponent(name, isDirectory: true), node: node?.child(named: name), anchor: anchor)
     }
 }
 
@@ -135,23 +192,25 @@ extension RuleContext {
     /// descendre dans un dossier ; `visit` reçoit chaque dossier parcouru.
     func walkVolume(_ volume: VolumeScope, enter: (String, URL) -> Bool,
                     visit: (VolumeDirectory, _ directories: [String], _ files: [String]) -> Void) async {
-        var info = stat()
-        guard lstat(volume.root.path, &info) == 0 else { return }
-        let device = info.st_dev
+        guard !Task.isCancelled,
+              let info = VolumeDirectory.entry(volume.root, in: volumeAnchor).facts else { return }
+        let device = info.device
         let tree = await self.tree?()
         let rootNode = tree?.descendant(atPath: volume.root.path)
-        var queue = [VolumeDirectory(url: volume.root, node: rootNode)]
+        var queue = [VolumeDirectory(url: volume.root, node: rootNode, anchor: volumeAnchor)]
         var head = 0
-        while head < queue.count {
+        while head < queue.count, !Task.isCancelled {
             let directory = queue[head]
             head += 1
             let (directories, files) = directory.listing(device: device)
+            guard !Task.isCancelled else { return }
             visit(directory, directories, files)
             for name in directories {
+                guard !Task.isCancelled else { return }
                 if Self.neverOpened.contains(name) || VolumeProtection.serviceFolders.contains(name) { continue }
                 if VolumeProtection.isTimeMachineName(name) || VolumeProtection.isPhotoLibrary(name) { continue }
                 let child = directory.child(name)
-                if VolumeProtection.isTimeMachineSparseBundle(child.url) { continue }
+                if isPossibleTimeMachineBundle(child.url) { continue }
                 if enter(name, child.url) { queue.append(child) }
             }
         }
@@ -159,6 +218,11 @@ extension RuleContext {
 
     /// Jamais ouverts par les chercheurs d'un disque.
     static let neverOpened: Set<String> = [VolumeProtection.volumeTrashFolder, ".oust-transit", ".Trash"]
+
+    func isPossibleTimeMachineBundle(_ url: URL) -> Bool {
+        guard let volumeAnchor else { return VolumeProtection.isTimeMachineSparseBundle(url) }
+        return VolumeProtection.timeMachineSparseBundle(url, in: volumeAnchor) != false
+    }
 }
 
 // MARK: - Corbeille du disque
@@ -175,20 +239,20 @@ struct VolumeTrashFinder {
     func find() async -> [Candidate] {
         guard let volume = context.volume else { return [] }
         let trash = VolumeProtection.userTrash(on: volume.root, userID: volume.userID)
-        var info = stat()
-        guard lstat(trash.path, &info) == 0 else { return [] }
+        guard VolumeDirectory.entry(trash, in: context.volumeAnchor).facts != nil else { return [] }
         let id = "trash|\(trash.path)"
         // Par `readdir` : sur un disque exFAT, la corbeille garde aussi le `._`
         // de chaque fichier jeté, que `FileManager` tairait.
-        guard access(trash.path, R_OK | X_OK) == 0 else {
+        guard let names = VolumeDirectory.names(in: trash, anchor: context.volumeAnchor) else {
             var item = CleanupItem(id: id, title: volume.name, detail: trash.path, paths: [trash], category: .trash,
                                    owner: "Finder", ruleID: "trash.volume", safety: .review, method: .removeNow,
                                    rebuild: .irreversible)
             item.protect(.needsFullDiskAccess)
             return [Candidate(item: item, needsMeasure: false)]
         }
-        let entries = VolumeDirectory.names(in: trash.path).filter { $0 != ".DS_Store" }.sorted()
-            .map { trash.appendingPathComponent($0) }
+        let entries = names.filter { $0 != ".DS_Store" }.sorted()
+            .map { trash.appendingPathComponent($0, isDirectory: false) }
+            .filter { VolumeDirectory.entry($0, in: context.volumeAnchor).facts != nil }
         guard !entries.isEmpty else { return [] }
         return [Candidate(item: CleanupItem(
             id: id, title: volume.name, detail: "×\(entries.count)", paths: entries, category: .trash,
@@ -211,16 +275,14 @@ struct VolumeInstallersFinder {
     func find() async -> [Candidate] {
         guard let volume = context.volume else { return [] }
         var candidates: [Candidate] = []
-        let keys: Set<URLResourceKey> = [.contentModificationDateKey]
         await context.walkVolume(volume, enter: { name, _ in
             !VolumePackages.isPackage(name) && !name.hasPrefix(".")
         }, visit: { directory, _, files in
             for name in files where UserContentFinder.installerExtensions.contains((name as NSString).pathExtension.lowercased()) {
                 let url = directory.url.appendingPathComponent(name, isDirectory: false)
-                var info = stat()
-                guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
-                      Int64(info.st_blocks) * 512 >= Self.minimumSize else { continue }
-                let modified = (try? url.resourceValues(forKeys: keys))?.contentModificationDate
+                guard let info = VolumeDirectory.entry(url, in: context.volumeAnchor).facts,
+                      info.isRegularFile, info.allocated >= Self.minimumSize else { continue }
+                let modified = info.modificationDate
                 candidates.append(Candidate(item: CleanupItem(
                     title: name, detail: directory.url.path, paths: [url], category: .systemDownloads,
                     owner: volume.name, ruleID: "volume.installer", safety: .review, method: .trash,
@@ -271,11 +333,10 @@ struct VolumeTracesFinder {
         var latest: Date?
 
         func size(of url: URL) -> Int64? {
-            var info = stat()
-            guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
-            let modified = Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec))
+            guard let info = VolumeDirectory.entry(url, in: context.volumeAnchor).facts, info.isRegularFile else { return nil }
+            let modified = info.modificationDate
             if modified > (latest ?? .distantPast) { latest = modified }
-            return Int64(info.st_blocks) * 512
+            return info.allocated
         }
 
         await context.walkVolume(volume, enter: { name, _ in
@@ -303,9 +364,14 @@ struct VolumeTracesFinder {
                     storeSizes += Sizes(private: bytes)
                     continue
                 }
-                var info = stat()
-                let exists = present.contains(companion)
-                    || lstat(directory.url.appendingPathComponent(companion).path, &info) == 0
+                let companionURL = directory.url.appendingPathComponent(companion, isDirectory: false)
+                let companionEntry = VolumeDirectory.entry(companionURL, in: context.volumeAnchor)
+                let exists: Bool
+                switch companionEntry {
+                case .facts: exists = true
+                case .missing: exists = context.volumeAnchor == nil && present.contains(companion)
+                case .unknown: continue
+                }
                 if exists {
                     let group = topLevelFolder(of: directory.url, in: volume) ?? volume.name
                     described[group, default: ([], .zero)].paths.append(url)
@@ -370,13 +436,12 @@ struct VolumeKeptFinder {
     func find() async -> [Candidate] {
         guard let volume = context.volume else { return [] }
         var candidates: [Candidate] = []
-        var info = stat()
-        guard lstat(volume.root.path, &info) == 0 else { return [] }
-        let device = info.st_dev
+        guard let info = VolumeDirectory.entry(volume.root, in: context.volumeAnchor).facts else { return [] }
+        let device = info.device
         let tree = await context.tree?()
-        var queue = [VolumeDirectory(url: volume.root, node: tree?.descendant(atPath: volume.root.path))]
+        var queue = [VolumeDirectory(url: volume.root, node: tree?.descendant(atPath: volume.root.path), anchor: context.volumeAnchor)]
         var head = 0
-        while head < queue.count {
+        while head < queue.count, !Task.isCancelled {
             let directory = queue[head]
             head += 1
             let (directories, files) = directory.listing(device: device)
@@ -405,7 +470,7 @@ struct VolumeKeptFinder {
     private func kept(name: String, url: URL, volume: VolumeScope, isDirectory: Bool) -> Candidate? {
         // Le `._` d'une sauvegarde ou d'une photothèque n'en est pas une.
         if name.hasPrefix(VolumeTraces.appleDoublePrefix) { return nil }
-        if VolumeProtection.isTimeMachineName(name) || (isDirectory && VolumeProtection.isTimeMachineSparseBundle(url)) {
+        if VolumeProtection.isTimeMachineName(name) || (isDirectory && context.isPossibleTimeMachineBundle(url)) {
             var item = CleanupItem(title: name, detail: url.deletingLastPathComponent().path, paths: [url],
                                    category: .protectedOnDisk, owner: "Time Machine", ruleID: "volume.time_machine",
                                    safety: .protected, method: .manual, rebuild: .irreversible)

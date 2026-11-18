@@ -16,6 +16,11 @@ public struct BatteryDiagnostics: Sendable, Equatable {
     public let inputPower: InputPower?
     public let macWatts: Double?
     public let batteryWatts: Double?
+    public let batteryVoltage: Double?
+    public let batteryMilliamps: Int?
+    public let remainingMilliampHours: Int?
+    public let fullMilliampHours: Int?
+    public let designMilliampHours: Int?
 
     public static func read() async -> Self? {
         await checkStorageIO {
@@ -41,7 +46,7 @@ public struct BatteryDiagnostics: Sendable, Equatable {
         let temperaturePack = pack?["Temperature"] == nil ? legacyPack : pack
         let verifiedBattery = (state == .onBattery && plugged == false) || onAC ? battery : nil
         return parse(adapter: adapter, pack: temperaturePack, telemetry: telemetry,
-                     battery: verifiedBattery, state: state)
+                     battery: verifiedBattery, state: state, capacityPack: pack)
     }
 
     private static var supportsLegacyTemperature: Bool {
@@ -53,7 +58,8 @@ public struct BatteryDiagnostics: Sendable, Equatable {
     }
 
     static func parse(adapter: [String: Any]?, pack: [String: Any]?, telemetry: [String: Any]?,
-                      battery: [String: Any]? = nil, state: BatteryReading.State? = nil) -> Self? {
+                      battery: [String: Any]? = nil, state: BatteryReading.State? = nil,
+                      capacityPack: [String: Any]? = nil) -> Self? {
         let nominal = adapter?[kIOPSPowerAdapterWattsKey] as? Int
         let nominalWatts = nominal.flatMap { (1...300).contains($0) ? $0 : nil }
         // Ce champ du pack a été comparé à l'affichage en degrés sur macOS 27.
@@ -78,21 +84,57 @@ public struct BatteryDiagnostics: Sendable, Equatable {
                 inputPower = .estimated(expected / 1_000)
             }
         }
-        let batteryWatts = batteryPower(battery, state: state)
-        guard temperature != nil || nominalWatts != nil || inputPower != nil || batteryWatts != nil else { return nil }
+        let voltage = integer(battery?["Voltage"]).flatMap { (1_000...30_000).contains($0) ? Double($0) / 1_000 : nil }
+        let current = signedCurrent(battery?["Amperage"], state: state)
+        let batteryWatts = voltage.flatMap { voltage in
+            current.flatMap { $0 == 0 ? nil : voltage * Double(abs($0)) / 1_000 }
+        }
+        // AppleSmartBattery publie aussi ces clés brutes sur certains Mac.
+        // Le couple restant/pleine charge doit provenir du même relevé.
+        let packCharge = chargeCapacity(in: capacityPack)
+        let legacyCharge = chargeCapacity(in: battery)
+        let charge = (packCharge.remaining != nil || legacyCharge.remaining == nil && packCharge.full != nil)
+            ? packCharge : legacyCharge
+        let (remaining, full) = charge
+        let design = capacity("DesignCapacity", in: capacityPack) ?? capacity("DesignCapacity", in: battery)
+            ?? capacity("DesignCapacity", in: battery?["BatteryData"] as? [String: Any])
+        guard temperature != nil || nominalWatts != nil || inputPower != nil || voltage != nil
+                || current != nil || full != nil || design != nil else { return nil }
         return Self(temperature: temperature, source: state, nominalWatts: nominalWatts, inputPower: inputPower,
-                    macWatts: macWatts, batteryWatts: batteryWatts)
+                    macWatts: macWatts, batteryWatts: batteryWatts, batteryVoltage: voltage,
+                    batteryMilliamps: current, remainingMilliampHours: remaining,
+                    fullMilliampHours: full, designMilliampHours: design)
     }
 
-    /// IOPMPowerSource publie la tension en mV et le courant signé en mA.
-    /// Leur produit estime seulement la puissance au niveau de la batterie.
-    private static func batteryPower(_ battery: [String: Any]?, state: BatteryReading.State?) -> Double? {
-        guard let voltage = battery?["Voltage"] as? Int, (1_000...30_000).contains(voltage),
-              let raw = battery?["Amperage"] as? NSNumber, CFGetTypeID(raw) != CFBooleanGetTypeID(),
-              let current = Int32(raw.stringValue) ?? UInt32(raw.stringValue).map(Int32.init(bitPattern:)),
-              (-30_000...30_000).contains(current),
-              (state == .onBattery && current < 0 || state == .charging && current > 0) else { return nil }
-        return Double(voltage) * Double(abs(current)) / 1_000_000
+    private static func integer(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return Int(number.stringValue)
+    }
+
+    private static func chargeCapacity(in source: [String: Any]?) -> (remaining: Int?, full: Int?) {
+        let full = capacity("AppleRawMaxCapacity", in: source)
+        let remaining = integer(source?["AppleRawCurrentCapacity"]).flatMap { value in
+            full.flatMap { (0...$0).contains(value) ? value : nil }
+        }
+        return (remaining, full)
+    }
+
+    private static func capacity(_ key: String, in pack: [String: Any]?) -> Int? {
+        integer(pack?[key]).flatMap { (1...50_000).contains($0) ? $0 : nil }
+    }
+
+    /// IOPMPowerSource publie un courant signé en mA, parfois encodé sur 32 bits non signés.
+    private static func signedCurrent(_ value: Any?, state: BatteryReading.State?) -> Int? {
+        guard let raw = integer(value),
+              let current = Int32(exactly: raw) ?? UInt32(exactly: raw).map(Int32.init(bitPattern:)),
+              (-30_000...30_000).contains(current) else { return nil }
+        switch state {
+        case .onBattery where current < 0, .charging where current > 0, .charged where current == 0,
+             .onAC where current == 0:
+            return Int(current)
+        default:
+            return nil
+        }
     }
 
     private static func properties(for serviceClass: String) -> [String: Any]? {

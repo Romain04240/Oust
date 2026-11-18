@@ -73,9 +73,12 @@ public final class AppModel {
 
     // MARK: Volumes
 
-    public internal(set) var volumes: [VolumeDescriptor] = [] {
-        didSet { watch.updateBoot(bootVolume) }
-    }
+    public internal(set) var volumes: [VolumeDescriptor] = []
+    @ObservationIgnored private var volumeRead: Task<Bool, Never>?
+    @ObservationIgnored private var volumeRevision = 0
+    @ObservationIgnored private(set) var mountGeneration = 0
+    @ObservationIgnored var timeMachineReadSequence = 0
+    @ObservationIgnored var timeMachineRetry: Task<Void, Never>?
     public private(set) var snapshots: [LocalSnapshot] = []
     public private(set) var snapshotReadFailed = false
     public private(set) var snapshotSizing = false
@@ -86,7 +89,7 @@ public final class AppModel {
     @ObservationIgnored var snapshotSizeTask: Task<Void, Never>?
     /// Un disque qu'on vient de brancher, à proposer à l'analyse.
     public var offeredVolume: VolumeDescriptor?
-    public var bootVolume: VolumeDescriptor? { volumes.first(where: \.isBoot) }
+    public var bootVolume: VolumeDescriptor? { watch.boot ?? volumes.first(where: \.isBoot) }
 
     // MARK: Analyse par règles
 
@@ -108,6 +111,7 @@ public final class AppModel {
     @ObservationIgnored var explorerGainCheck: (root: TreeNode, work: Task<ScanIndex, Never>)?
     public internal(set) var scanProgress = ScanProgress()
     var scanTask: Task<Void, Never>?
+    @ObservationIgnored var volumeAnalysisAttempt: UUID?
     /// L'analyse gardée de chaque autre disque, par son point de montage : relue
     /// du disque à la première demande, et non refaite à chaque ouverture
     /// (Romain, 18/10/2026).
@@ -126,6 +130,9 @@ public final class AppModel {
     public internal(set) var analyzingVolumeID: String?
     /// Les destinations Time Machine branchées : jamais proposées à l'analyse.
     public internal(set) var timeMachineMounts: Set<String> = []
+    var confirmedOrdinaryMounts: [String: VolumeMountIdentity] = [:]
+    var pendingTimeMachineMounts: Set<String> = []
+    var unresolvedMounts: Set<String> = []
     /// Les disques dont l'arbre a été fait depuis leur branchement : FSEvents
     /// dit ce qui y a bougé depuis, sans qu'un autre ordinateur ait pu y écrire.
     var liveVolumeScans: Set<String> = []
@@ -134,6 +141,7 @@ public final class AppModel {
 
     public internal(set) var duplicates: Phase = .idle
     public internal(set) var duplicateGroups: [DuplicateGroup] = []
+    @ObservationIgnored var duplicatePreviewRoots: DuplicatePreviewRoots?
     public internal(set) var duplicateProgress = DuplicateProgress()
     /// Le disque des doublons montrés.
     public internal(set) var duplicatesVolumeID: String?
@@ -143,6 +151,8 @@ public final class AppModel {
     public internal(set) var changingDuplicateExclusions = false
     public internal(set) var duplicateExclusionsWaitingForQuickLook = false
     @ObservationIgnored var duplicateNativePanelClosed: () -> Bool = { AppModel.isNativeDuplicatePreviewClosed() }
+    @ObservationIgnored var duplicateExclusionWaitBudget: Duration = .seconds(2)
+    public internal(set) var duplicateExclusionsTimedOut = false
     @ObservationIgnored var duplicateReadSession = DuplicateReadSession()
     @ObservationIgnored var duplicatePreviewRevokers: [UUID: () -> Void] = [:]
     /// Les images qui se ressemblent, hors photothèque : l'onglet « Similaires ».
@@ -253,7 +263,7 @@ public final class AppModel {
     public func start() async {
         guard !started else { return }
         started = true
-        refreshVolumes()
+        await refreshVolumeInventory(waitForOtherVolumes: true)
         // Un composant changé est signalé à l'utilisateur ; aucune opération
         // administrateur en cours dans une autre copie n'est interrompue.
         Task { await PrivilegedHelper.synchronizeApprovedInstallation() }
@@ -273,9 +283,20 @@ public final class AppModel {
     }
 
     public func refreshVolumes() {
-        let fresh = VolumeService.mountedVolumes()
-        // Relu souvent : on ne réveille l'interface que si un chiffre a bougé.
-        if fresh != volumes { volumes = fresh }
+        volumeRevision += 1
+        Self.backgroundStorageTask { [self] in
+            _ = await refreshVolumeInventory(waitForOtherVolumes: true)
+        }
+    }
+
+    /// An autonomous refresh has its own bounded reads and cannot inherit
+    /// an analysis permit or report progress to a completed analysis.
+    nonisolated static func backgroundStorageTask(
+        _ operation: @escaping @MainActor @Sendable () async -> Void
+    ) -> Task<Void, Never> {
+        StorageOperationContext.withUnboundContext {
+            Task { @MainActor in await operation() }
+        }
     }
 
     /// L'espace libre bouge sans qu'Oust! le sache : des fichiers effacés dans
@@ -286,18 +307,75 @@ public final class AppModel {
     private func keepVolumesFresh() async {
         Task {
             for await _ in NotificationCenter.default.notifications(named: NSApplication.didBecomeActiveNotification) {
-                await self.refreshVolumesInBackground()
+                await self.refreshVolumeInventory(waitForOtherVolumes: false)
             }
         }
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(20))
-            await refreshVolumesInBackground()
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            await refreshVolumeInventory(waitForOtherVolumes: false)
         }
     }
 
-    public func refreshVolumesInBackground() async {
-        let fresh = await Task.detached(priority: .utility) { VolumeService.mountedVolumes() }.value
-        if fresh != volumes { volumes = fresh }
+    public func refreshVolumesInBackground(invalidate: Bool = false) async {
+        await refreshVolumeInventory(invalidate: invalidate, waitForOtherVolumes: true)
+    }
+
+    func refreshStartupVolume(read: @escaping @Sendable () async -> VolumeDescriptor? = VolumeService.bootVolume) async {
+        await watch.refreshDisk(read: read)
+        guard !Task.isCancelled, let startup = watch.boot else { return }
+        if let index = volumes.firstIndex(where: \.isBoot) {
+            if volumes[index] != startup { volumes[index] = startup }
+        } else {
+            volumes.insert(startup, at: 0)
+        }
+    }
+
+    @discardableResult
+    func refreshVolumeInventory(
+        invalidate: Bool = false, waitForOtherVolumes: Bool, generation: Int? = nil,
+        readStartup: @escaping @Sendable () async -> VolumeDescriptor? = VolumeService.bootVolume,
+        readVolumes: (@Sendable () async -> [VolumeDescriptor])? = nil
+    ) async -> Bool {
+        await refreshStartupVolume(read: readStartup)
+        guard !Task.isCancelled, generation == nil || generation == mountGeneration else { return false }
+        if invalidate { volumeRevision += 1 }
+        if generation == nil { scheduleTimeMachineRetry() }
+        while !Task.isCancelled, generation == nil || generation == mountGeneration {
+            let revision = volumeRevision
+            let read: Task<Bool, Never>
+            if let existing = volumeRead {
+                read = existing
+            } else {
+                read = Task {
+                    let inventory: VolumeService.Inventory?
+                    let fresh: [VolumeDescriptor]?
+                    if let readVolumes {
+                        inventory = nil
+                        fresh = await Task.detached(priority: .utility, operation: readVolumes).value
+                    } else {
+                        inventory = await VolumeService.readInventory()
+                        fresh = inventory?.volumes
+                    }
+                    volumeRead = nil
+                    guard revision == volumeRevision else { return false }
+                    let pending = inventory?.unverified ?? (fresh == nil ? Set(volumes.filter { !$0.isBoot }.map { $0.mountURL.path }) : [])
+                    unresolvedMounts = Set(pending.map(PathNormalizer.normalize))
+                    guard let fresh else { return true }
+                    let hasNewMount = generation == nil && fresh.contains { candidate in
+                        !volumes.contains { $0.id == candidate.id && $0.mountIdentity == candidate.mountIdentity }
+                    }
+                    publishVolumeInventory(fresh)
+                    if generation == nil { scheduleTimeMachineRetry(force: hasNewMount) }
+                    return true
+                }
+                volumeRead = read
+            }
+            guard waitForOtherVolumes else { return false }
+            if await read.value, revision == volumeRevision, generation == nil || generation == mountGeneration {
+                return !Task.isCancelled
+            }
+        }
+        return false
     }
 
     public func refreshSnapshots(using listing: (@Sendable () async -> [LocalSnapshot]?)? = nil,
@@ -345,18 +423,40 @@ public final class AppModel {
         }
     }
 
+    func registerVolumeEvent(_ event: VolumeEvent) {
+        mountGeneration += 1
+        volumeRevision += 1
+        switch event {
+        case .mounted(let url):
+            let path = PathNormalizer.normalize(url.standardizedFileURL.path)
+            pendingTimeMachineMounts.insert(path)
+            confirmedOrdinaryMounts.removeValue(forKey: path)
+        case .unmounted(let url):
+            let path = PathNormalizer.normalize(url.standardizedFileURL.path)
+            unresolvedMounts.remove(path)
+            volumes.removeAll { PathNormalizer.normalize($0.mountURL.standardizedFileURL.path) == path }
+            if offeredVolume.map({ PathNormalizer.normalize($0.mountURL.standardizedFileURL.path) }) == path {
+                offeredVolume = nil
+            }
+            forgetVolume(at: url)
+        }
+    }
+
     private func watchVolumes() async {
         for await event in VolumeMonitor.events() {
-            refreshVolumes()
-            if case .unmounted(let url) = event { forgetVolume(at: url) }
+            registerVolumeEvent(event)
+            let generation = mountGeneration
             if case .mounted(let url) = event, engine.supports(.removeNow) {
                 transit.resume(volumes: [url])
             }
-            if case .mounted(let url) = event,
-               let volume = volumes.first(where: { $0.mountURL.standardizedFileURL == url.standardizedFileURL }) {
-                // Un disque de sauvegarde ne se propose pas : seul Time Machine y touche.
-                await refreshTimeMachineMounts()
-                if !isTimeMachine(volume) { offeredVolume = volume }
+            Task {
+                guard await refreshVolumeInventory(waitForOtherVolumes: true, generation: generation),
+                      generation == mountGeneration else { return }
+                if case .mounted(let url) = event {
+                    await classifyVolumeForOffer(at: url, generation: generation)
+                } else {
+                    await refreshTimeMachineMounts()
+                }
             }
         }
     }
@@ -515,6 +615,7 @@ public final class AppModel {
     }
 
     func explore(_ volume: VolumeDescriptor, rescan: Bool, previous: ScanIndex?) {
+        guard canAnalyzeVolume(volume) else { return }
         // Le disque de démarrage : l'arbre partagé, gardé d'une fois sur l'autre.
         if volume.isBoot {
             if treeVolume?.isBoot != true {
@@ -544,11 +645,15 @@ public final class AppModel {
         // le disque seulement s'il a un UUID.
         let isMounted = volumes.contains { $0.id == volume.id }
         scanTask = Task {
-            if !rescan, let known = await self.storedAnalysis(for: volume) {
-                guard !progress.isCancelled, self.treeVolume?.id == volume.id else { return }
-                self.showExplorerIndex(known, volume: volume)
-                return
+            defer {
+                if scanProgress === progress, explorer.isRunning { explorer = .idle }
             }
+            let roots = [volume.scanRoot]
+            guard let resolved = await resolveAnalysisRoots(roots), let anchor = resolved.directories.first,
+                  !progress.isCancelled, self.treeVolume?.id == volume.id, self.canAnalyzeVolume(volume) else { return }
+            var physicalVolume = volume
+            physicalVolume.scanRoot = anchor.url
+            let scanningVolume = physicalVolume
             // Les fichiers de 100 Ko et plus sont gardés un à un : assez pour que
             // les onglets Types et Âge de l'Explorateur portent sur l'essentiel
             // des octets, sans un nœud par fichier sur un disque de 5 millions.
@@ -558,15 +663,18 @@ public final class AppModel {
             // Les mêmes réglages que l'arbre partagé, et de quoi trouver les
             // traces de macOS : les règles du disque y lisent leurs marqueurs.
             let home = home
-            guard let options = await checkStorageIO({ Self.volumeScanOptions(for: volume, home: home) }),
-                  !progress.isCancelled, self.treeVolume?.id == volume.id else {
+            guard let options = await checkStorageIO({ Self.volumeScanOptions(for: scanningVolume, home: home) }),
+                  await resolveAnalysisRoots(roots) == resolved, !progress.isCancelled,
+                  self.treeVolume?.id == volume.id, self.canAnalyzeVolume(volume) else {
                 if !progress.isCancelled, self.treeVolume?.id == volume.id { self.explorer = .idle }
                 return
             }
-            let (scanned, _) = await ScanIndex.refresh(previous, root: volume.scanRoot, options: options, progress: progress)
+            let cached = previous ?? (rescan ? nil : self.volumeIndexes[volume.id])
+            let (scanned, _) = await ScanIndex.refreshBound(cached, root: anchor, options: options, progress: progress)
             guard !progress.isCancelled else { return }
-            let fresh = await scanned.revalidatedForDisplay(for: options)
-            guard !progress.isCancelled, self.treeVolume?.id == volume.id else { return }
+            let fresh = await scanned.revalidatedForDisplay()
+            guard await resolveAnalysisRoots(roots) == resolved, !progress.isCancelled,
+                  self.treeVolume?.id == volume.id, self.canAnalyzeVolume(volume) else { return }
             if isMounted {
                 self.volumeIndexes[volume.id] = fresh
                 self.liveVolumeScans.insert(volume.id)
@@ -575,13 +683,14 @@ public final class AppModel {
             if isMounted {
                 Task.detached(priority: .utility) { try? Self.volumeStore(for: volume)?.save(fresh) }
             }
-            Task { await self.refreshVolumesInBackground() }
+            Self.backgroundStorageTask { await self.refreshVolumesInBackground() }
         }
     }
 
     public func explore(folder: URL) {
+        guard canAnalyzePath(folder) else { return }
         let name = folder.lastPathComponent
-        let capacity = VolumeService.capacity(of: folder) ?? Capacity(total: 0, available: 0, availableForImportantUsage: 0)
+        let capacity = Capacity(total: 0, available: 0, availableForImportantUsage: 0)
         explore(VolumeDescriptor(name: name, mountURL: folder, scanRoot: folder, isBoot: false, isInternal: true,
                                  isRemovable: false, capacity: capacity))
     }
@@ -631,15 +740,17 @@ public final class AppModel {
     // MARK: - Doublons
 
     public func findDuplicates(in roots: [URL]? = nil) async {
-        guard !duplicates.isRunning else { return }
+        guard !duplicates.isRunning, roots?.allSatisfy(canAnalyzePath) != false else { return }
         // Sur un autre disque choisi dans la vue d'ensemble : ce disque seul.
         if roots == nil, let volume = analyzedVolume, !volume.isBoot {
             await findDuplicates(on: volume)
             return
         }
-        let session = duplicateReadSession
-        guard session.acquire() else { return }
-        defer { session.release() }
+        guard let reader = beginDuplicateRead() else { return }
+        defer {
+            withExtendedLifetime(reader) {}
+            if duplicates.isRunning { duplicates = .idle }
+        }
         duplicates = .running
         let progress = DuplicateProgress()
         duplicateProgress = progress
@@ -648,19 +759,27 @@ public final class AppModel {
         options.minimumSize = Int64(preferences.duplicateMinimumMegabytes) * 1_000_000
         options.exclusions = preferences.duplicateExclusions
         let revision = duplicateExclusionRevision
-        guard canSearchDuplicates(options.roots) else { return }
+        let requestedRoots = options.roots
+        guard await canSearchDuplicates(requestedRoots, reader: reader), let resolved = await resolveAnalysisRoots(requestedRoots, reader: reader),
+              revision == duplicateExclusionRevision, await canSearchDuplicates(resolved.urls, reader: reader) else { return }
+        options.roots = resolved.urls
+        options.exclusions.analysisRoots = resolved.directories
         // Les candidats viennent des feuilles de l'arbre partagé, sans
         // reparcourir le dossier personnel.
         let tree = await disk.treeProvider()()
+        guard await resolveAnalysisRoots(requestedRoots, reader: reader) == resolved,
+              revision == duplicateExclusionRevision, await canSearchDuplicates(resolved.urls, reader: reader) else { return }
         let groups = await DuplicateFinder.find(options, tree: tree, progress: progress)
-        guard revision == duplicateExclusionRevision, canSearchDuplicates(options.roots) else { return }
-        showDuplicates(groups, volume: bootVolume)
+        guard await resolveAnalysisRoots(requestedRoots, reader: reader) == resolved, revision == duplicateExclusionRevision,
+              await canSearchDuplicates(resolved.urls, reader: reader) else { return }
+        showDuplicates(groups, volume: bootVolume, previewRoots: DuplicatePreviewRoots(requestedRoots, resolved))
     }
 
     /// Les groupes trouvés sur un disque remplacent ceux de ce disque ; ce qui a
     /// été coché sur un autre disque reste dans la corbeille.
-    func showDuplicates(_ groups: [DuplicateGroup], volume: VolumeDescriptor?) {
+    func showDuplicates(_ groups: [DuplicateGroup], volume: VolumeDescriptor?, previewRoots: DuplicatePreviewRoots? = nil) {
         duplicateGroups = groups
+        duplicatePreviewRoots = previewRoots
         duplicatesVolumeID = volume?.id
         items = items.filter { entry in
             entry.value.category != .duplicates || !(volume.map { belongs(entry.value, to: $0) } ?? true)
@@ -1026,12 +1145,19 @@ public final class AppModel {
     private func watchReclaim() {
         guard let boot = bootVolume else { return }
         Task {
-            for await capacity in VolumeService.watchReclaim(of: boot.scanRoot) {
-                self.reclaimed = capacity
-                if let index = self.volumes.firstIndex(where: \.isBoot) { self.volumes[index].capacity = capacity }
+            for await sample in VolumeService.watchReclaimSamples(of: boot.scanRoot) {
+                self.publishReclaimedCapacity(sample.capacity, measuredAt: sample.measuredAt)
             }
-            self.refreshVolumes()
+            await self.refreshVolumesInBackground()
         }
+    }
+
+    func publishReclaimedCapacity(_ capacity: Capacity, measuredAt: ContinuousClock.Instant = .now) {
+        guard var latest = bootVolume else { return }
+        latest.capacity = capacity
+        guard watch.updateBoot(latest, measuredAt: measuredAt) else { return }
+        reclaimed = capacity
+        if let index = volumes.firstIndex(where: \.isBoot) { volumes[index].capacity = capacity }
     }
 
     // MARK: - Règles planifiées

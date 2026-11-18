@@ -67,6 +67,86 @@ private extension FakeHome {
 @Suite("Un autre disque s'analyse comme le disque de démarrage")
 struct VolumeFindersTests {
 
+    @Test("Une mesure du volume ne suit pas un dossier remplacé au même chemin")
+    func boundMeasurementRejectsReplacement() async throws {
+        let home = try FakeHome()
+        try home.text("_Volume/Dev/site/package.json", "{}")
+        try home.onVolume("Dev/site/node_modules/original", bytes: 1_200_000)
+        let anchor = try home.openVolume(home.volume)
+        let snapshot = await ScanIndex.refreshBound(nil, root: anchor, options: ScanOptions(), progress: ScanProgress())
+        var context = home.volumeContext(tree: snapshot.index.root)
+        context.volume?.root = anchor.url
+        context.projectRoots = [anchor.url]
+        context.volumeAnchor = anchor
+        let initial = await RuleEngine.collect(context, finders: [.projectArtifacts])
+        let measured = try #require(initial.first { $0.ruleID == "artifact.node_modules" })
+        #expect(measured.sizes.allocated >= 1_200_000)
+        #expect(!measured.protections.contains(.unknownState))
+
+        let target = home.volume.appendingPathComponent("Dev/site/node_modules")
+        try FileManager.default.moveItem(at: target, to: home.root.appendingPathComponent("original"))
+        try home.onVolume("Dev/site/node_modules/replacement", bytes: 4096)
+        let rescanned = await RuleEngine.collect(context, finders: [.projectArtifacts])
+        let replacement = try #require(rescanned.first { $0.ruleID == "artifact.node_modules" })
+        #expect(replacement.sizes == .zero)
+        #expect(replacement.protections.contains(.unknownState))
+        #expect(!replacement.isSelectable)
+    }
+
+    @Test("Les petits fichiers de métadonnées restent sur le volume et sans suivi de liens")
+    func boundMetadataReadsOnlyConfirmedFiles() throws {
+        let home = try FakeHome()
+        try home.text("_Volume/Local/metadata", "known")
+        try home.text("Outside/metadata", "other")
+        let fs = FileManager.default
+        let local = home.volume.appendingPathComponent("Local")
+        let outside = home.root.appendingPathComponent("Outside")
+        try fs.createSymbolicLink(at: home.volume.appendingPathComponent("Redirect"), withDestinationURL: outside)
+        try fs.createSymbolicLink(at: local.appendingPathComponent("Symbolic"), withDestinationURL: outside.appendingPathComponent("metadata"))
+        try fs.linkItem(at: outside.appendingPathComponent("metadata"), to: local.appendingPathComponent("Hard"))
+        var context = home.volumeContext()
+        let anchor = try home.openVolume(home.volume)
+        context.volumeAnchor = anchor
+        let physicalLocal = anchor.url.appendingPathComponent("Local")
+        let redirect = anchor.url.appendingPathComponent("Redirect")
+        let metadata = physicalLocal.appendingPathComponent("metadata")
+        #expect(context.volumeData(at: metadata, maximumBytes: 5) == Data("known".utf8))
+        #expect(context.volumeData(at: metadata, maximumBytes: 4) == nil)
+        #expect(context.volumeData(at: physicalLocal.appendingPathComponent("Symbolic"), maximumBytes: 10) == nil)
+        #expect(context.volumeData(at: physicalLocal.appendingPathComponent("Hard"), maximumBytes: 10) == nil)
+        #expect(context.volumeData(at: redirect.appendingPathComponent("metadata"), maximumBytes: 10) == nil)
+        #expect(context.volumeEntries(in: redirect) == nil)
+    }
+
+    @Test("Le moteur externe ne relève que les traces du dossier ouvert")
+    func boundTracesStayOnOriginalVolume() async throws {
+        let home = try FakeHome()
+        try home.onVolume("Dossier/._Original.txt", bytes: 4096)
+        try home.onVolume("Dossier/Original.txt", bytes: 4096)
+        try home.onVolume("2026-11-18-120000.backup/Temoin.txt", bytes: 4096)
+        try home.file("Autre/._Remplacement.txt", bytes: 4096)
+        try home.file("Autre/Remplacement.txt", bytes: 4096)
+        let physical = try #require(realpath(home.volume.path, nil))
+        defer { free(physical) }
+        let url = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
+        let opened = try #require(AnalysisRoot(url))
+        let fs = FileManager.default
+        try fs.moveItem(at: home.volume, to: home.root.appendingPathComponent("Deplace"))
+        try fs.createSymbolicLink(at: home.volume, withDestinationURL: home.root.appendingPathComponent("Autre"))
+        #expect(VolumeProtection.timeMachineVolumeMarker(in: opened) == true)
+
+        var context = home.volumeContext()
+        context.volume?.root = url
+        context.volumeAnchor = opened
+        let items = await RuleEngine.collect(context, finders: [.volumeTraces, .projectArtifacts], measurer: Measurer { _ in
+            Issue.record("Le moteur externe ne doit pas lancer la mesure brute.")
+            return [:]
+        })
+        let item = try #require(items.first { $0.ruleID == "volume.appledouble" })
+        #expect(item.paths.map(\.lastPathComponent) == ["._Original.txt"])
+        #expect(items.flatMap(\.paths).allSatisfy { !$0.lastPathComponent.contains("Remplacement") })
+    }
+
     @Test("Artefacts, montage, installeurs, corbeille du disque et traces : chacun dans sa section")
     func findsEachKind() async throws {
         let home = try FakeHome()

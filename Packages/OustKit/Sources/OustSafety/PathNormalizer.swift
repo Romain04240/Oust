@@ -22,6 +22,6 @@ public enum PathNormalizer {
     public static func isWithin(_ path: String, _ base: String) -> Bool {
         let path = normalize(path)
         let base = normalize(base)
-        return path == base || path.hasPrefix(base + "/")
+        return path == base || path.hasPrefix(base == "/" ? base : base + "/")
     }
 }

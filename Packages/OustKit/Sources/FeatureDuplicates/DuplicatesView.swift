@@ -6,6 +6,14 @@ import OustDuplicates
 import OustLocalization
 import OustModel
 
+@MainActor
+func requestDuplicateQuickLook(_ url: URL, neighbors: [URL], similar: Bool, model: AppModel, preview: FilePreview) {
+    preview.showPrepared(url, among: neighbors) {
+        guard let prepared = await model.prepareDuplicatePreview(url, similar: similar) else { return nil }
+        return (prepared.urls, prepared)
+    }
+}
+
 /// Les doublons, conscients des clones APFS (SPEC §7).
 public struct DuplicatesView: View {
     @Bindable var model: AppModel
@@ -53,6 +61,7 @@ public struct DuplicatesView: View {
             preview.revoke()
             model.setDuplicatePreviewRevoker(for: previewOwner, nil)
         }
+        .alert(Text("quicklook.unavailable", bundle: .oust), isPresented: $preview.preparedPreviewUnavailable) {}
     }
 
     /// Les doublons octet pour octet, sur le disque analysé.
@@ -125,21 +134,24 @@ public struct DuplicatesView: View {
                     ForEach(shown) { group in
                         GroupCard(model: model, group: group, selection: $selection) { file in
                             guard model.canUseDuplicateQuickLook else { return }
-                            preview.show(file.url, among: group.files.map(\.url))
+                            openPreview(file.url, neighbors: group.files.map(\.url))
                         }
                     }
                 }
             }
             .previewKeys(selection: $selection, order: shown.flatMap { $0.files.map(\.id) }) { id in
                 guard model.canUseDuplicateQuickLook else { return }
-                if case let (group, file)? = copy(id, in: shown) { preview.toggle(file.url, among: group.files.map(\.url)) }
+                if preview.isOpen || preview.isPreparing { preview.close() }
+                else if case let (group, file)? = copy(id, in: shown) { openPreview(file.url, neighbors: group.files.map(\.url)) }
             }
             .filePreview(preview)
             // Le panneau montre les copies d'un groupe ; il suit la sélection
             // d'un groupe à l'autre, et la sélection suit ses flèches.
             .onChange(of: selection) {
                 guard model.canUseDuplicateQuickLook, let selection, case let (group, file)? = copy(selection, in: shown) else { return }
-                preview.follow(file.url, among: group.files.map(\.url))
+                if (preview.isOpen || preview.isPreparing), preview.current != file.url, preview.preparingURL != file.url {
+                    openPreview(file.url, neighbors: group.files.map(\.url))
+                }
             }
             .onChange(of: model.duplicateExclusionRevision) {
                 selection = nil
@@ -151,6 +163,10 @@ public struct DuplicatesView: View {
                     .buttonStyle(OnGradientButtonStyle())
             }
         }
+    }
+
+    private func openPreview(_ url: URL, neighbors: [URL]) {
+        requestDuplicateQuickLook(url, neighbors: neighbors, similar: false, model: model, preview: preview)
     }
 
     /// La copie d'un identifiant, et son groupe.

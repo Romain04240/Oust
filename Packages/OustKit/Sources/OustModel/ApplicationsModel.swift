@@ -61,7 +61,7 @@ public final class ApplicationsModel {
         // Et le dossier Applications de chaque autre disque branché : une
         // application rangée sur un disque externe se désinstalle comme les
         // autres. Jamais une sauvegarde Time Machine.
-        let volumeRoots = (app?.volumes ?? []).filter { !$0.isBoot && app?.isTimeMachine($0) == false }
+        let volumeRoots = (app?.volumes ?? []).filter { !$0.isBoot && app?.canAnalyzeVolume($0) == true }
             .map { $0.mountURL.appendingPathComponent("Applications", isDirectory: true) }
         let roots = AppCatalog.standardRoots(home: home) + volumeRoots
         let listed = await Task.detached(priority: .userInitiated) { AppCatalog.installedApps(in: roots) }.value

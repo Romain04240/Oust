@@ -339,7 +339,8 @@ private struct VolumeChip: View {
 
     var body: some View {
         let timeMachine = model.isTimeMachine(volume)
-        let readOnly = model.isReadOnly(volume)
+        let canAnalyze = model.canAnalyzeVolume(volume)
+        let readOnly = canAnalyze && model.isReadOnly(volume)
         let analyzed = model.analysisPhase(for: volume)
         Button { model.selectAnalysisVolume(volume) } label: {
             HStack(spacing: Spacing.medium) {
@@ -359,6 +360,8 @@ private struct VolumeChip: View {
                     Group {
                         if timeMachine {
                             Text("overview.disk_time_machine", bundle: .oust)
+                        } else if !canAnalyze {
+                            Text("overview.disk_unverified", bundle: .oust)
                         } else if readOnly {
                             Text("overview.disk_read_only", bundle: .oust)
                         } else {
@@ -387,15 +390,15 @@ private struct VolumeChip: View {
                 RoundedRectangle(cornerRadius: Radius.large, style: .continuous)
                     .strokeBorder(Color.white.opacity(isSelected ? 0.95 : 0), lineWidth: 2)
             }
-            .opacity(timeMachine ? 0.6 : 1)
+            .opacity(canAnalyze ? 1 : 0.6)
             .contentShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(timeMachine)
+        .disabled(!canAnalyze)
         .help(timeMachine ? L10n.string("overview.disk_time_machine_help") : volume.name)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .contextMenu {
-            if !timeMachine {
+            if canAnalyze {
                 Button {
                     model.explore(volume)
                     model.section = .explorer

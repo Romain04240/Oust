@@ -14,14 +14,42 @@ extension AppModel {
         duplicatePreviewRevokers[window] = revoke
     }
 
+    func beginDuplicateRead() -> DuplicateReadSession.Reader? {
+        guard !changingDuplicateExclusions, !Task.isCancelled else { return nil }
+        if duplicateReadSession.isRevoked {
+            guard duplicateReadSession.isIdle, duplicateNativePanelClosed() else { return nil }
+            duplicateReadSession = DuplicateReadSession()
+        }
+        return duplicateReadSession.reader()
+    }
+
     @discardableResult
     public func excludeDuplicateFolder(_ url: URL) async -> Bool {
         guard cleaning != .running, preferences.duplicateExclusions.isReadable,
-              !changingDuplicateExclusions, let entry = DuplicateExclusion(folder: url) else { return false }
+              !changingDuplicateExclusions else { return false }
+        let revision = duplicateExclusionRevision
+        guard let entry = await readDuplicateExclusion(url), revision == duplicateExclusionRevision,
+              cleaning != .running else { return false }
         var folders = preferences.duplicateExclusions.folders
         folders.removeAll { $0.id == entry.id }
         folders.append(entry)
         return await applyDuplicateExclusions(DuplicateExclusions(folders: folders))
+    }
+
+    private func readDuplicateExclusion(_ url: URL) async -> DuplicateExclusion? {
+        guard let reader = beginDuplicateRead() else { return nil }
+        return await checkStorageIO {
+            defer { withExtendedLifetime(reader) {} }
+            return DuplicateExclusion(folder: url)
+        } ?? nil
+    }
+
+    package func checkDuplicateExclusion(_ entry: DuplicateExclusion) async -> Bool? {
+        guard let reader = beginDuplicateRead() else { return nil }
+        return await checkStorageIO {
+            defer { withExtendedLifetime(reader) {} }
+            return entry.isCurrent
+        }
     }
 
     public func removeDuplicateExclusion(_ id: URL) async {
@@ -38,6 +66,7 @@ extension AppModel {
     private func applyDuplicateExclusions(_ exclusions: DuplicateExclusions) async -> Bool {
         guard !changingDuplicateExclusions else { return false }
         guard exclusions != preferences.duplicateExclusions else { return true }
+        duplicateExclusionsTimedOut = false
         changingDuplicateExclusions = true
         defer {
             duplicateExclusionsWaitingForQuickLook = false
@@ -47,19 +76,24 @@ extension AppModel {
         previous.revoke()
         for revoke in Array(duplicatePreviewRevokers.values) { revoke() }
         invalidateDuplicateResults()
-        duplicateExclusionsWaitingForQuickLook = !duplicateNativePanelClosed()
-        await previous.drain()
-        defer { duplicateReadSession = DuplicateReadSession() }
-        // La révocation des URL ne prouve pas que le panneau de macOS a disparu.
-        // Tant qu'il est visible, les anciennes exclusions restent en vigueur.
-        while !duplicateNativePanelClosed() {
-            duplicateExclusionsWaitingForQuickLook = true
-            do { try await Task.sleep(for: .milliseconds(100)) }
+        let deadline = ContinuousClock.now + duplicateExclusionWaitBudget
+        while !Task.isCancelled {
+            let panelClosed = duplicateNativePanelClosed()
+            duplicateExclusionsWaitingForQuickLook = !panelClosed
+            if previous.isIdle, panelClosed {
+                guard !Task.isCancelled, ContinuousClock.now < deadline else { break }
+                persistDuplicateExclusions(exclusions)
+                duplicateReadSession = DuplicateReadSession()
+                return true
+            }
+            guard ContinuousClock.now < deadline else {
+                duplicateExclusionsTimedOut = true
+                return false
+            }
+            do { try await Task.sleep(until: min(deadline, .now + .milliseconds(50)), clock: .continuous) }
             catch { return false }
         }
-        guard !Task.isCancelled else { return false }
-        persistDuplicateExclusions(exclusions)
-        return true
+        return false
     }
 
     static func isNativeDuplicatePreviewClosed() -> Bool {
@@ -76,6 +110,7 @@ extension AppModel {
         duplicateProgress.cancel()
         duplicates = .idle
         duplicateGroups = []
+        duplicatePreviewRoots = nil
         duplicatesVolumeID = nil
         similarImages.invalidateExclusionResults()
         let stale = items.values.filter { $0.category == .duplicates || $0.category == .similarImages }.map(\.id)
@@ -83,9 +118,16 @@ extension AppModel {
         for id in stale { items.removeValue(forKey: id) }
     }
 
-    func canSearchDuplicates(_ roots: [URL]) -> Bool {
+    func canSearchDuplicates(_ roots: [URL], reader: DuplicateReadSession.Reader) async -> Bool {
         guard !changingDuplicateExclusions else { return false }
-        guard preferences.duplicateExclusions.canSearch(roots) else {
+        let revision = duplicateExclusionRevision
+        let exclusions = preferences.duplicateExclusions
+        let allowed = await checkStorageIO {
+            defer { withExtendedLifetime(reader) {} }
+            return exclusions.canSearch(roots)
+        }
+        guard !changingDuplicateExclusions, revision == duplicateExclusionRevision, !Task.isCancelled else { return false }
+        guard allowed == true else {
             invalidateDuplicateResults()
             duplicateExclusionBlocked = true
             return false

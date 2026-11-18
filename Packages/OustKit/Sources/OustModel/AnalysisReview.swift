@@ -75,10 +75,11 @@ package struct AnalysisReview: Identifiable, Sendable {
 }
 
 extension AppModel {
-    func saveAnalysisReview(for volume: VolumeDescriptor, location: AnalysisReview.Location?, ids: Set<String>) {
+    func saveAnalysisReview(for volume: VolumeDescriptor, location: AnalysisReview.Location?, ids: Set<String>,
+                            locationWasVerified: Bool = false) {
         guard let location, analyzingVolumeID == volume.id,
               volumes.contains(where: { $0.id == volume.id }),
-              location.matches(volume.scanRoot), !isTimeMachine(volume) else { return }
+              (locationWasVerified || location.matches(volume.scanRoot)), canAnalyzeVolume(volume) else { return }
         let rows = ids.compactMap { items[$0] }.filter { isInReviewVolume($0, volume: volume) }
             .sorted { ($0.category.rawValue, $0.title, $0.id) < ($1.category.rawValue, $1.title, $1.id) }
         analysisReviews[volume.id] = AnalysisReview(volume: volume, location: location, rows: rows)
@@ -99,7 +100,7 @@ extension AppModel {
     package func analysisReview(for volume: VolumeDescriptor) -> AnalysisReview? {
         guard case .done = analysisPhase(for: volume),
               volumes.contains(where: { $0.id == volume.id }),
-              !isTimeMachine(volume) else { return nil }
+              canAnalyzeVolume(volume) else { return nil }
         return analysisReviews[volume.id]
     }
 

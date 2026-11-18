@@ -13,6 +13,8 @@ public struct ScanOptions: Sendable, Hashable {
     /// Demander la part privée des fichiers qui partagent des blocs.
     public var measurePrivateSizes: Bool
     package var bindMeasurementsToRoots = false
+    package var boundRootIdentity: AnalysisRoot.Identity?
+    package var hardlinkGainGroups: [[String]]?
     /// Chemins à ne pas parcourir.
     public var excludedPaths: Set<String>
     /// Petits fichiers à retenir par leur nom (marqueurs de projets) : les règles
@@ -57,8 +59,11 @@ public final class ScanProgress: Sendable {
     private let directories = Atomic<Int>(0)
     private let bytes = Atomic<Int64>(0)
     private let cancelled = Atomic<Bool>(false)
+    private let operationProgress: StorageOperationProgress?
 
-    public init() {}
+    public init() {
+        operationProgress = StorageOperationContext.progress
+    }
 
     public var fileCount: Int { files.load(ordering: .relaxed) }
     public var directoryCount: Int { directories.load(ordering: .relaxed) }
@@ -70,9 +75,15 @@ public final class ScanProgress: Sendable {
     func add(files count: Int, bytes size: Int64) {
         files.add(count, ordering: .relaxed)
         bytes.add(size, ordering: .relaxed)
+        if count > 0 { operationProgress?.reportProgress() }
     }
 
-    func addDirectory() { directories.add(1, ordering: .relaxed) }
+    func addDirectory() {
+        directories.add(1, ordering: .relaxed)
+        operationProgress?.reportProgress()
+    }
+
+    func reportProgress() { operationProgress?.reportProgress() }
 }
 
 /// Ce qu'une analyse rend.
@@ -124,11 +135,32 @@ public enum Scanner {
         options: ScanOptions = ScanOptions(),
         progress: ScanProgress = ScanProgress()
     ) async -> ScanResult {
+        await scan(roots, options: options, progress: progress, boundRoot: nil)
+    }
+
+    static func scan(
+        _ roots: [URL], options: ScanOptions, progress: ScanProgress, boundRoot: AnalysisRoot?,
+        readDirectory: Walk.DirectoryReader? = nil
+    ) async -> ScanResult {
+        await withTaskCancellationHandler {
+            if Task.isCancelled { progress.cancel() }
+            return await scanUncancelled(roots, options: options, progress: progress, boundRoot: boundRoot,
+                                         readDirectory: readDirectory)
+        } onCancel: {
+            progress.cancel()
+        }
+    }
+
+    private static func scanUncancelled(
+        _ roots: [URL], options: ScanOptions, progress: ScanProgress, boundRoot: AnalysisRoot?,
+        readDirectory: Walk.DirectoryReader?
+    ) async -> ScanResult {
         configureProcessIOPolicy()
         let started = Date()
         let ownership = Ownership()
         let backups = await checkStorageIO { DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory) }
-        let walk = Walk(options: options, progress: progress, ownership: ownership, deviceBackupDirectory: backups ?? .unknown)
+        let walk = Walk(options: options, progress: progress, ownership: ownership,
+                        deviceBackupDirectory: backups ?? .unknown, boundRoot: boundRoot, readDirectory: readDirectory)
         // Foundation peut réécrire /private/var en /var. Pour une ouverture
         // sans suivi de liens, garder le chemin physique donné par l'appelant.
         let rootPaths = roots.map { options.bindMeasurementsToRoots ? $0.path : $0.standardizedFileURL.path }
@@ -163,6 +195,31 @@ public enum Scanner {
             )
         }
         return measures
+    }
+
+    /// Fresh read through the retained root, including small regular files.
+    package static func measureBound(_ urls: [URL], root: AnalysisRoot,
+                                     options suppliedOptions: ScanOptions = .measuring) async -> [URL: Measurement] {
+        guard !urls.isEmpty, !Task.isCancelled else { return [:] }
+        var options = suppliedOptions
+        options.leafThreshold = .max
+        options.bindMeasurementsToRoots = true
+        options.boundRootIdentity = root.identity
+        let progress = ScanProgress()
+        let result = await withTaskCancellationHandler {
+            if Task.isCancelled { progress.cancel() }
+            return await scan(urls, options: options, progress: progress, boundRoot: root)
+        } onCancel: {
+            progress.cancel()
+        }
+        guard !Task.isCancelled, !progress.isCancelled else { return [:] }
+        return Dictionary(uniqueKeysWithValues: zip(urls, result.roots).map { url, node in
+            (url, Measurement(sizes: node.total, fileCount: node.fileCount,
+                              latestModification: node.latestModification,
+                              inaccessible: node.status.isInaccessible || node.status == .excluded || node.inaccessibleCount > 0
+                                  || !result.freeableEstimatesAreValid,
+                              directoryDevice: node.measurementDevice, directoryFileID: node.fileID))
+        })
     }
 
     /// Mesure un seul élément (fichier ou dossier).
@@ -213,10 +270,40 @@ final class Walk: @unchecked Sendable {
         var shallow: [String: Known]?
     }
 
+    typealias DirectoryReader = @Sendable (Int32, Bool, UnsafeMutableRawBufferPointer, (RawEntry) -> Void) -> Int32
+    typealias SharingReader = @Sendable (Int32, Int64) -> (privateSize: Int64?, fullCloneID: UInt64?)
+    private let readDirectory: DirectoryReader
+    private let blockSharing: SharingReader
     private let options: ScanOptions
     private let progress: ScanProgress
     private let mounts: Set<String>
     private let ownership: Ownership
+    private let boundRoot: AnalysisRoot?
+    private let excludedRoots: Set<String>
+
+    private struct LinkedFile: Hashable {
+        let device: Int32
+        let inode: UInt64
+    }
+
+    private struct LinkName {
+        let path: String
+        let info: stat
+    }
+
+    private struct LinkContribution {
+        let node: TreeNode
+        let name: String?
+        let bytes: Int64
+        let isLeaf: Bool
+    }
+
+    private struct LinkSelection {
+        var names: [String: LinkName] = [:]
+        var contributions: [LinkContribution] = []
+    }
+
+    private let linkedFiles = Mutex<[LinkedFile: LinkSelection]>([:])
 
     private let condition = NSCondition()
     private var pending: [Job] = []
@@ -247,10 +334,19 @@ final class Walk: @unchecked Sendable {
     var touchedFileIDs: Set<UInt64> { Set(touched.withLock { $0.map(\.fileID) }) }
 
     init(options: ScanOptions, progress: ScanProgress, ownership: Ownership,
-         deviceBackupDirectory: DeviceBackupPath.Snapshot) {
+         deviceBackupDirectory: DeviceBackupPath.Snapshot, boundRoot: AnalysisRoot? = nil,
+         readDirectory: DirectoryReader? = nil,
+         blockSharing: @escaping SharingReader = { BulkReader.blockSharing(descriptor: $0, allocated: $1) }) {
+        self.readDirectory = readDirectory ?? { fd, extended, buffer, visit in
+            BulkReader.read(directoryFD: fd, extended: extended, buffer: buffer,
+                            isCancelled: { progress.isCancelled }, visit: visit)
+        }
+        self.blockSharing = blockSharing
         self.options = options
         self.progress = progress
         self.ownership = ownership
+        self.boundRoot = boundRoot
+        self.excludedRoots = Set(options.excludedPaths.map(Self.exclusionKey))
         self.mounts = MountTable.mountPoints()
         self.notableExtensions = Set(options.notableNames.filter { $0.hasPrefix("*.") }.map { String($0.dropFirst(2)) })
         self.notablePrefixes = options.notableNames.filter { $0.hasSuffix("*") && !$0.hasPrefix("*") }
@@ -283,15 +379,40 @@ final class Walk: @unchecked Sendable {
     func run(roots rootPaths: [String]) async -> [TreeNode] {
         var nodes: [TreeNode] = []
         var jobs: [Job] = []
+        var countedRootLinks = Set<UInt64>()
+        var countedRootClones = Set<UInt64>()
         for path in rootPaths {
             if progress.isCancelled { break }
+            if isExcluded(path) {
+                let node = TreeNode(name: (path as NSString).lastPathComponent, parent: nil, fileID: 0, rootPath: path)
+                node.status = .excluded
+                node.recomputeTotals()
+                nodes.append(node)
+                continue
+            }
             var info = stat()
-            let exists = lstat(path, &info) == 0
+            let exists: Bool
+            if let boundRoot {
+                if let fd = boundRoot.openDirectory(URL(fileURLWithPath: path, isDirectory: true),
+                                                    allowing: directoryIsAllowed) {
+                    exists = fstat(fd, &info) == 0
+                    close(fd)
+                } else if let parent = boundRoot.openDirectory(URL(fileURLWithPath: path, isDirectory: false).deletingLastPathComponent(),
+                                                                 allowing: directoryIsAllowed) {
+                    exists = fstatat(parent, (path as NSString).lastPathComponent, &info, AT_SYMLINK_NOFOLLOW) == 0
+                        && info.st_dev == boundRoot.identity.directory.device && info.st_mode & S_IFMT == S_IFREG
+                    close(parent)
+                } else {
+                    exists = false
+                }
+            } else {
+                exists = lstat(path, &info) == 0
+            }
             let node = TreeNode(name: (path as NSString).lastPathComponent, parent: nil,
                                 fileID: exists ? UInt64(info.st_ino) : 0, rootPath: path)
             nodes.append(node)
             guard exists else {
-                node.status = .inaccessible(code: errno)
+                node.status = .inaccessible(code: boundRoot == nil ? errno : ESTALE)
                 node.recomputeTotals()
                 continue
             }
@@ -307,12 +428,20 @@ final class Walk: @unchecked Sendable {
                 node.ownFileCount = 1
                 node.ownLatestModification = Self.date(info.st_mtimespec)
                 if options.bindMeasurementsToRoots {
-                    guard let sizes = boundFileSizes(path: path, expected: info) else {
+                    guard let measured = boundFileSizes(path: path, expected: info) else {
                         node.status = .inaccessible(code: ESTALE)
                         node.resetOwnContent()
                         continue
                     }
-                    node.ownFiles = sizes
+                    node.ownFiles = measured.sizes
+                    if measured.uncertain { node.status = .inaccessible(code: EIO) }
+                    if info.st_nlink > 1,
+                       !claim(node.fileID, in: ownership.links, by: node, counted: &countedRootLinks) {
+                        node.ownFiles = .zero
+                    } else if let clone = measured.fullCloneID,
+                              !claim(clone, in: ownership.clones, by: node, counted: &countedRootClones) {
+                        node.ownFiles = .zero
+                    }
                 } else if options.measurePrivateSizes, let privateSize = BulkReader.privateSize(path: path) {
                     node.ownFiles = Sizes(allocated: allocated, freeable: privateSize)
                 }
@@ -324,17 +453,32 @@ final class Walk: @unchecked Sendable {
                         && protectsAccountArchives({ $0.matches((path as NSString).deletingLastPathComponent) })) {
                     node.ownFiles.freeable = 0
                 }
+                if boundRoot != nil, info.st_nlink > 1 {
+                    recordLink(path: path, info: info, node: node, name: nil,
+                               bytes: node.ownFiles.freeable, isLeaf: false)
+                }
                 node.recomputeTotals()
             }
         }
         await process(jobs)
+        revalidateLinkGains()
         for node in nodes { node.refreshTotals() }
         return nodes
     }
 
-    private func boundFileSizes(path: String, expected: stat) -> Sizes? {
+    private func boundFileSizes(path: String, expected: stat)
+    -> (sizes: Sizes, fullCloneID: UInt64?, uncertain: Bool)? {
         guard expected.st_mode & S_IFMT == S_IFREG, expected.st_flags & Attr.sfDataless == 0 else { return nil }
-        let fd = open(path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
+        let fd: Int32
+        if let boundRoot {
+            let url = URL(fileURLWithPath: path, isDirectory: false)
+            guard let parent = boundRoot.openDirectory(url.deletingLastPathComponent(),
+                                                       allowing: directoryIsAllowed) else { return nil }
+            fd = openat(parent, url.lastPathComponent, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
+            close(parent)
+        } else {
+            fd = open(path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
+        }
         guard fd >= 0 else { return nil }
         defer { close(fd) }
         var actual = stat()
@@ -344,15 +488,17 @@ final class Walk: @unchecked Sendable {
               actual.st_birthtimespec.tv_nsec == expected.st_birthtimespec.tv_nsec,
               actual.st_flags & Attr.sfDataless == 0 else { return nil }
         let allocated = Int64(actual.st_blocks) * 512
-        let privateSize = options.measurePrivateSizes
-            ? BulkReader.blockSharing(descriptor: fd, allocated: allocated).privateSize : nil
-        return Sizes(allocated: allocated, freeable: privateSize ?? allocated)
+        let sharing: (privateSize: Int64?, fullCloneID: UInt64?) = options.measurePrivateSizes
+            ? blockSharing(fd, allocated) : (privateSize: allocated, fullCloneID: nil)
+        let uncertain = sharing.privateSize == nil
+        return (Sizes(allocated: allocated, freeable: sharing.privateSize ?? 0), sharing.fullCloneID, uncertain)
     }
 
     /// Relit des dossiers d'une arborescence existante (réanalyse incrémentale).
     /// Rend les nœuds abandonnés, pour libérer ce qu'ils comptaient.
     func run(jobs: [Job], root: TreeNode) async -> [TreeNode] {
         await process(jobs)
+        revalidateLinkGains()
         root.refreshTotals()
         return dropped.withLock { $0 }
     }
@@ -459,12 +605,24 @@ final class Walk: @unchecked Sendable {
     private func process(_ job: Job, buffer: UnsafeMutableRawBufferPointer, abandoned: inout [TreeNode]) -> [Job] {
         progress.addDirectory()
         let node = job.node
+        guard !isExcluded(job.path) else {
+            node.status = .excluded
+            node.children = []
+            node.resetOwnContent()
+            return []
+        }
         let insideSafariDownload = SafariDownloadPath.containsPackage(job.path)
         let noFollow = options.bindMeasurementsToRoots ? O_NOFOLLOW_ANY : O_NOFOLLOW
-        let fd = open(job.path, O_RDONLY | O_DIRECTORY | noFollow | O_CLOEXEC)
+        let fd: Int32
+        if let boundRoot {
+            fd = boundRoot.openDirectory(URL(fileURLWithPath: job.path, isDirectory: true),
+                                         allowing: directoryIsAllowed) ?? -1
+        } else {
+            fd = open(job.path, O_RDONLY | O_DIRECTORY | noFollow | O_CLOEXEC)
+        }
         let openError: Int32
         if fd < 0 {
-            openError = errno
+            openError = boundRoot == nil ? errno : ESTALE
         } else if insideSafariDownload || options.bindMeasurementsToRoots || options.deviceBackupsDirectory != nil {
             var info = stat()
             openError = fstat(fd, &info) == 0 && info.st_dev == job.device && UInt64(info.st_ino) == node.fileID
@@ -503,14 +661,22 @@ final class Walk: @unchecked Sendable {
         var children: [Job] = []
         var keptOrNew: [TreeNode] = []
         var files = 0
+        var entries = 0
         var bytes: Int64 = 0
         // Ce que ce dossier a déjà compté pendant ce passage : deux noms pour un
         // même inode dans un même dossier ne comptent qu'une fois.
+        var readError: Int32 = 0
         var countedHere = Set<UInt64>()
         let known = job.shallow ?? [:]
 
         let visit: (RawEntry) -> Void = { [self] entry in
-            guard entry.error == 0, !entry.name.isEmpty else { return }
+            guard !progress.isCancelled else { return }
+            guard entry.error == 0, !entry.name.isEmpty else {
+                readError = entry.error == 0 ? EIO : Int32(bitPattern: entry.error)
+                return
+            }
+            entries += 1
+            if entries % 256 == 0 { progress.reportProgress() }
             let childPath = job.path.hasSuffix("/") ? job.path + entry.name : job.path + "/" + entry.name
 
             if entry.isDirectory {
@@ -538,6 +704,17 @@ final class Walk: @unchecked Sendable {
 
             // Un fichier, un lien symbolique ou autre : on compte ce qu'il occupe,
             // sans jamais suivre un lien.
+            var linkInfo: stat?
+            if boundRoot != nil, entry.type == Attr.typeRegular, entry.linkCount > 1 {
+                var info = stat()
+                if fstatat(fd, entry.name, &info, AT_SYMLINK_NOFOLLOW) == 0,
+                   info.st_dev == job.device, UInt64(info.st_ino) == entry.fileID,
+                   info.st_mode & S_IFMT == S_IFREG, info.st_nlink == entry.linkCount {
+                    linkInfo = info
+                } else {
+                    readError = ESTALE
+                }
+            }
             var allocated = entry.allocated
             var freeable = allocated
             if entry.linkCount > 1, !claim(entry.fileID, in: ownership.links, by: node, counted: &countedHere) {
@@ -549,9 +726,17 @@ final class Walk: @unchecked Sendable {
                 // Clone complet d'un fichier compté ailleurs : il n'occupe rien de plus.
                 allocated = 0
                 freeable = 0
-            } else if options.measurePrivateSizes, entry.mayShareBlocks,
-                      let privateSize = BulkReader.privateSize(directoryFD: fd, name: entry.name) {
-                freeable = privateSize
+            } else if boundRoot != nil, options.measurePrivateSizes, !entry.sharingFlagsAreKnown,
+                      entry.type == Attr.typeRegular {
+                freeable = 0
+                readError = EIO
+            } else if options.measurePrivateSizes, entry.mayShareBlocks {
+                if let privateSize = BulkReader.privateSize(directoryFD: fd, name: entry.name) {
+                    freeable = privateSize
+                } else {
+                    freeable = 0
+                    readError = EIO
+                }
             }
             let isPlist = options.readOnlyPreferencesDirectory != nil && PreferenceDirectory.isPlist(entry.name)
             if isPlist, insideReadOnlyPreferences == nil {
@@ -565,6 +750,10 @@ final class Walk: @unchecked Sendable {
                 || (isPlist && insideReadOnlyPreferences == true)
                 || (looksLikeArchive && insideAccountArchives == true)
             let sizes = Sizes(allocated: allocated, freeable: protected ? 0 : freeable)
+            if let linkInfo {
+                recordLink(path: childPath, info: linkInfo, node: node, name: entry.name,
+                           bytes: sizes.freeable, isLeaf: entry.allocated >= options.leafThreshold)
+            }
             node.ownFiles += sizes
             node.ownFileCount += 1
             if let date = entry.modified, date > (node.ownLatestModification ?? .distantPast) {
@@ -588,8 +777,7 @@ final class Walk: @unchecked Sendable {
         }
 
         node.resetOwnContent()
-        var status = BulkReader.read(directoryFD: fd, extended: extendedSupported.load(ordering: .relaxed),
-                                     buffer: buffer, visit: visit)
+        var status = readDirectory(fd, extendedSupported.load(ordering: .relaxed), buffer, visit)
         if status == EINVAL, extendedSupported.load(ordering: .relaxed) {
             // Volume qui refuse les attributs étendus (exFAT, réseau) : on
             // recommence sans, et on ne les redemande plus.
@@ -600,8 +788,9 @@ final class Walk: @unchecked Sendable {
             children.removeAll()
             files = 0
             bytes = 0
+            readError = 0
             lseek(fd, 0, SEEK_SET)
-            status = BulkReader.read(directoryFD: fd, extended: false, buffer: buffer, visit: visit)
+            status = readDirectory(fd, false, buffer, visit)
         }
         if let physical, PreferenceDirectory.capturingLocation(openDirectory: fd).resolvedPath != physical {
             staleDirectories.store(true, ordering: .relaxed)
@@ -613,8 +802,8 @@ final class Walk: @unchecked Sendable {
             let kept = Set(keptOrNew.map(ObjectIdentifier.init))
             abandoned.append(contentsOf: known.values.map(\.node).filter { !kept.contains(ObjectIdentifier($0)) })
         }
-        if status != 0 && node.ownFileCount == 0 && node.children.isEmpty {
-            node.status = .inaccessible(code: status)
+        if status != 0 || readError != 0 {
+            node.status = .inaccessible(code: status != 0 ? status : readError)
         }
         progress.add(files: files, bytes: bytes)
         return children
@@ -627,8 +816,103 @@ final class Walk: @unchecked Sendable {
         return notableExtensions.contains(String(name[name.index(after: dot)...]))
     }
 
+    /// Exclusions are lexical policy checks. Do not resolve or open an
+    /// excluded root just to decide whether it is excluded.
+    private static func exclusionKey(_ path: String) -> String {
+        var components: [String] = []
+        for component in path.split(separator: "/") {
+            if component == "." { continue }
+            if component == ".." { if !components.isEmpty { components.removeLast() }; continue }
+            components.append(String(component))
+        }
+        if components.starts(with: ["System", "Volumes", "Data"]) { components.removeFirst(3) }
+        if let first = components.first, ["var", "tmp", "etc"].contains(first) { components.insert("private", at: 0) }
+        return "/" + components.joined(separator: "/")
+    }
+
+    private func directoryIsAllowed(_ url: URL, _ info: stat) -> Bool {
+        guard !progress.isCancelled, !isExcluded(url.path) else { return false }
+        progress.reportProgress()
+        return true
+    }
+
+    private func isExcluded(_ path: String) -> Bool {
+        let key = Self.exclusionKey(path)
+        return excludedRoots.contains { $0 == "/" || key == $0 || key.hasPrefix($0 + "/") }
+    }
+
+    private func recordLink(path: String, info: stat, node: TreeNode, name: String?, bytes: Int64, isLeaf: Bool) {
+        let key = LinkedFile(device: info.st_dev, inode: UInt64(info.st_ino))
+        linkedFiles.withLock { links in
+            links[key, default: LinkSelection()].names[path] = LinkName(path: path, info: info)
+            if bytes > 0 {
+                links[key, default: LinkSelection()].contributions.append(
+                    LinkContribution(node: node, name: name, bytes: bytes, isLeaf: isLeaf))
+            }
+        }
+    }
+
+    /// Occupied blocks are deduplicated during traversal. Gain additionally
+    /// requires every hardlink name to be in the selected, still-current set.
+    private func revalidateLinkGains() {
+        guard let boundRoot else { return }
+        let selections = linkedFiles.withLock { Array($0.values) }
+        for selection in selections {
+            let names = Array(selection.names.values)
+            let complete = !progress.isCancelled && !names.isEmpty && names.allSatisfy { name in
+                guard Int(name.info.st_nlink) == names.count, !isExcluded(name.path),
+                      let parent = boundRoot.openDirectory(URL(fileURLWithPath: name.path, isDirectory: false).deletingLastPathComponent(),
+                                                           allowing: directoryIsAllowed) else { return false }
+                defer { close(parent) }
+                var current = stat()
+                guard fstatat(parent, (name.path as NSString).lastPathComponent, &current, AT_SYMLINK_NOFOLLOW) == 0 else { return false }
+                return current.st_dev == name.info.st_dev && current.st_ino == name.info.st_ino
+                    && current.st_mode == name.info.st_mode && current.st_flags == name.info.st_flags
+                    && current.st_birthtimespec.tv_sec == name.info.st_birthtimespec.tv_sec
+                    && current.st_birthtimespec.tv_nsec == name.info.st_birthtimespec.tv_nsec
+                    && current.st_nlink == name.info.st_nlink && current.st_size == name.info.st_size
+                    && current.st_ctimespec.tv_sec == name.info.st_ctimespec.tv_sec
+                    && current.st_ctimespec.tv_nsec == name.info.st_ctimespec.tv_nsec
+            }
+            for contribution in selection.contributions {
+                if complete && gainGroupCovers(names, contribution: contribution) { continue }
+                let node = contribution.node
+                node.ownFiles.freeable = max(0, node.ownFiles.freeable - contribution.bytes)
+                if let name = contribution.name {
+                    if contribution.isLeaf, let index = node.files.firstIndex(where: { $0.name == name }) {
+                        node.files[index].sizes.freeable = 0
+                    } else {
+                        node.smallFiles.freeable = max(0, node.smallFiles.freeable - contribution.bytes)
+                    }
+                }
+                var current: TreeNode? = node
+                while let parent = current {
+                    parent.needsTotals = true
+                    current = parent.parent
+                }
+            }
+        }
+    }
+
     /// Ce dossier doit-il compter ce lien physique (ou ce clone) ?
     ///
+    private func gainGroupCovers(_ names: [LinkName], contribution: LinkContribution) -> Bool {
+        guard let groups = options.hardlinkGainGroups else { return true }
+        var root = contribution.node
+        while let parent = root.parent { root = parent }
+        let rootPath = Self.exclusionKey(root.path)
+        let relevant = groups.filter { $0.contains { Self.exclusionKey($0) == rootPath } }
+        return !relevant.isEmpty && relevant.allSatisfy { group in
+            names.allSatisfy { name in
+                let path = Self.exclusionKey(name.path)
+                return group.contains {
+                    let selected = Self.exclusionKey($0)
+                    return path == selected || path.hasPrefix(selected + "/")
+                }
+            }
+        }
+    }
+
     /// Oui s'il est le premier à le rencontrer, ou s'il le comptait déjà lors
     /// de l'analyse précédente : c'est ce qui permet de relire un seul dossier
     /// sans fausser les totaux.
@@ -639,7 +923,7 @@ final class Walk: @unchecked Sendable {
 
     /// Pourquoi ne pas descendre dans ce dossier, s'il y a une raison.
     private func skipReason(for entry: RawEntry, path: String, rootDevice: Int32) -> NodeStatus? {
-        if options.excludedPaths.contains(path) { return .excluded }
+        if isExcluded(path) { return .excluded }
         // `getattrlistbulk` décrit un point de montage avec les attributs du
         // système de fichiers *en dessous* : son DEVID est celui du parent. Seul
         // l'état de montage le trahit. Comparer les DEVID n'aurait pas suffi à
@@ -791,29 +1075,8 @@ public enum MountTable {
     }
 
     public static func entries() -> [Entry] {
-        let count = getfsstat(nil, 0, MNT_NOWAIT)
-        guard count > 0 else { return [] }
-        // Un tampon brut plutôt que `[statfs](repeating: statfs(), …)` : le nom
-        // du type est aussi celui d'une fonction, et Swift ne sait pas lequel on
-        // veut.
-        let capacity = Int(count) + 8
-        let buffer = UnsafeMutablePointer<statfs>.allocate(capacity: capacity)
-        defer { buffer.deallocate() }
-        let filled = getfsstat(buffer, Int32(MemoryLayout<statfs>.stride * capacity), MNT_NOWAIT)
-        guard filled > 0 else { return [] }
-        return (0..<Int(filled)).map { index in
-            var info = buffer[index]
-            return Entry(
-                mountPoint: cString(&info.f_mntonname),
-                fileSystem: cString(&info.f_fstypename),
-                device: cString(&info.f_mntfromname)
-            )
-        }
-    }
-
-    private static func cString<T>(_ tuple: inout T) -> String {
-        withUnsafeBytes(of: &tuple) { raw in
-            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        (MountedFileSystems.read() ?? []).map {
+            Entry(mountPoint: $0.path, fileSystem: $0.type, device: $0.source)
         }
     }
 }

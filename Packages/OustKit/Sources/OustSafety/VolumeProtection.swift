@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OustCore
 
 /// Ce qu'un disque porte et qu'Oust! ne touche jamais, où qu'il soit : les
 /// dossiers que macOS tient à la racine de chaque volume, les sauvegardes
@@ -82,14 +83,45 @@ public enum VolumeProtection {
         }
     }
 
+    package static func timeMachineSparseBundle(_ url: URL, in root: AnalysisRoot) -> Bool? {
+        guard url.pathExtension.lowercased() == "sparsebundle" else { return false }
+        guard let fd = root.openDirectory(url) else { return nil }
+        defer { close(fd) }
+        for marker in timeMachineSparseMarkers {
+            var info = stat()
+            if fstatat(fd, marker, &info, AT_SYMLINK_NOFOLLOW) == 0 { return true }
+            if errno != ENOENT { return nil }
+        }
+        return false
+    }
+
     /// Un volume entier tenu par Time Machine, d'après ce qu'il porte à sa
     /// racine : des sauvegardes datées (APFS). Un disque HFS+ peut garder
     /// `Backups.backupdb` à côté d'autres dossiers : seul ce dossier est
     /// protégé. `tmutil destinationinfo` le dit aussi, quand le disque est
     /// connu de ce Mac.
     public static func looksLikeTimeMachineVolume(_ root: URL) -> Bool {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        timeMachineVolumeMarker(root) == true
+    }
+
+    package static func timeMachineVolumeMarker(_ root: URL) -> Bool? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return nil }
         return names.contains(where: isDatedBackup)
+    }
+
+    package static func timeMachineVolumeMarker(in root: AnalysisRoot) -> Bool? {
+        guard let fd = root.openDirectory(root.url) else { return nil }
+        guard let directory = fdopendir(fd) else { close(fd); return nil }
+        defer { closedir(directory) }
+        while true {
+            errno = 0
+            guard let entry = readdir(directory) else { return errno == 0 ? false : nil }
+            let name = withUnsafeBytes(of: entry.pointee.d_name) {
+                String(bytes: $0.prefix(Int(entry.pointee.d_namlen)), encoding: .utf8)
+            }
+            guard let name else { return nil }
+            if isDatedBackup(name) { return true }
+        }
     }
 
     /// Le dossier de la corbeille du Mac à la racine d'un autre volume, et

@@ -555,6 +555,9 @@ public enum SimilarImageFinder {
 
     static func collect(_ options: SimilarImageOptions,
                         progress: SimilarImageProgress) -> (files: [File], skippedInCloud: Int) {
+        if !options.exclusions.analysisRoots.isEmpty {
+            return collectBound(options, progress: progress)
+        }
         let keys: [URLResourceKey] = [
             .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .isVolumeKey, .fileSizeKey, .totalFileAllocatedSizeKey,
             .fileResourceIdentifierKey, .fileContentIdentifierKey, .mayShareFileContentKey, .contentModificationDateKey,
@@ -617,6 +620,47 @@ public enum SimilarImageFinder {
         return (collapseShared(files), skippedInCloud)
     }
 
+    private static func collectBound(
+        _ options: SimilarImageOptions, progress: SimilarImageProgress
+    ) -> (files: [File], skippedInCloud: Int) {
+        let excluded = Set(options.excludedFolders.map { $0.standardizedFileURL.path })
+        var files: [File] = []
+        var seen = Set<String>()
+        var catalogFolders = Set<String>()
+        var skippedInCloud = 0
+        options.exclusions.walkBound(cancelled: { progress.isCancelled }, descend: { url in
+            !skippedFolderNames.contains(url.lastPathComponent) && !skippedExtensions.contains(url.pathExtension.lowercased())
+                && !excluded.contains(url.standardizedFileURL.path)
+        }, enter: { fd in
+            var marker = stat()
+            return fstatat(fd, ".git", &marker, AT_SYMLINK_NOFOLLOW) != 0 && errno == ENOENT
+        }) { url, info in
+            let ext = url.pathExtension.lowercased()
+            if catalogExtensions.contains(ext) {
+                catalogFolders.insert(url.deletingLastPathComponent().path + "/")
+                return
+            }
+            guard imageExtensions.contains(ext) || rawExtensions.contains(ext), info.st_size >= options.minimumSize else { return }
+            let allocated = Int64(info.st_blocks) * 512
+            guard info.st_flags & DuplicateExclusions.dataless == 0, allocated > 0 else {
+                skippedInCloud += 1
+                return
+            }
+            guard let identity = DuplicateExclusions.regularIdentity(info), !screenshotName(url.lastPathComponent),
+                  seen.insert(url.path).inserted else { return }
+            let screenshot = options.exclusions.withRead(url, expected: identity) { handle, _ in
+                fgetxattr(handle.fileDescriptor, "com.apple.metadata:kMDItemIsScreenCapture", nil, 0, 0, 0) > 0
+            }
+            guard screenshot == false else { return }
+            progress.advance()
+            files.append(File(url: url, logicalSize: identity.size, allocated: allocated, fileID: identity.fileID,
+                              contentKey: options.exclusions.cloneKey(of: url, identity: identity),
+                              modified: identity.modified, readIdentity: identity))
+        }
+        files.removeAll { file in catalogFolders.contains { file.url.path.hasPrefix($0) } }
+        return (collapseShared(files), skippedInCloud)
+    }
+
     /// Deux images d'une même prise de vue, ou deux copies d'un même fichier :
     /// mêmes dates EXIF à `window` près, ou même nom au suffixe de copie près.
     /// La date de modification ne compte pas : des images générées ou
@@ -639,8 +683,11 @@ public enum SimilarImageFinder {
     /// l'attribut posé par macOS, sinon le nom.
     static func isScreenshot(_ url: URL) -> Bool {
         if getxattr(url.path, "com.apple.metadata:kMDItemIsScreenCapture", nil, 0, 0, XATTR_NOFOLLOW) > 0 { return true }
-        let name = url.lastPathComponent
-        return ["Screenshot", "Screen Shot", "Capture d’écran", "Capture d'écran", "CleanShot"].contains { name.hasPrefix($0) }
+        return screenshotName(url.lastPathComponent)
+    }
+
+    private static func screenshotName(_ name: String) -> Bool {
+        ["Screenshot", "Screen Shot", "Capture d’écran", "Capture d'écran", "CleanShot"].contains { name.hasPrefix($0) }
     }
 
     /// Un lien physique ou un clone complet n'est pas une copie de plus : le

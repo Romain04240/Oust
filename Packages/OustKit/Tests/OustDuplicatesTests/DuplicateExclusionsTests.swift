@@ -2,10 +2,115 @@ import Darwin
 import Foundation
 import Testing
 @testable import OustDuplicates
+import OustCore
 import OustScan
 
 @Suite("Les dossiers exclus de Doublons")
 struct DuplicateExclusionsTests {
+    @Test("Identiques conserve le dossier ouvert si son ancien chemin est redirigé")
+    func exactStaysOnOpenedRoot() async throws {
+        let pile = try Pile()
+        let elsewhere = try Pile()
+        let original = try pile.file("Dossier/A.bin").deletingLastPathComponent()
+        _ = try pile.file("Dossier/B.bin")
+        _ = try elsewhere.file("Redirection-Un.bin", seed: 33)
+        _ = try elsewhere.file("Redirection-Deux.bin", seed: 33)
+        let root = try openedRoot(original)
+        let moved = pile.root.appendingPathComponent("Original")
+        try FileManager.default.moveItem(at: original, to: moved)
+        try FileManager.default.createSymbolicLink(at: original, withDestinationURL: elsewhere.root)
+        var options = DuplicateOptions(roots: [root.url])
+        options.exclusions.analysisRoots = [root]
+
+        let groups = await DuplicateFinder.find(options)
+        #expect(groups.count == 1)
+        #expect(Set(groups.flatMap(\.files).map { $0.url.lastPathComponent }) == ["A.bin", "B.bin"])
+    }
+
+    @Test("Images similaires ignore une redirection de dossier après l’admission")
+    func similarStaysOnOpenedRoot() async throws {
+        let pile = try ImageFolder()
+        let other = try ImageFolder()
+        let first = try pile.image("Dossier/Original.jpg", Drawing.landscape())
+        _ = try pile.image("Dossier/Original copie.jpg", Drawing.landscape(), quality: 0.7)
+        _ = try other.image("Redirection.jpg", Drawing.city())
+        _ = try other.image("Redirection copie.jpg", Drawing.city(), quality: 0.7)
+        let path = first.deletingLastPathComponent()
+        let root = try openedRoot(path)
+        try FileManager.default.moveItem(at: path, to: pile.root.appendingPathComponent("Original"))
+        try FileManager.default.createSymbolicLink(at: path, withDestinationURL: other.root)
+        var options = pile.options()
+        options.roots = [root.url]
+        options.exclusions.analysisRoots = [root]
+
+        let found = await SimilarImageFinder.find(options)
+        #expect(found.examined == 2)
+        #expect(Set(found.groups.flatMap(\.images).map { $0.url.lastPathComponent })
+                == ["Original.jpg", "Original copie.jpg"])
+    }
+
+    private func openedRoot(_ url: URL) throws -> AnalysisRoot {
+        let path = try #require(realpath(url.path, nil))
+        defer { free(path) }
+        return try #require(AnalysisRoot(URL(fileURLWithPath: String(cString: path), isDirectory: true)))
+    }
+
+    @Test("Coup d’œil reçoit des copies limitées et refuse un original remplacé")
+    func quickLookUsesPrivateBoundCopies() async throws {
+        let pile = try Pile()
+        let first = try pile.file("Premiere.bin", bytes: 4096)
+        _ = try pile.file("Seconde.bin", bytes: 4096)
+        let root = try openedRoot(pile.root)
+        var options = DuplicateOptions(roots: [root.url], minimumSize: 1)
+        options.exclusions.analysisRoots = [root]
+        let groups = await DuplicateFinder.find(options)
+        let group = try #require(groups.first)
+        let selected = try #require(group.files.first(where: { $0.url.lastPathComponent == first.lastPathComponent }))
+        let sources = group.files.map(DuplicatePreviewCopies.Source.init)
+        #expect(DuplicatePreviewCopies.prepare(selected.url, sources: sources, exclusions: options.exclusions,
+                                               maximumFileBytes: 4095) == nil)
+        var owner = DuplicatePreviewCopies.prepare(selected.url, sources: sources, exclusions: options.exclusions,
+                                                   maximumFileBytes: 4096, maximumGroupBytes: 4096)
+        let copy = try #require(owner?.urls[selected.url])
+        #expect(owner?.urls.count == 1)
+        #expect(copy != selected.url)
+        #expect(try Data(contentsOf: copy) == Data(contentsOf: selected.url))
+        var info = stat()
+        #expect(lstat(copy.path, &info) == 0 && info.st_mode & 0o777 == 0o600)
+        try FileManager.default.moveItem(at: selected.url, to: pile.root.appendingPathComponent("Original.bin"))
+        _ = try pile.file(first.lastPathComponent, bytes: 4096, seed: 42)
+        #expect(DuplicatePreviewCopies.prepare(selected.url, sources: sources, exclusions: options.exclusions) == nil)
+        #expect(try Data(contentsOf: copy) != Data(contentsOf: selected.url))
+        owner = nil
+        #expect(!FileManager.default.fileExists(atPath: copy.path))
+    }
+
+    @Test("Le nettoyage d’un aperçu laisse intact un dossier de remplacement")
+    func previewCleanupKeepsReplacement() async throws {
+        let pile = try Pile()
+        _ = try pile.file("Un.txt", bytes: 4096)
+        _ = try pile.file("Deux.txt", bytes: 4096)
+        let root = try openedRoot(pile.root)
+        var options = DuplicateOptions(roots: [root.url], minimumSize: 1)
+        options.exclusions.analysisRoots = [root]
+        let files = try #require(await DuplicateFinder.find(options).first?.files)
+        let requested = try #require(files.first?.url)
+        var owner = DuplicatePreviewCopies.prepare(requested, sources: files.map(DuplicatePreviewCopies.Source.init),
+                                                   exclusions: options.exclusions, maximumGroupBytes: 8192)
+        let copy = try #require(owner?.urls[requested])
+        let original = copy.deletingLastPathComponent().deletingLastPathComponent()
+        let moved = original.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+        let fm = FileManager.default
+        try fm.moveItem(at: original, to: moved)
+        defer { try? fm.removeItem(at: moved); try? fm.removeItem(at: original) }
+        try fm.createDirectory(at: original, withIntermediateDirectories: false)
+        let marker = original.appendingPathComponent("Temoin.txt")
+        try Data([12]).write(to: marker)
+        owner = nil
+        #expect(fm.fileExists(atPath: marker.path))
+        #expect(!fm.fileExists(atPath: moved.appendingPathComponent("0").appendingPathComponent(copy.lastPathComponent).path))
+    }
+
     @Test("Identiques : la lecture directe et l'arbre suivent la même exclusion")
     func bothExactPaths() async throws {
         let pile = try Pile()

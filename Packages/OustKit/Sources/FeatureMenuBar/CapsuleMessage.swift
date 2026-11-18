@@ -14,6 +14,7 @@ import OustWatch
 ///     [symbole]  label  FIGURE mot  [✓ note sûre]
 public struct CapsuleMessage: Sendable, Equatable {
     public enum Priority: Int, Sendable { case normal, batteryWarning, warning }
+    public enum Tint: Sendable { case batteryLow, batteryCharged }
     /// Le symbole de tête (SF Symbols).
     public var symbol: String
     /// Ce dont parle la pastille : « Espace disque · Macintosh HD », « Entretien ».
@@ -30,9 +31,11 @@ public struct CapsuleMessage: Sendable, Equatable {
     /// Ce que fait un clic, pour VoiceOver.
     public var hint: String
     public var priority: Priority
+    public var tint: Tint?
 
     public init(symbol: String, label: String, figure: String? = nil, word: String, safeNote: String? = nil,
-                gauge: CapsuleGauge, announcement: String, hint: String, priority: Priority = .normal) {
+                gauge: CapsuleGauge, announcement: String, hint: String, priority: Priority = .normal,
+                tint: Tint? = nil) {
         self.symbol = symbol
         self.label = label
         self.figure = figure
@@ -42,6 +45,7 @@ public struct CapsuleMessage: Sendable, Equatable {
         self.announcement = announcement
         self.hint = hint
         self.priority = priority
+        self.tint = tint
     }
 }
 
@@ -88,7 +92,8 @@ extension CapsuleMessage {
                               gauge: CapsuleGauge(filled: Double(reading.level) / 100),
                               announcement: title + " " + figure,
                               hint: L10n.string("watch.battery_capsule.hint"),
-                              priority: low ? .batteryWarning : .normal)
+                              priority: low ? .batteryWarning : .normal,
+                              tint: low ? .batteryLow : .batteryCharged)
     }
 
     /// L'entretien : « Entretien · 12 Go à récupérer » (Romain : « à récupérer »,

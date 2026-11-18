@@ -283,17 +283,27 @@ extension TreeNode {
     /// (autre volume, exclu), fichier trop petit pour être une feuille. On
     /// mesure alors le disque, plutôt que d'annoncer zéro.
     public func measurement(of url: URL) -> Measurement? {
+        measurement(of: url, matchingFileID: nil, regularFileSize: nil, modificationDate: nil)
+    }
+
+    package func measurement(of url: URL, matchingFileID: UInt64?, regularFileSize: Int64?,
+                             modificationDate: Date?) -> Measurement? {
         let path = url.standardizedFileURL.path
         if let node = descendant(atPath: path) {
-            guard node.status == .ok || node.status.isInaccessible else { return nil }
+            guard node.status == .ok || node.status.isInaccessible,
+                  matchingFileID == nil || (node.fileID == matchingFileID && regularFileSize == nil)
+            else { return nil }
             return Measurement(sizes: node.total, fileCount: node.fileCount,
                                latestModification: node.latestModification,
-                               inaccessible: node.status.isInaccessible)
+                               inaccessible: node.status.isInaccessible || (matchingFileID != nil && node.inaccessibleCount > 0))
         }
         let parentPath = (path as NSString).deletingLastPathComponent
         let name = (path as NSString).lastPathComponent
         guard let parent = descendant(atPath: parentPath), parent.status == .ok,
-              let leaf = parent.files.first(where: { $0.name == name }) else { return nil }
+              let leaf = parent.files.first(where: { $0.name == name }),
+              matchingFileID == nil || (leaf.fileID == matchingFileID && leaf.logicalSize == regularFileSize
+                                        && leaf.modified == modificationDate)
+        else { return nil }
         return Measurement(sizes: leaf.sizes, fileCount: 1, latestModification: leaf.modified, inaccessible: false)
     }
 }

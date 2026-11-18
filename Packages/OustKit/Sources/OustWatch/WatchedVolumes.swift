@@ -38,8 +38,12 @@ public enum WatchedVolumes {
     /// `tmutil destinationinfo -X`. Illisible : aucun (rien n'est écarté à tort,
     /// au pire une sauvegarde pleine prévient une fois).
     public static func timeMachineMountPoints(in plist: Data) -> Set<String> {
+        readTimeMachineMountPoints(in: plist) ?? []
+    }
+
+    package static func readTimeMachineMountPoints(in plist: Data) -> Set<String>? {
         guard let object = try? PropertyListSerialization.propertyList(from: plist, format: nil) as? [String: Any],
-              let destinations = object["Destinations"] as? [[String: Any]] else { return [] }
+              let destinations = object["Destinations"] as? [[String: Any]] else { return nil }
         return Set(destinations.compactMap { $0["MountPoint"] as? String }.map(normalized))
     }
 

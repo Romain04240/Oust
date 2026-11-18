@@ -279,7 +279,17 @@ struct CapsuleView: View {
     /// ce qu'Oust! peut rendre sans risque si une analyse le sait. Pour
     /// l'entretien : « Entretien », ce qu'il rendrait.
     private func pill(_ message: CapsuleMessage) -> some View {
-        HStack(spacing: Spacing.small + 2) {
+        let batteryAccent: Color? = switch message.tint {
+        case .batteryLow: .orange
+        case .batteryCharged: .green
+        case nil: nil
+        }
+        let batteryBackground: Color? = switch message.tint {
+        case .batteryLow: Color(hex: 0x4B290B)
+        case .batteryCharged: Color(hex: 0x123B2A)
+        case nil: nil
+        }
+        return HStack(spacing: Spacing.small + 2) {
             Image(systemName: message.symbol)
                 .font(.system(size: 15, weight: .semibold))
             Text(verbatim: message.label)
@@ -312,10 +322,10 @@ struct CapsuleView: View {
         .frame(height: CapsuleGeometry.pillHeight)
         // Le fond de l'icône, violet profond : l'anneau en dégradé s'y lit, ce
         // qu'il ne faisait pas sur le dégradé magenta de la vue d'ensemble.
-        .background(Self.deep, in: Capsule())
-        .glassEffect(.regular.tint(Color(hex: 0x1B0E52).opacity(0.25)).interactive(), in: Capsule())
-        .overlay(PillGauge(gauge: message.gauge, isShown: state.isShown))
-        .shadow(color: Palette.colors(for: .overview).glow.opacity(0.45), radius: 14, y: 4)
+        .background(batteryBackground.map(AnyShapeStyle.init) ?? AnyShapeStyle(Self.deep), in: Capsule())
+        .glassEffect(.regular.tint((batteryBackground ?? Color(hex: 0x1B0E52)).opacity(0.25)).interactive(), in: Capsule())
+        .overlay(PillGauge(gauge: message.gauge, isShown: state.isShown, tint: batteryAccent))
+        .shadow(color: (batteryAccent ?? Palette.colors(for: .overview).glow).opacity(0.45), radius: 14, y: 4)
         .contentShape(Capsule())
         .onTapGesture { state.onOpen() }
         .onHover { state.isHovered = $0 }
@@ -343,6 +353,7 @@ struct CapsuleView: View {
 private struct PillGauge: View {
     let gauge: CapsuleGauge
     let isShown: Bool
+    let tint: Color?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 3 pt, trop fin ; 6, trop épais (Romain, 18/10/2026).
@@ -377,7 +388,8 @@ private struct PillGauge: View {
             if kept > 0 {
                 PillOutline(inset: Self.lineWidth / 2)
                     .trim(from: 0, to: shown ? kept : 0)
-                    .stroke(Self.ring, style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round))
+                    .stroke(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(Self.ring),
+                            style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round))
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.9).delay(0.15), value: isShown)
             }
         }

@@ -20,7 +20,12 @@ public struct WatchSettings: Sendable, Hashable, Codable {
     public var alsoNotifies: Bool
     public var threshold: LowDiskThreshold
     public var policies: [RetentionPolicy]
+    public enum TemperatureUnit: String, CaseIterable, Codable, Sendable {
+        case celsius, fahrenheit
+    }
+
     public var batteryAlerts: BatteryAlertSettings
+    public var batteryTemperatureUnit: TemperatureUnit = .celsius
 
     public init(alertsLowDisk: Bool = true, alsoNotifies: Bool = false, threshold: LowDiskThreshold = .standard,
                 policies: [RetentionPolicy] = RetentionFamily.allCases.map { RetentionPolicy(family: $0) },
@@ -42,6 +47,8 @@ public struct WatchSettings: Sendable, Hashable, Codable {
         threshold = try container.decodeIfPresent(LowDiskThreshold.self, forKey: .threshold) ?? defaults.threshold
         policies = try container.decodeIfPresent([RetentionPolicy].self, forKey: .policies) ?? defaults.policies
         batteryAlerts = (try? container.decode(BatteryAlertSettings.self, forKey: .batteryAlerts)) ?? defaults.batteryAlerts
+        batteryTemperatureUnit = (try? container.decode(TemperatureUnit.self, forKey: .batteryTemperatureUnit))
+            ?? defaults.batteryTemperatureUnit
     }
 
     /// La règle d'une famille ; désactivée si elle n'a jamais été enregistrée.

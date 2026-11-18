@@ -30,7 +30,7 @@ public final class SimilarImagesModel {
     /// ceux qu'on ajoute. Gardés le temps de la session.
     public private(set) var folders: [URL]
 
-    @ObservationIgnored private var thumbnails: [String: ImageThumbnail] = [:]
+    @ObservationIgnored private(set) var sourceRoots: AppModel.DuplicatePreviewRoots?
 
     init(home: URL) {
         self.home = home
@@ -54,25 +54,34 @@ public final class SimilarImagesModel {
     // MARK: Recherche
 
     public func search() async {
-        guard let app, !phase.isRunning, !folders.isEmpty, app.canSearchDuplicates(folders) else { return }
-        let session = app.duplicateReadSession
-        guard session.acquire() else { return }
-        defer { session.release() }
+        guard let app, !phase.isRunning, !folders.isEmpty,
+              let reader = app.beginDuplicateRead() else { return }
+        defer {
+            withExtendedLifetime(reader) {}
+            if phase.isRunning { phase = findings == nil ? .idle : .done(searchedAt ?? Date()) }
+        }
         let revision = app.duplicateExclusionRevision
         phase = .running
         let progress = SimilarImageProgress()
         self.progress = progress
-        var options = SimilarImageOptions(roots: folders, excludedFolders: app.preferences.projectRoots)
+        let requestedRoots = folders
+        guard await app.canSearchDuplicates(requestedRoots, reader: reader),
+              let resolved = await app.resolveAnalysisRoots(requestedRoots, reader: reader),
+              revision == app.duplicateExclusionRevision,
+              await app.canSearchDuplicates(resolved.urls, reader: reader), !progress.isCancelled else { return }
+        var options = SimilarImageOptions(roots: resolved.urls, excludedFolders: app.preferences.projectRoots)
         options.exclusions = app.preferences.duplicateExclusions
+        options.exclusions.analysisRoots = resolved.directories
         let found = await SimilarImageFinder.find(options, progress: progress)
-        guard revision == app.duplicateExclusionRevision, app.canSearchDuplicates(options.roots) else { return }
+        guard await app.resolveAnalysisRoots(requestedRoots, reader: reader) == resolved,
+              revision == app.duplicateExclusionRevision, await app.canSearchDuplicates(resolved.urls, reader: reader) else { return }
         guard !progress.isCancelled else {
             phase = findings == nil ? .idle : .done(searchedAt ?? Date())
             return
         }
         findings = found
         searchedAt = Date()
-        thumbnails = [:]
+        sourceRoots = AppModel.DuplicatePreviewRoots(requestedRoots, resolved)
         reconcileCart()
         phase = .done(Date())
     }
@@ -81,7 +90,7 @@ public final class SimilarImagesModel {
         progress.cancel()
         findings = nil
         searchedAt = nil
-        thumbnails = [:]
+        sourceRoots = nil
         phase = .idle
     }
 
@@ -222,26 +231,24 @@ public final class SimilarImagesModel {
     /// Une vignette pour l'écran, décodée hors du fil principal et gardée le
     /// temps de la recherche ; aucune n'est écrite sur le disque.
     public func thumbnail(for url: URL, side: Int) async -> CGImage? {
-        guard let app, !app.changingDuplicateExclusions else { return nil }
-        let session = app.duplicateReadSession
+        guard let app, !app.changingDuplicateExclusions, let sourceRoots,
+              let member = groups.lazy.flatMap(\.images).first(where: { $0.url == url }) else { return nil }
+        guard let reader = app.beginDuplicateRead() else { return nil }
+        defer { withExtendedLifetime(reader) {} }
         let revision = app.duplicateExclusionRevision
-        let key = "\(side)|\(url.path)"
-        let usePath = app.canUseDuplicateQuickLook
-        let exclusions = app.preferences.duplicateExclusions
-        let member = usePath ? nil : groups.lazy.flatMap(\.images).first { $0.url == url }
-        if usePath, let cached = thumbnails[key] { return cached.image }
+        let searchedAt = searchedAt
+        guard let openRoots = await app.resolveAnalysisRoots(sourceRoots.requested, reader: reader), openRoots.stamp == sourceRoots.stamp,
+              revision == app.duplicateExclusionRevision, self.searchedAt == searchedAt else { return nil }
+        var policy = app.preferences.duplicateExclusions
+        policy.analysisRoots = openRoots.directories
+        let exclusions = policy
         let made: ImageThumbnail? = await Task.detached(priority: .userInitiated) {
-            guard session.acquire() else { return nil }
-            defer { session.release() }
-            if usePath { return ImageReader.thumbnail(of: url, side: side).map(ImageThumbnail.init) }
-            guard let member else { return nil }
+            defer { withExtendedLifetime(reader) {} }
             return ImageReader.thumbnail(of: member, side: side, exclusions: exclusions).map(ImageThumbnail.init)
         }.value
-        // Une centaine de groupes à l'écran au plus : au-delà, on repart de zéro
-        // plutôt que de garder des centaines de mégaoctets d'images décodées.
-        guard revision == app.duplicateExclusionRevision, !app.changingDuplicateExclusions else { return nil }
-        if thumbnails.count > 600 { thumbnails = [:] }
-        if usePath, let made { thumbnails[key] = made }
+        guard made != nil, await app.resolveAnalysisRoots(sourceRoots.requested, reader: reader) == openRoots,
+              revision == app.duplicateExclusionRevision, self.searchedAt == searchedAt,
+              !app.changingDuplicateExclusions, !Task.isCancelled else { return nil }
         return made?.image
     }
 }

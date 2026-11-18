@@ -17,8 +17,12 @@ final class MenuBarNavigation {
     }
     private(set) var batteryPresentedAt = ContinuousClock.now
     var height: CGFloat = 500
+    var batteryHealth: BatterySummary?
+    var batteryHealthReadAt: ContinuousClock.Instant?
+    var batteryDiagnostics: BatteryDiagnostics?
+    var batteryDiagnosticsReadAt: ContinuousClock.Instant?
+    var batteryDiagnosticsCycle: Int?
     @ObservationIgnored var close: () -> Void = {}
-    @ObservationIgnored var commands: () -> Void = {}
 }
 
 /// L'icône d'Oust! dans la barre de menus, et son panneau.
@@ -51,10 +55,6 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         self.icon = icon
         super.init()
         navigation.close = { [weak self] in self?.close() }
-        navigation.commands = { [weak self] in
-            guard let self, let anchor = self.anchor else { return }
-            self.showCommands(from: anchor)
-        }
         popover.behavior = .transient
         popover.delegate = self
         popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -71,7 +71,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Change l'icône (monogramme blanc ou en couleur), sans retirer l'élément.
     public func setIcon(_ image: NSImage) {
         icon = image
-        item?.button?.image = image
+        updateStorageBadge(available: model.watch.boot?.capacity.availableForImportantUsage)
     }
 
     private func install() {
@@ -80,8 +80,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         // macOS retient la place que l'utilisateur lui donne (⌘-glisser).
         item.autosaveName = "fr.meaillais.oust.menubar"
         if let button = item.button {
-            button.image = icon
-            button.imagePosition = .imageLeading
+            button.imagePosition = .imageOnly
             configure(button)
         }
         self.item = item
@@ -101,7 +100,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         item.autosaveName = "fr.meaillais.oust.menubar.battery"
         batteryItem = item
         if let button = item.button {
-            button.imagePosition = .imageLeading
+            button.imagePosition = .imageOnly
             configure(button)
             trackBattery(on: button)
         }
@@ -118,16 +117,25 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     /// relu à chaque nouvel échantillon du modèle.
     private func trackLabel() {
         guard let button = item?.button else { return }
-        let title = withObservationTracking {
-            model.watch.boot.map { " " + Formatters.compactBytes($0.capacity.availableForImportantUsage) }
+        let available = withObservationTracking {
+            model.watch.boot?.capacity.availableForImportantUsage
         } onChange: { [weak self, weak button] in
             Task { @MainActor in
                 guard let self, let button, self.item?.button === button else { return }
                 self.trackLabel()
             }
         }
-        button.title = title ?? ""
-        button.setAccessibilityLabel(L10n.string("menubar.storage") + (title ?? ""))
+        updateStorageBadge(available: available)
+    }
+
+    private func updateStorageBadge(available: Int64?) {
+        guard let button = item?.button else { return }
+        let value = available.map { Formatters.compactBytes($0) }
+        let label = L10n.string("menubar.storage")
+        let badge = MenuBarBadge.storage(icon: icon, value: value)
+        item?.length = badge.size.width
+        button.image = badge
+        button.setAccessibilityLabel(value.map { label + ", " + L10n.string("disks.free", $0) } ?? label)
     }
 
     private func trackBattery(on button: NSStatusBarButton) {
@@ -136,20 +144,30 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
             Task { @MainActor in if let button { self?.trackBattery(on: button) } }
         }
         let label = L10n.string("menubar.battery")
-        button.image = NSImage(systemSymbolName: reading?.symbol ?? "batteryblock.slash", accessibilityDescription: label)
-            ?? NSImage(systemSymbolName: "battery.0percent", accessibilityDescription: label)
-        button.image?.isTemplate = true
-        button.contentTintColor = reading?.state == .charging || reading?.state == .charged ? .systemGreen : nil
         let percent = reading.map { L10n.string("menubar.battery_percent", Formatters.count($0.level)) }
-        button.title = percent.map { " " + $0 } ?? ""
-        button.setAccessibilityLabel(reading.map {
-            label + " " + (percent ?? "") + ", " + L10n.string($0.state.localizationKey)
-        } ?? L10n.string("menubar.battery_unavailable"))
+        let badge = MenuBarBadge.battery(reading, percentage: percent)
+        batteryItem?.length = badge.size.width
+        button.image = badge
+        if let reading, let percent {
+            button.setAccessibilityLabel(label + " " + percent + ", " + L10n.string(reading.state.localizationKey))
+        } else {
+            button.setAccessibilityLabel(L10n.string("menubar.battery_unavailable"))
+        }
     }
 
     private func configure(_ button: NSStatusBarButton) {
+        button.isBordered = false
+        button.imageScaling = .scaleNone
+        button.wantsLayer = true
         button.target = self
         button.action = #selector(toggle(_:))
+        button.setAccessibilityCustomActions([
+            NSAccessibilityCustomAction(name: L10n.string("menubar.commands")) { [weak self, weak button] in
+                guard let self, let button else { return false }
+                self.showCommands(from: button)
+                return true
+            }
+        ])
         let secondary = NSClickGestureRecognizer(target: self, action: #selector(contextClick(_:)))
         secondary.buttonMask = 0x2
         button.addGestureRecognizer(secondary)
@@ -179,9 +197,16 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
             pendingPresentation = .battery(onUnavailable: onUnavailable)
             return true
         }
-        for button in [batteryItem?.button, item?.button].compactMap({ $0 }) {
-            if show(.battery, from: button) { return true }
+        guard let button = batteryItem?.button, visibleRect(of: button) != nil else {
+            onUnavailable()
+            return false
         }
+        if popover.isShown, anchor !== button {
+            pendingPresentation = .battery(onUnavailable: onUnavailable)
+            close()
+            return true
+        }
+        if show(.battery, from: button) { return true }
         onUnavailable()
         return false
     }
@@ -202,12 +227,24 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
             pendingPresentation = .panel(page, sender)
             return true
         }
+        if popover.isShown {
+            if anchor === sender { return true }
+            pendingPresentation = .panel(page, sender)
+            close()
+            return true
+        }
         navigation.page = page
-        if popover.isShown, anchor === sender { return true }
         navigation.height = min(520, max(180, (sender.window?.screen?.visibleFrame.height ?? 600) - 70))
         popover.show(relativeTo: rect, of: sender, preferredEdge: .minY)
         guard popover.isShown else { return false }
         anchor = sender
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer = sender.layer {
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 0.65
+            pulse.toValue = 1
+            pulse.duration = 0.20
+            layer.add(pulse, forKey: "oust.badge.open")
+        }
         navigation.presented = popover.isShown
             // Par-dessus une app en plein écran, comme les menus des autres
             // apps : le panneau rejoint l'espace courant au lieu de rester sur
@@ -223,7 +260,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
 
     /// Ferme le panneau (on vient d'ouvrir la fenêtre, de quitter…).
     public func close() {
-        if popover.isShown && !isClosing { popover.performClose(nil) }
+        if popover.isShown && !isClosing { popover.close() }
     }
 
     public func popoverWillClose(_ notification: Notification) {

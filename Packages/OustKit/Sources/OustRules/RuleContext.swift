@@ -44,6 +44,8 @@ public struct RuleContext: Sendable {
     /// installeurs, corbeille du disque, traces de macOS) le parcourent au lieu
     /// du dossier personnel.
     public var volume: VolumeScope?
+    package var volumeAnchor: AnalysisRoot?
+    package var volumeScanOptions: ScanOptions?
 
     public init(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -116,7 +118,7 @@ public struct RuleContext: Sendable {
             guard path.hasPrefix(base + "/") else { continue }
             let relative = path.dropFirst(base.count + 1)
             guard let first = relative.split(separator: "/").first else { continue }
-            return root.appendingPathComponent(String(first))
+            return root.appendingPathComponent(String(first), isDirectory: true)
         }
         return nil
     }
@@ -133,6 +135,7 @@ public struct RuleContext: Sendable {
 
 /// Un élément trouvé, avant mesure.
 struct Candidate: Sendable {
+    var boundProof: (@Sendable () -> Bool)? = nil
     var item: CleanupItem
     /// Faut-il le mesurer ? Non quand l'outil donne déjà sa taille (simctl).
     var needsMeasure: Bool = true

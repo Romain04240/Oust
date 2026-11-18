@@ -132,11 +132,53 @@ struct BatteryMenuTests {
         #expect(batteryOnly.batteryWatts == 18)
         #expect(batteryOnly.inputPower == nil)
         #expect(batteryOnly.macWatts == nil)
-        #expect(BatteryDiagnostics.parse(adapter: nil, pack: nil, telemetry: nil,
-                                         battery: pack, state: .charging) == nil)
+        let contradictory = BatteryDiagnostics.parse(adapter: nil, pack: nil, telemetry: nil,
+                                                      battery: pack, state: .charging)
+        #expect(contradictory?.batteryVoltage == 12)
+        #expect(contradictory?.batteryMilliamps == nil)
+        #expect(contradictory?.batteryWatts == nil)
         let unsignedPack = ["Voltage": 12_000, "Amperage": Int(UInt32(bitPattern: -1_500))]
         #expect(BatteryDiagnostics.parse(adapter: nil, pack: nil, telemetry: nil,
                                          battery: unsignedPack, state: .onBattery)?.batteryWatts == 18)
+    }
+
+    @Test("Le détail batterie distingue les mAh bruts du pourcentage et le courant nul d’une puissance mesurée")
+    func rawBatteryReadings() throws {
+        let battery = ["Voltage": 13_220, "Amperage": 0, "CurrentCapacity": 100, "MaxCapacity": 100]
+        var pack = ["AppleRawCurrentCapacity": 6_329, "AppleRawMaxCapacity": 6_329, "DesignCapacity": 6_249]
+        let charged = try #require(BatteryDiagnostics.parse(adapter: nil, pack: nil, telemetry: nil,
+                                                            battery: battery, state: .charged, capacityPack: pack))
+        #expect(charged.batteryVoltage == 13.22)
+        #expect(charged.batteryMilliamps == 0)
+        #expect(charged.batteryWatts == nil)
+        #expect(charged.remainingMilliampHours == 6_329)
+        #expect(charged.fullMilliampHours == 6_329)
+        #expect(charged.designMilliampHours == 6_249)
+        pack["AppleRawCurrentCapacity"] = 6_330
+        let invalidRemaining = BatteryDiagnostics.parse(adapter: nil, pack: nil, telemetry: nil,
+                                                       battery: battery, state: .charged, capacityPack: pack)
+        #expect(invalidRemaining?.remainingMilliampHours == nil)
+        let normalizedOnly = BatteryDiagnostics.parse(adapter: nil, pack: nil, telemetry: nil,
+                                                      battery: battery, state: .charged, capacityPack: battery)
+        #expect(normalizedOnly?.fullMilliampHours == nil)
+    }
+
+    @Test("Les capacités brutes sont reprises sur un Air sans combiner deux sources")
+    func legacyRawBatteryCapacity() throws {
+        let air: [String: Any] = ["ExternalConnected": true, "AppleRawCurrentCapacity": 3_244,
+                                  "AppleRawMaxCapacity": 4_215, "BatteryData": ["DesignCapacity": 4_629],
+                                  "Temperature": 2_999]
+        let sample = try #require(BatteryDiagnostics.parseSnapshot(pack: nil, battery: air, state: .onAC,
+                                                                  allowLegacyTemperature: true))
+        #expect(sample.remainingMilliampHours == 3_244)
+        #expect(sample.fullMilliampHours == 4_215)
+        #expect(sample.designMilliampHours == 4_629)
+
+        let split = try #require(BatteryDiagnostics.parseSnapshot(pack: ["AppleRawMaxCapacity": 5_000],
+                                                                 battery: air, state: .onAC,
+                                                                 allowLegacyTemperature: true))
+        #expect(split.remainingMilliampHours == 3_244)
+        #expect(split.fullMilliampHours == 4_215)
     }
 
     @Test("Les anciennes préférences gardent leurs seuils et les alertes batterie sont facultatives")
@@ -144,8 +186,10 @@ struct BatteryMenuTests {
         let old = WatchSettings.decode(Data(#"{"alertsLowDisk":false}"#.utf8))
         #expect(!old.alertsLowDisk)
         #expect(old.batteryAlerts == .init())
+        #expect(old.batteryTemperatureUnit == .celsius)
         var new = old
         new.batteryAlerts = .init(warnsLow: true, warnsCharged: true, low: 15, high: 85)
+        new.batteryTemperatureUnit = .fahrenheit
         #expect(WatchSettings.decode(new.encoded()) == new)
     }
 }

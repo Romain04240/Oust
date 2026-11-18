@@ -171,10 +171,36 @@ struct DuplicateExclusionModelTests {
             #expect(await applying.value == !cancel)
             #expect(!app.changingDuplicateExclusions)
             #expect(!app.duplicateExclusionsWaitingForQuickLook)
+            if cancel {
+                #expect(app.duplicateReadSession === previous)
+                panelClosed = true
+                #expect(app.beginDuplicateRead() != nil)
+            }
             #expect(app.duplicateReadSession !== previous)
             #expect(app.preferences.duplicateExclusions.folders.count == (cancel ? 0 : 1))
             #expect(!app.canMoveFiles && !app.canCloneDuplicates)
         }
+    }
+
+    @Test("L’expiration d’une exclusion conserve les lecteurs et la liste en vigueur")
+    func exclusionTimeoutKeepsActiveReader() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let app = AppModel(home: home, defaults: MemoryDefaults())
+        app.duplicateNativePanelClosed = { true }
+        app.duplicateExclusionWaitBudget = .milliseconds(100)
+        let running = app.duplicateReadSession
+        try #require(running.acquire())
+        #expect(await app.excludeDuplicateFolder(home) == false)
+        #expect(app.duplicateExclusionsTimedOut)
+        #expect(app.preferences.duplicateExclusions.folders.isEmpty)
+        #expect(app.duplicateReadSession === running)
+        #expect(app.beginDuplicateRead() == nil)
+        running.release()
+        #expect(await app.excludeDuplicateFolder(home))
+        #expect(app.preferences.duplicateExclusions.folders.count == 1)
+        #expect(app.duplicateReadSession !== running)
     }
 
     @Test("Une liste illisible suspend les recherches")

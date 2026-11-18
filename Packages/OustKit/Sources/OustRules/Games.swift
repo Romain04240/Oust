@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OustCore
 import OustSafety
@@ -24,6 +25,7 @@ struct GamesFinder {
     static let minimumAllocated: Int64 = 1_000_000
 
     func find() async -> [Candidate] {
+        guard context.volumeAnchor == nil || context.volume != nil else { return [] }
         let found = context.volume != nil
             ? await volumeLibraries()
             : steam() + epic() + gog() + ProAppsFinder.fixedCaches(Self.launchers, context: context)
@@ -46,13 +48,37 @@ struct GamesFinder {
     }
 
     func directories(in folder: URL) -> [URL] {
-        let fileManager = FileManager.default
-        return fileManager.children(of: folder).filter { fileManager.isDirectory($0) && !$0.isSymbolicLink }
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        let directories: [URL]
+        if context.volumeAnchor != nil {
+            directories = (context.volumeEntries(in: folder) ?? [])
+                .filter { $0.facts.mode & S_IFMT == S_IFDIR }.map(\.url)
+        } else {
+            let fileManager = FileManager.default
+            directories = fileManager.children(of: folder).filter { fileManager.isDirectory($0) && !$0.isSymbolicLink }
+        }
+        return directories.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
 
     func isDirectory(_ url: URL) -> Bool {
-        FileManager.default.isDirectory(url) && !url.isSymbolicLink
+        if let anchor = context.volumeAnchor {
+            return VolumeDirectory.entry(url, in: anchor).facts.map { $0.mode & S_IFMT == S_IFDIR } ?? false
+        }
+        return FileManager.default.isDirectory(url) && !url.isSymbolicLink
+    }
+
+    private func lastModification(of url: URL) -> Date? {
+        if let anchor = context.volumeAnchor {
+            return VolumeDirectory.entry(url, in: anchor).facts?.modificationDate
+        }
+        return url.modificationDate
+    }
+
+    private func steamManifestText(at url: URL) -> String? {
+        if context.volumeAnchor != nil {
+            guard let data = context.volumeData(at: url, maximumBytes: 1_048_576) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 
     // MARK: - Autres lanceurs
@@ -150,14 +176,17 @@ struct GamesFinder {
         for folder in directories(in: downloading) + directories(in: temp) where Self.isAppID(folder.lastPathComponent) {
             byApp[folder.lastPathComponent, default: []].append(folder)
         }
-        for file in FileManager.default.children(of: downloading) where file.pathExtension == "patch" {
+        let downloadFiles = context.volumeAnchor == nil
+            ? FileManager.default.children(of: downloading)
+            : (context.volumeEntries(in: downloading) ?? []).filter { $0.facts.isRegularFile }.map(\.url)
+        for file in downloadFiles where file.pathExtension == "patch" {
             let parts = file.deletingPathExtension().lastPathComponent.split(separator: "_")
             guard parts.count >= 3, parts[0] == "state", Self.isAppID(String(parts[1])) else { continue }
             byApp[String(parts[1]), default: []].append(file)
         }
         return byApp.sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }.map { app, paths in
-            let manifest = steamapps.appendingPathComponent("appmanifest_\(app).acf")
-            let name = (try? String(contentsOf: manifest, encoding: .utf8)).flatMap { Self.vdfValues("name", in: $0).first }
+            let manifest = steamapps.appendingPathComponent("appmanifest_\(app).acf", isDirectory: false)
+            let name = steamManifestText(at: manifest).flatMap { Self.vdfValues("name", in: $0).first }
             return candidate(name.flatMap { $0.isEmpty ? nil : $0 } ?? "Steam", detail: paths[0], paths: paths,
                              owner: "Steam", rule: "game.steam.download", safety: .review, method: .removeNow,
                              rebuild: .download)
@@ -188,24 +217,64 @@ struct GamesFinder {
     func steamLeftovers(in steamapps: URL) -> [Candidate] {
         let folders = directories(in: steamapps.appendingPathComponent("common", isDirectory: true))
         guard !folders.isEmpty else { return [] }
+        let (installed, unreadable) = installedSteamFolders(in: steamapps)
+        return folders.filter { !installed.contains($0.lastPathComponent.lowercased()) }.map { folder in
+            var leftover = candidate(folder.lastPathComponent, detail: folder, paths: [folder], owner: "Steam",
+                                     rule: "game.steam.leftover", safety: .review, method: .trash,
+                                     rebuild: .download, lastActivity: lastModification(of: folder))
+            if unreadable { leftover.item.protect(.unknownState) }
+            if context.volumeAnchor != nil, !unreadable {
+                leftover.boundProof = {
+                    let (current, uncertain) = installedSteamFolders(in: steamapps)
+                    return !uncertain && current == installed
+                }
+            }
+            return leftover
+        }
+    }
+
+    private func installedSteamFolders(in steamapps: URL) -> (Set<String>, unreadable: Bool) {
+        let anchor = context.volumeAnchor
+        let directory = anchor.flatMap { VolumeDirectory.entry(steamapps, in: $0).facts }
+        let manifests: [URL]
+        if let anchor {
+            // Keep unreadable names in the list. An unverified manifest can still declare a game.
+            guard let names = VolumeDirectory.names(in: steamapps, anchor: anchor), directory != nil else {
+                return ([], true)
+            }
+            manifests = names.map { steamapps.appendingPathComponent($0, isDirectory: false) }.filter(Self.isSteamManifest)
+        } else {
+            manifests = FileManager.default.children(of: steamapps).filter(Self.isSteamManifest)
+        }
         var installed = Set<String>()
         var unreadable = false
-        for manifest in FileManager.default.children(of: steamapps)
-        where manifest.lastPathComponent.hasPrefix("appmanifest_") && manifest.pathExtension == "acf" {
-            guard let text = try? String(contentsOf: manifest, encoding: .utf8),
-                  let folder = Self.vdfValues("installdir", in: text).first else {
+        var verified: [(URL, FileFacts)] = []
+        for manifest in manifests {
+            if let anchor {
+                guard let before = VolumeDirectory.entry(manifest, in: anchor).facts, before.isRegularFile else {
+                    unreadable = true
+                    continue
+                }
+                verified.append((manifest, before))
+            }
+            guard let text = steamManifestText(at: manifest),
+                  let folder = Self.vdfValues("installdir", in: text).first, !folder.isEmpty else {
                 unreadable = true
                 continue
             }
             installed.insert(folder.lowercased())
         }
-        return folders.filter { !installed.contains($0.lastPathComponent.lowercased()) }.map { folder in
-            var leftover = candidate(folder.lastPathComponent, detail: folder, paths: [folder], owner: "Steam",
-                                     rule: "game.steam.leftover", safety: .review, method: .trash,
-                                     rebuild: .download, lastActivity: folder.modificationDate)
-            if unreadable { leftover.item.protect(.unknownState) }
-            return leftover
+        if let anchor, let directory {
+            guard VolumeDirectory.entry(steamapps, in: anchor).facts?.isUnchanged(comparedTo: directory) == true,
+                  verified.allSatisfy({ manifest, before in
+                      VolumeDirectory.entry(manifest, in: anchor).facts?.isUnchanged(comparedTo: before) == true
+                  }) else { return (installed, true) }
         }
+        return (installed, unreadable)
+    }
+
+    private static func isSteamManifest(_ file: URL) -> Bool {
+        file.lastPathComponent.hasPrefix("appmanifest_") && file.pathExtension == "acf"
     }
 
     /// Les valeurs d'une clé d'un fichier VDF de Steam (`"path"  "/Users/…"`),
@@ -291,7 +360,7 @@ struct GamesFinder {
             if let installed, isListed(folder, in: installed) { return epicDownload(in: folder) }
             var leftover = candidate(folder.lastPathComponent, detail: folder, paths: [folder],
                                      owner: "Epic Games Launcher", rule: "game.epic.leftover", safety: .review,
-                                     method: .trash, rebuild: .download, lastActivity: folder.modificationDate)
+                                     method: .trash, rebuild: .download, lastActivity: lastModification(of: folder))
             let elsewhere = context.volume != nil
                 && (!libraryIsOurs || isDirectory(folder.appendingPathComponent(Self.epicStore, isDirectory: true)))
             if installed == nil || elsewhere { leftover.item.protect(.unknownState) }
@@ -366,24 +435,28 @@ struct GamesFinder {
         }
         var candidates: [Candidate] = []
         for steamapps in found where steamapps.lastPathComponent.caseInsensitiveCompare(Self.steamapps) == .orderedSame
-            && Self.isSteamLibrary(steamapps) {
+            && isSteamLibrary(steamapps) {
             candidates += steamLibrary(steamapps)
             let depots = steamapps.appendingPathComponent("depotcache", isDirectory: true)
             if isDirectory(depots) { candidates.append(steamDepots(depots, paths: [depots])) }
         }
 
-        let installed = Self.epicInstallLocations(epicInstallList)
+        // The host's registry is outside the opened volume. Epic rows from that volume stay protected.
+        let installed = context.volumeAnchor == nil ? Self.epicInstallLocations(epicInstallList) : nil
+        func key(_ url: URL) -> String {
+            context.volumeAnchor == nil ? Self.comparable(url.path) : url.path
+        }
         var seen = Set<String>()
         for library in found where library.lastPathComponent.caseInsensitiveCompare(Self.epicLibraryName) == .orderedSame {
-            let folders = directories(in: library).filter { seen.insert(Self.comparable($0.path)).inserted }
+            let folders = directories(in: library).filter { seen.insert(key($0)).inserted }
             let ours = installed.map { list in folders.contains { isListed($0, in: list) } } ?? false
             candidates += epicFolders(folders, installed: installed, libraryIsOurs: ours)
         }
         // Un jeu d'Epic hors d'un dossier `Epic Games` : jamais la racine du
         // disque elle-même, si l'on y a installé un jeu.
-        let root = Self.comparable(volume.root.path)
+        let root = key(volume.root)
         let loose = found.filter { $0.lastPathComponent == Self.epicStore }.map { $0.deletingLastPathComponent() }
-            .filter { Self.comparable($0.path) != root && seen.insert(Self.comparable($0.path)).inserted }
+            .filter { key($0) != root && seen.insert(key($0)).inserted }
         candidates += epicFolders(loose, installed: installed, libraryIsOurs: false)
         return candidates
     }
@@ -393,17 +466,22 @@ struct GamesFinder {
     /// Un dossier `steamapps` est une bibliothèque Steam sous `SteamLibrary`, à
     /// côté de son `libraryfolder.vdf` (que Steam écrit dans chaque bibliothèque
     /// d'un autre disque), ou s'il garde des manifestes de jeux.
-    static func isSteamLibrary(_ steamapps: URL) -> Bool {
+    func isSteamLibrary(_ steamapps: URL) -> Bool {
         let library = steamapps.deletingLastPathComponent()
         if library.lastPathComponent.caseInsensitiveCompare("SteamLibrary") == .orderedSame { return true }
+        if let anchor = context.volumeAnchor {
+            let markers = [library, steamapps].map { $0.appendingPathComponent("libraryfolder.vdf", isDirectory: false) }
+            return markers.contains { VolumeDirectory.entry($0, in: anchor).facts?.isRegularFile == true }
+                || (context.volumeEntries(in: steamapps) ?? []).contains {
+                    $0.facts.isRegularFile && Self.isSteamManifest($0.url)
+                }
+        }
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: library.appendingPathComponent("libraryfolder.vdf").path)
             || fileManager.fileExists(atPath: steamapps.appendingPathComponent("libraryfolder.vdf").path) {
             return true
         }
-        return fileManager.children(of: steamapps).contains {
-            $0.lastPathComponent.hasPrefix("appmanifest_") && $0.pathExtension == "acf"
-        }
+        return fileManager.children(of: steamapps).contains(where: Self.isSteamManifest)
     }
 
     // MARK: - GOG Galaxy

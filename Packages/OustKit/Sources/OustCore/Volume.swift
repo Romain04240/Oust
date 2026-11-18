@@ -43,6 +43,9 @@ public struct VolumeDescriptor: Sendable, Hashable, Codable, Identifiable {
     public var isInternal: Bool
     public var isRemovable: Bool
     public var capacity: Capacity
+    package var mountIdentity: VolumeMountIdentity?
+    package var mountedReadOnly: Bool?
+    package var mountedFileSystem: String?
 
     public init(name: String, mountURL: URL, scanRoot: URL, isBoot: Bool, isInternal: Bool,
                 isRemovable: Bool, capacity: Capacity) {
@@ -58,6 +61,24 @@ public struct VolumeDescriptor: Sendable, Hashable, Codable, Identifiable {
     public var symbol: String {
         if isBoot { return "internaldrive.fill" }
         return isInternal ? "internaldrive" : "externaldrive.fill"
+    }
+}
+
+/// Identité de l'instance montée, distincte de son nom et de son chemin.
+package struct VolumeMountIdentity: Sendable, Hashable, Codable {
+    package let device: Int32
+    package let inode: UInt64
+    package let createdSeconds: Int
+    package let createdNanoseconds: Int
+    package let filesystemID: [Int32]?
+
+    package init(device: Int32, inode: UInt64, createdSeconds: Int, createdNanoseconds: Int,
+                 filesystemID: [Int32]? = nil) {
+        self.device = device
+        self.inode = inode
+        self.createdSeconds = createdSeconds
+        self.createdNanoseconds = createdNanoseconds
+        self.filesystemID = filesystemID
     }
 }
 

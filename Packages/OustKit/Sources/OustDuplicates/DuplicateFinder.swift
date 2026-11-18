@@ -17,6 +17,7 @@ public struct DuplicateFile: Sendable, Hashable, Identifiable {
     public let modified: Date?
     public let created: Date?
     public internal(set) var privateSizeKnown = true
+    var readIdentity: DuplicateReadIdentity?
 }
 
 /// Des fichiers au contenu identique, octet pour octet.
@@ -157,7 +158,7 @@ public enum DuplicateFinder {
                             return DuplicateFile(url: scanned.url, logicalSize: identity.size,
                                                  allocated: storage.allocated, privateSize: storage.privateSize ?? 0,
                                                  modified: identity.modified, created: identity.created,
-                                                 privateSizeKnown: storage.privateSize != nil)
+                                                 privateSizeKnown: storage.privateSize != nil, readIdentity: identity)
                         }
                         return DuplicateFile(url: scanned.url, logicalSize: scanned.logicalSize,
                                              allocated: scanned.allocated > 0 ? scanned.allocated : allocatedSize(scanned.url),
@@ -191,6 +192,21 @@ public enum DuplicateFinder {
     }
 
     static func collect(_ options: DuplicateOptions, progress: DuplicateProgress) -> [Scanned] {
+        if !options.exclusions.analysisRoots.isEmpty {
+            var files: [Scanned] = []
+            options.exclusions.walkBound(cancelled: { progress.isCancelled }, descend: {
+                !skippedFolders.contains($0.lastPathComponent) && !skippedExtensions.contains($0.pathExtension.lowercased())
+            }) { url, info in
+                guard info.st_size >= options.minimumSize,
+                      let identity = DuplicateExclusions.regularIdentity(info) else { return }
+                progress.didExamine()
+                files.append(Scanned(url: url, logicalSize: identity.size, allocated: Int64(info.st_blocks) * 512,
+                                     fileID: identity.fileID,
+                                     contentKey: options.exclusions.cloneKey(of: url, identity: identity),
+                                     modified: identity.modified, created: identity.created, readIdentity: identity))
+            }
+            return files
+        }
         let keys: [URLResourceKey] = [
             .isRegularFileKey, .fileSizeKey, .totalFileAllocatedSizeKey, .fileResourceIdentifierKey,
             .fileContentIdentifierKey, .mayShareFileContentKey, .contentModificationDateKey, .creationDateKey,

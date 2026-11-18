@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OustCore
 import OustSafety
@@ -24,7 +25,7 @@ struct CreativeAppsFinder {
     func find() async -> [Candidate] {
         // Sur un autre disque, ce que ces logiciels y rangent : leurs
         // bibliothèques et les dossiers de travail qu'on leur a choisis là.
-        let candidates = context.volume != nil
+        let candidates = context.volume != nil || context.volumeAnchor != nil
             ? await videoLibraries() + volumeResolveCaches() + volumeAdobeMediaCaches()
             : await videoLibraries() + resolve() + insta360() + blender() + soundLibrary()
                 + adobeMediaCache() + capCut() + filmora() + plexUpdates()
@@ -49,7 +50,13 @@ struct CreativeAppsFinder {
     /// Les dossiers qui existent vraiment, liens symboliques écartés : un lien
     /// vers un disque externe ne se vide pas d'ici.
     func existing(_ urls: [URL]) -> [URL] {
-        urls.filter { FileManager.default.isDirectory($0) && !$0.isSymbolicLink }
+        if let anchor = context.volumeAnchor {
+            return urls.filter {
+                guard let facts = VolumeDirectory.entry($0, in: anchor).facts else { return false }
+                return facts.mode & S_IFMT == S_IFDIR
+            }
+        }
+        return urls.filter { FileManager.default.isDirectory($0) && !$0.isSymbolicLink }
     }
 
     // MARK: - Final Cut Pro et iMovie
@@ -63,12 +70,22 @@ struct CreativeAppsFinder {
     /// Les médias transcodés sont « à examiner » : sans les originaux, débranchés
     /// ou effacés, ils sont la seule copie lisible des plans.
     func videoLibraries() async -> [Candidate] {
-        let fileManager = FileManager.default
         var candidates: [Candidate] = []
         for library in await libraries() {
             let app = Self.libraryApps[library.pathExtension.lowercased()] ?? "Final Cut Pro"
             let name = library.deletingPathExtension().lastPathComponent
-            let events = existing(fileManager.children(of: library))
+            let events: [URL]
+            if context.volumeAnchor != nil {
+                events = (context.volumeEntries(in: library) ?? []).compactMap { entry in
+                    let name = entry.url.lastPathComponent
+                    guard entry.facts.mode & S_IFMT == S_IFDIR, !name.hasPrefix("."),
+                          !VolumeProtection.isTimeMachineName(name), !VolumePackages.isPackage(name)
+                    else { return nil }
+                    return entry.url
+                }
+            } else {
+                events = existing(FileManager.default.children(of: library))
+            }
             let renders = existing(events.map { $0.appendingPathComponent("Render Files") })
             let transcoded = existing(events.map { $0.appendingPathComponent("Transcoded Media") })
             if !renders.isEmpty {
@@ -88,7 +105,7 @@ struct CreativeAppsFinder {
     /// Les bibliothèques du dossier personnel ; sans l'arbre de l'analyse, là où
     /// les deux applications les créent d'office (`~/Movies`), et un dossier plus bas.
     func libraries() async -> [URL] {
-        await context.findFolders(fallback: [context.path("Movies")], depth: 1) {
+        await context.findFolders(fallback: [context.home.appendingPathComponent("Movies", isDirectory: true)], depth: 1) {
             Self.libraryApps[($0 as NSString).pathExtension.lowercased()] != nil
         }
     }
@@ -121,6 +138,7 @@ struct CreativeAppsFinder {
     func volumeResolveCaches() async -> [Candidate] {
         let caches = await context.findFolders(fallback: [], depth: 0) { $0 == "CacheClip" }
         return caches.flatMap { cache -> [Candidate] in
+            if context.volumeAnchor != nil, existing([cache]).isEmpty { return [] }
             let root = cache.deletingLastPathComponent()
             let entries: [(folder: URL, rule: String, safety: SafetyClass, method: CleanupMethod, rebuild: RebuildCost)] = [
                 (cache, "creative.resolve.cache", .rebuilds, .removeNow, .automatic),
@@ -141,9 +159,10 @@ struct CreativeAppsFinder {
     /// les gros montages) : `Media Cache Files`, et `Media Cache` à côté.
     func volumeAdobeMediaCaches() async -> [Candidate] {
         let caches = await context.findFolders(fallback: [], depth: 0) { $0 == "Media Cache Files" }
-        return caches.map { files in
+        return caches.compactMap { files in
             let folders = existing([files, files.deletingLastPathComponent().appendingPathComponent("Media Cache",
                                                                                                isDirectory: true)])
+            if context.volumeAnchor != nil, !folders.contains(files) { return nil }
             return candidate("Adobe", detail: files, paths: folders, owner: "Adobe", rule: "creative.adobe.media_cache",
                              safety: .rebuilds, method: .removeNow, rebuild: .automatic)
         }
@@ -312,6 +331,9 @@ extension RuleContext {
     /// Sur un autre disque (`volume`), c'est sa racine qu'on parcourt, et non le
     /// dossier personnel, jamais au-delà de ses sauvegardes Time Machine.
     func findFolders(fallback: [URL], depth: Int, matches: (String) -> Bool) async -> [URL] {
+        if let anchor = volumeAnchor {
+            return await findBoundFolders(in: anchor, matches: matches)
+        }
         let home = (volume?.root ?? self.home).standardizedFileURL
         let fallback = volume.map { [$0.root] } ?? fallback
         let depth = volume == nil ? depth : 6
@@ -354,6 +376,47 @@ extension RuleContext {
             }
         }
         return found
+    }
+
+    /// L'index fournit des noms et des inodes. La racine ouverte reste la
+    /// seule autorité pour vérifier un dossier à utiliser.
+    private func findBoundFolders(in anchor: AnalysisRoot, matches: (String) -> Bool) async -> [URL] {
+        Scanner.configureProcessIOPolicy()
+        let root = anchor.url
+        let index = await tree?()
+        var found: [URL] = []
+        var queue: [(url: URL, level: Int, node: TreeNode?)] = [(root, 0, index?.descendant(atPath: root.path))]
+        var head = 0
+        while head < queue.count, !Task.isCancelled {
+            let (directory, level, node) = queue[head]
+            head += 1
+            let children: [(name: String, node: TreeNode?)]
+            if let node {
+                guard node.status == .ok else { continue }
+                children = node.children.filter { $0.status == .ok }.map { ($0.name, $0) }
+            } else {
+                children = (volumeEntries(in: directory) ?? []).compactMap {
+                    $0.facts.mode & S_IFMT == S_IFDIR ? ($0.url.lastPathComponent, nil) : nil
+                }
+            }
+            for (name, childNode) in children {
+                let child = directory.appendingPathComponent(name, isDirectory: true)
+                if Self.neverOpened.contains(name) || VolumeProtection.serviceFolders.contains(name)
+                    || VolumeProtection.isTimeMachineName(name) || Self.otherPackages.contains(child.pathExtension.lowercased())
+                    || (level == 0 && name == "Library") {
+                    continue
+                }
+                if matches(name) {
+                    guard let facts = VolumeDirectory.entry(child, in: anchor).facts,
+                          facts.mode & S_IFMT == S_IFDIR,
+                          childNode.map({ $0.fileID == facts.inode }) ?? true else { continue }
+                    found.append(child)
+                } else if level < 6, !name.hasPrefix("."), name != "node_modules", !VolumePackages.isPackage(name) {
+                    queue.append((child, level + 1, childNode))
+                }
+            }
+        }
+        return Task.isCancelled ? [] : found
     }
 
     /// Le parcours sans arbre ne change jamais de volume (RULES.md, règle 10).

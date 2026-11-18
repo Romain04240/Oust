@@ -91,29 +91,48 @@ extension ScanIndex {
         maximumAge: TimeInterval = 7 * 86_400,
         now: Date = Date()
     ) async -> (index: ScanIndex, how: IndexRefresh) {
-        let rootPath = root.standardizedFileURL.path
-        guard let previous, previous.rootPath == rootPath else {
-            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.noIndex))
+        await refresh(previous, root: root, options: options, progress: progress, maximumAge: maximumAge,
+                      now: now, boundRoot: nil)
+    }
+
+    package static func refreshBound(
+        _ previous: ScanIndex?, root: AnalysisRoot, options: ScanOptions, progress: ScanProgress
+    ) async -> (index: ScanIndex, how: IndexRefresh) {
+        var options = options
+        options.bindMeasurementsToRoots = true
+        options.boundRootIdentity = root.identity
+        return await refresh(previous, root: root.url, options: options, progress: progress,
+                             maximumAge: 7 * 86_400, now: Date(), boundRoot: root)
+    }
+
+    private static func refresh(
+        _ previous: ScanIndex?, root: URL, options: ScanOptions, progress: ScanProgress,
+        maximumAge: TimeInterval, now: Date, boundRoot: AnalysisRoot?
+    ) async -> (index: ScanIndex, how: IndexRefresh) {
+        let rootPath = options.bindMeasurementsToRoots ? root.path : root.standardizedFileURL.path
+        guard let previous, previous.rootPath == rootPath,
+              previous.options.boundRootIdentity == boundRoot?.identity else {
+            return (await fullScan(rootPath, options: options, progress: progress, now: now, boundRoot: boundRoot), .full(.noIndex))
         }
         guard await checkStorageIO({ previous.canReuse(for: options) }) == true else {
-            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.optionsChanged))
+            return (await fullScan(rootPath, options: options, progress: progress, now: now, boundRoot: boundRoot), .full(.optionsChanged))
         }
         guard now.timeIntervalSince(previous.fullScanAt) < maximumAge else {
-            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.tooOld))
+            return (await fullScan(rootPath, options: options, progress: progress, now: now, boundRoot: boundRoot), .full(.tooOld))
         }
         // Base d'événements effacée, recréée ou absente : les identifiants
         // mémorisés ne désignent plus rien, et l'historique est perdu.
         let database = FileSystemEvents.database(for: rootPath)
         let start = FileSystemEvents.currentEventID
         guard let database, database == previous.eventDatabase, previous.eventID <= start else {
-            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.historyLost))
+            return (await fullScan(rootPath, options: options, progress: progress, now: now, boundRoot: boundRoot), .full(.historyLost))
         }
         let changes = await FileSystemEvents.changes(since: previous.eventID, under: [rootPath])
         if changes.historyLost {
-            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.historyLost))
+            return (await fullScan(rootPath, options: options, progress: progress, now: now, boundRoot: boundRoot), .full(.historyLost))
         }
         guard await checkStorageIO({ previous.hasCurrentProtectionRoots }) == true else {
-            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.optionsChanged))
+            return (await fullScan(rootPath, options: options, progress: progress, now: now, boundRoot: boundRoot), .full(.optionsChanged))
         }
         if changes.directories.isEmpty && changes.recursive.isEmpty {
             let index = ScanIndex(root: previous.root, options: options, ownership: previous.ownership,
@@ -126,21 +145,24 @@ extension ScanIndex {
             return (index, .unchanged)
         }
         guard let updated = await previous.applying(changes, eventID: start, database: database,
-                                                    progress: progress, now: now) else {
-            return (await fullScan(rootPath, options: options, progress: progress, now: now), .full(.tooManyChanges))
+                                                    progress: progress, now: now, boundRoot: boundRoot) else {
+            return (await fullScan(rootPath, options: options, progress: progress, now: now, boundRoot: boundRoot), .full(.tooManyChanges))
         }
         return updated
     }
 
-    static func fullScan(_ rootPath: String, options: ScanOptions, progress: ScanProgress, now: Date) async -> ScanIndex {
+    static func fullScan(_ rootPath: String, options: ScanOptions, progress: ScanProgress, now: Date,
+                         boundRoot: AnalysisRoot? = nil) async -> ScanIndex {
         // L'identifiant d'avant le parcours : ce qui bouge pendant qu'il tourne
         // sera rejoué la prochaine fois, au pire relu deux fois.
         let start = FileSystemEvents.currentEventID
         let database = FileSystemEvents.database(for: rootPath)
         let location = options.deviceBackupsDirectory == nil ? PreferenceDirectory(nil) :
             await checkStorageIO { PreferenceDirectory.capturingLocation(at: rootPath) } ?? PreferenceDirectory(nil)
-        let result = await Scanner.scan([URL(fileURLWithPath: rootPath)], options: options, progress: progress)
-        let root = result.roots[0]
+        let result = await Scanner.scan([URL(fileURLWithPath: rootPath)], options: options, progress: progress,
+                                        boundRoot: boundRoot)
+        let root = result.roots.first ?? TreeNode(name: (rootPath as NSString).lastPathComponent,
+                                                  parent: nil, fileID: 0, rootPath: rootPath)
         let stableRoot: Bool
         if options.deviceBackupsDirectory == nil {
             stableRoot = true
@@ -161,13 +183,18 @@ extension ScanIndex {
     ///
     /// `nil` quand il y a tant à relire qu'un parcours complet ira aussi vite.
     func applying(_ changes: FileSystemChanges, eventID: UInt64, database: String, progress: ScanProgress,
-                  now: Date) async -> (index: ScanIndex, how: IndexRefresh)? {
+                  now: Date, boundRoot: AnalysisRoot? = nil) async -> (index: ScanIndex, how: IndexRefresh)? {
         guard await checkStorageIO({ hasCurrentProtectionRoots }) == true else { return nil }
         let root = root.clone()
         let ownership = ownership.copy()
         var info = stat()
-        guard lstat(root.path, &info) == 0 else { return nil }
-        let device = info.st_dev
+        let device: dev_t
+        if let boundRoot {
+            device = boundRoot.identity.directory.device
+        } else {
+            guard lstat(root.path, &info) == 0 else { return nil }
+            device = info.st_dev
+        }
 
         // Chaque chemin signalé devient un dossier de l'arbre. Un dossier
         // inconnu (créé depuis) : c'est son plus proche parent connu qu'on
@@ -205,8 +232,14 @@ extension ScanIndex {
         // le 18/10/2026) : on en essaie trois, et tous seulement si l'un d'eux
         // s'ouvre. L'accès complet s'accorde en bloc, pas dossier par dossier.
         let (total, refused) = root.census()
+        func openDirectory(_ node: TreeNode) -> Int32 {
+            if let boundRoot {
+                return boundRoot.openDirectory(URL(fileURLWithPath: node.path, isDirectory: true)) ?? -1
+            }
+            return open(node.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        }
         func opens(_ node: TreeNode) -> Bool {
-            let fd = open(node.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            let fd = openDirectory(node)
             guard fd >= 0 else { return false }
             close(fd)
             return true
@@ -240,7 +273,13 @@ extension ScanIndex {
             node.resetOwnContent()
             node.status = NodeStatus.ok
             var stats = stat()
-            node.ownLatestModification = lstat(node.path, &stats) == 0 ? Walk.date(stats.st_mtimespec) : nil
+            if boundRoot != nil {
+                let fd = openDirectory(node)
+                node.ownLatestModification = fd >= 0 && fstat(fd, &stats) == 0 ? Walk.date(stats.st_mtimespec) : nil
+                if fd >= 0 { close(fd) }
+            } else {
+                node.ownLatestModification = lstat(node.path, &stats) == 0 ? Walk.date(stats.st_mtimespec) : nil
+            }
             jobs.append(Walk.Job(node: node, path: node.path, device: device, shallow: nil))
         }
         for node in shallowNodes {
@@ -251,7 +290,7 @@ extension ScanIndex {
 
         guard let backups = await checkStorageIO({ DeviceBackupPath.Snapshot.capture(options.deviceBackupsDirectory) }),
               !backups.uncertain else { return nil }
-        let walk = Walk(options: options, progress: progress, ownership: ownership, deviceBackupDirectory: backups)
+        let walk = Walk(options: options, progress: progress, ownership: ownership, deviceBackupDirectory: backups, boundRoot: boundRoot)
         guard walk.preferenceDirectory == preferenceDirectory, walk.accountArchiveDirectory == accountArchiveDirectory,
               walk.deviceBackupDirectory == deviceBackupDirectory else { return nil }
         dropped += await walk.run(jobs: jobs, root: root)
@@ -282,6 +321,7 @@ extension ScanOptions {
     /// Deux réglages qui donnent le même arbre (le nombre de threads n'y change rien).
     func describesSameTree(as other: ScanOptions) -> Bool {
         leafThreshold == other.leafThreshold && measurePrivateSizes == other.measurePrivateSizes
+            && boundRootIdentity == other.boundRootIdentity
             && excludedPaths == other.excludedPaths && notableNames == other.notableNames
             && readOnlyPreferencesDirectory == other.readOnlyPreferencesDirectory
             && accountArchivesDirectory == other.accountArchivesDirectory && deviceBackupsDirectory == other.deviceBackupsDirectory

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import OustCore
 import OustScan
 
 /// Un dossier explicitement choisi, attaché à son emplacement et à son identité.
@@ -70,6 +71,13 @@ public struct DuplicateExclusion: Codable, Equatable, Identifiable, Sendable {
 public struct DuplicateExclusions: Equatable, Sendable {
     public let folders: [DuplicateExclusion]
     public let isReadable: Bool
+    package var analysisRoots: [AnalysisRoot] = []
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.folders == rhs.folders && lhs.isReadable == rhs.isReadable
+            && lhs.analysisRoots.map(\.url) == rhs.analysisRoots.map(\.url)
+            && lhs.analysisRoots.map(\.identity) == rhs.analysisRoots.map(\.identity)
+    }
 
     public init(folders: [DuplicateExclusion] = [], isReadable: Bool = true) {
         self.folders = folders
@@ -137,7 +145,10 @@ struct DuplicateReadIdentity: Equatable, Hashable, Sendable {
 }
 
 extension DuplicateExclusions {
-    var requiresBoundRead: Bool { !isReadable || !folders.isEmpty }
+    var requiresBoundRead: Bool { !isReadable || !folders.isEmpty || !analysisRoots.isEmpty }
+
+    // SF_DATALESS is not consistently exposed by the Swift Darwin overlay.
+    static let dataless: UInt32 = 0x4000_0000
 
     func readIdentity(_ url: URL) -> DuplicateReadIdentity? {
         guard isReadable, url.isFileURL, !url.path.isEmpty,
@@ -161,6 +172,7 @@ extension DuplicateExclusions {
         func stillAdmitted() -> Bool {
             var opened = stat()
             guard fstat(fd, &opened) == 0, Self.regularIdentity(opened) == expected,
+                  parent.root?.matchesMount(of: fd, stat: opened) != false,
                   let current = openParent(of: url) else { return false }
             defer { close(current.fd) }
             return current.chain.elementsEqual(parent.chain) { $0.sameDirectory(as: $1) }
@@ -189,12 +201,23 @@ extension DuplicateExclusions {
         return DuplicateContentKey(device: identity.device, identifier: Int64(bitPattern: cloneID))
     }
 
-    private func openParent(of url: URL) -> (fd: Int32, name: String, chain: [DuplicateReadIdentity])? {
+    private func openParent(of url: URL) -> (fd: Int32, name: String, chain: [DuplicateReadIdentity], root: AnalysisRoot?)? {
         let parent = DuplicateExclusion.systemPath(url.deletingLastPathComponent())
         let pieces = parent.pathComponents.dropFirst()
         let name = url.lastPathComponent
         guard !name.isEmpty, name != "/", name != ".", name != "..",
               !pieces.contains("."), !pieces.contains(".."), parent.path.hasPrefix("/") else { return nil }
+        if !analysisRoots.isEmpty {
+            guard let root = analysisRoots.filter({ $0.contains(parent) }).max(by: { $0.url.path.count < $1.url.path.count })
+            else { return nil }
+            var chain: [DuplicateReadIdentity] = []
+            guard let fd = root.openDirectory(parent, allowing: { url, info in
+                guard permitsBoundDirectory(url, info) else { return false }
+                chain.append(DuplicateReadIdentity(info))
+                return true
+            }) else { return nil }
+            return (fd, name, chain, root)
+        }
         let flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
         var fd = open("/", flags)
         guard fd >= 0 else { return nil }
@@ -216,7 +239,13 @@ extension DuplicateExclusions {
             }
             chain.append(DuplicateReadIdentity(info))
         }
-        return (fd, name, chain)
+        return (fd, name, chain, nil)
+    }
+
+    func permitsBoundDirectory(_ url: URL, _ info: stat) -> Bool {
+        isReadable && info.st_flags & Self.dataless == 0 && !folders.contains { folder in
+            url.path == folder.url.path || url.path.hasPrefix(folder.url.path + "/") || folder.matches(info)
+        }
     }
 
     private static func fileIdentity(_ parent: Int32, name: String) -> DuplicateReadIdentity? {
@@ -225,8 +254,9 @@ extension DuplicateExclusions {
         return regularIdentity(info)
     }
 
-    private static func regularIdentity(_ info: stat) -> DuplicateReadIdentity? {
-        guard (info.st_mode & S_IFMT) == S_IFREG, info.st_nlink == 1 else { return nil }
+    static func regularIdentity(_ info: stat) -> DuplicateReadIdentity? {
+        guard (info.st_mode & S_IFMT) == S_IFREG, info.st_nlink == 1,
+              info.st_flags & dataless == 0 else { return nil }
         return DuplicateReadIdentity(info)
     }
 }

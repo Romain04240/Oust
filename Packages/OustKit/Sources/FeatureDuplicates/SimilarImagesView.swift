@@ -299,27 +299,34 @@ private struct SimilarResults: View {
                     SimilarGroupCard(model: model, group: group, selection: $selection) { image in
                         guard model.canUseDuplicateQuickLook else { return }
                         selection = image.id
-                        preview.show(image.url, among: group.images.map(\.url))
+                        openPreview(image.url, neighbors: group.images.map(\.url))
                     }
                 }
             }
         }
         .previewKeys(selection: $selection, order: shown.flatMap { $0.images.map(\.id) }) { id in
             guard model.canUseDuplicateQuickLook else { return }
-            if case let (group, image)? = find(id, in: shown) { preview.toggle(image.url, among: group.images.map(\.url)) }
+            if preview.isOpen || preview.isPreparing { preview.close() }
+            else if case let (group, image)? = find(id, in: shown) { openPreview(image.url, neighbors: group.images.map(\.url)) }
         }
         .filePreview(preview)
         // Le panneau montre les images d'un groupe ; il suit la sélection d'un
         // groupe à l'autre, et la sélection suit ses flèches.
         .onChange(of: selection) {
             guard model.canUseDuplicateQuickLook, let selection, case let (group, image)? = find(selection, in: shown) else { return }
-            preview.follow(image.url, among: group.images.map(\.url))
+            if (preview.isOpen || preview.isPreparing), preview.current != image.url, preview.preparingURL != image.url {
+                openPreview(image.url, neighbors: group.images.map(\.url))
+            }
         }
         .onChange(of: preview.current) { if let current = preview.current { selection = current.path } }
         if groups.count > limit {
             Button { limit += 40 } label: { Text("group.show_more", bundle: .oust) }
                 .buttonStyle(OnGradientButtonStyle())
         }
+    }
+
+    private func openPreview(_ url: URL, neighbors: [URL]) {
+        requestDuplicateQuickLook(url, neighbors: neighbors, similar: true, model: model, preview: preview)
     }
 
     /// L'image d'un identifiant, et son groupe.

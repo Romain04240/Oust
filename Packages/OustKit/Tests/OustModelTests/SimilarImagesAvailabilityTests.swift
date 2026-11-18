@@ -34,7 +34,12 @@ struct SimilarImagesAvailabilityTests {
         similar.keepBest(in: group)
         #expect(app.cart.isEmpty)
         #expect(try Data(contentsOf: copy.url) == before)
-        #expect(await similar.thumbnail(for: copy.url, side: 16) != nil)
+        similar.addFolder(home)
+        await similar.search()
+        let shown = try #require(similar.groups.flatMap(\.images).first {
+            $0.url.lastPathComponent == copy.url.lastPathComponent
+        })
+        #expect(await similar.thumbnail(for: shown.url, side: 16) != nil)
 
         var alreadySelected = group.cleanupItem(for: copy)
         alreadySelected.method = .brewCleanup(executable: "/fictif/brew")
@@ -42,6 +47,9 @@ struct SimilarImagesAvailabilityTests {
         #expect(similar.isInCart(copy) && similar.canToggle(copy, in: group))
         similar.toggle(copy, in: group)
         #expect(app.cart.isEmpty)
+        try fm.moveItem(at: shown.url, to: home.appendingPathComponent("ancienne.png"))
+        try before.write(to: shown.url)
+        #expect(await similar.thumbnail(for: shown.url, side: 16) == nil)
     }
 
     @Test("Le libellé du veto se distingue de la protection du dernier exemplaire")
@@ -67,12 +75,20 @@ struct SimilarImagesAvailabilityTests {
     }
 
     private func fixtureGroup(in home: URL) throws -> SimilarImageGroup {
-        let context = try #require(CGContext(data: nil, width: 24, height: 24, bitsPerComponent: 8, bytesPerRow: 0,
-                                            space: CGColorSpaceCreateDeviceRGB(),
-                                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.setFillColor(red: 0.2, green: 0.5, blue: 0.8, alpha: 1)
-        context.fill(CGRect(x: 0, y: 0, width: 24, height: 24))
-        let drawing = try #require(context.makeImage())
+        let side = 400
+        var noise: UInt32 = 42
+        var bytes = [UInt8](repeating: 255, count: side * side * 4)
+        for offset in stride(from: 0, to: bytes.count, by: 4) {
+            noise = noise &* 1_664_525 &+ 1_013_904_223
+            bytes[offset] = UInt8(truncatingIfNeeded: noise >> 24)
+            bytes[offset + 1] = UInt8(truncatingIfNeeded: noise >> 16)
+            bytes[offset + 2] = UInt8(truncatingIfNeeded: noise >> 8)
+        }
+        let pixels = try #require(CGDataProvider(data: Data(bytes) as CFData))
+        let drawing = try #require(CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32,
+                                           bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                                           provider: pixels, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
         let images = try ["a.png", "b.png", "c.png"].map { name in
             let url = home.appendingPathComponent(name)
             let png = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))

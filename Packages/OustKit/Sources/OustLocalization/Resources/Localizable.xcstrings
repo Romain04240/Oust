@@ -6771,6 +6771,13 @@
         }
       }
     },
+    "duplicates.exclusions_timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "A file read or Quick Look is still active. Try again after it finishes." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Une lecture ou Coup d’œil est encore en cours. Réessaie après sa fermeture." } }
+      }
+    },
     "duplicates.exclusions_wait_quicklook": {
       "extractionState": "manual",
       "localizations": {
@@ -11717,6 +11724,262 @@
         }
       }
     },
+    "menubar.battery_degrees_f": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ °F"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ °F"
+          }
+        }
+      }
+    },
+    "menubar.battery_details": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Electrical and capacity details"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Détails électriques et capacité"
+          }
+        }
+      }
+    },
+    "menubar.battery_voltage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery voltage"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tension de la batterie"
+          }
+        }
+      }
+    },
+    "menubar.battery_volts": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ V"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ V"
+          }
+        }
+      }
+    },
+    "menubar.battery_current": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery current"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Intensité de la batterie"
+          }
+        }
+      }
+    },
+    "menubar.battery_milliamps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ mA"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ mA"
+          }
+        }
+      }
+    },
+    "menubar.battery_mah": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ mAh"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ mAh"
+          }
+        }
+      }
+    },
+    "menubar.battery_mac_draw": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measured Mac power draw"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consommation mesurée du Mac"
+          }
+        }
+      }
+    },
+    "menubar.battery_remaining_mah": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remaining capacity"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capacité restante"
+          }
+        }
+      }
+    },
+    "menubar.battery_full_mah": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full charge capacity"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capacité à pleine charge"
+          }
+        }
+      }
+    },
+    "menubar.battery_design_mah": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Design capacity"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capacité de conception"
+          }
+        }
+      }
+    },
+    "settings.battery.celsius": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Celsius (°C)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Celsius (°C)"
+          }
+        }
+      }
+    },
+    "settings.battery.fahrenheit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fahrenheit (°F)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fahrenheit (°F)"
+          }
+        }
+      }
+    },
+    "menubar.disk_occupied": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ used of %2$@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ utilisés sur %2$@"
+          }
+        }
+      }
+    },
+    "menubar.disk_purgeable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "incl. %@ purgeable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "dont %@ purgeables"
+          }
+        }
+      }
+    },
+    "menubar.battery_current_charge": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current charge"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charge actuelle"
+          }
+        }
+      }
+    },
     "menubar.battery_percent": {
       "localizations": {
         "en": {
@@ -11997,6 +12260,60 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Details visible" } },
         "fr": { "stringUnit": { "state": "translated", "value": "Détails affichés" } }
+      }
+    },
+    "menubar.battery_refreshing": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Refreshing…" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Actualisation…" } }
+      }
+    },
+    "menubar.battery_last_reading": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Last reading" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dernier relevé" } }
+      }
+    },
+    "menubar.battery_capacity_short": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Max capacity" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Capacité max." } }
+      }
+    },
+    "menubar.battery_cycles_short": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cycles" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Cycles" } }
+      }
+    },
+    "menubar.battery_temperature_short": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Temperature" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Température" } }
+      }
+    },
+    "menubar.battery_degrees": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%@ °C" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%@ °C" } }
+      }
+    },
+    "menubar.battery_battery_estimate_short": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Estimated discharge" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Décharge estimée" } }
+      }
+    },
+    "menubar.battery_input_estimated_short": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Estimated input" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Entrée estimée" } }
+      }
+    },
+    "menubar.battery_mac_short": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Mac" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Mac" } }
       }
     },
     "menubar.battery_watts": {
@@ -12390,13 +12707,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Bin"
+            "value": "Oust Bin"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La corbeille"
+            "value": "Corbeille d’Oust"
           }
         }
       }
@@ -12431,6 +12748,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Vider la Corbeille…"
+          }
+        }
+      }
+    },
+    "menubar.manage_disks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage disks in Oust…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gérer les disques dans Oust…"
+          }
+        }
+      }
+    },
+    "menubar.boot_disk": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Startup disk"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disque de démarrage"
           }
         }
       }
@@ -13621,6 +13970,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Lecture seule"
+          }
+        }
+      }
+    },
+    "overview.disk_unverified": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volume not verified"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volume non vérifié"
           }
         }
       }
@@ -16154,6 +16519,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Machine virtuelle : à sa place sur ce disque"
+          }
+        }
+      }
+    },
+    "quicklook.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aperçu indisponible"
           }
         }
       }

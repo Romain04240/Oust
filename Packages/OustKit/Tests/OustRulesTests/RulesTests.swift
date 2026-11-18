@@ -18,6 +18,14 @@ final class FakeHome {
     }
     deinit { try? FileManager.default.removeItem(at: root) }
 
+    func openVolume(_ url: URL) throws -> AnalysisRoot {
+        // Foundation peut abréger /private/var en /var, qui est un lien.
+        let physical = try #require(realpath(url.path, nil))
+        defer { free(physical) }
+        let path = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
+        return try #require(AnalysisRoot(path))
+    }
+
     func file(_ relative: String, bytes: Int = 50_000, modified: Date? = nil) throws {
         let url = root.appendingPathComponent(relative)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

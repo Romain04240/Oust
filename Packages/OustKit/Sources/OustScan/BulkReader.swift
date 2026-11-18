@@ -61,6 +61,7 @@ struct RawEntry {
     var logicalSize: Int64 = 0
     var cloneID: UInt64 = 0
     var extFlags: UInt64 = 0
+    var sharingFlagsAreKnown = false
     var error: UInt32 = 0
 
     var isDirectory: Bool { type == Attr.typeDirectory }
@@ -84,6 +85,7 @@ enum BulkReader {
         directoryFD fd: Int32,
         extended: Bool,
         buffer: UnsafeMutableRawBufferPointer,
+        isCancelled: () -> Bool = { false },
         visit: (RawEntry) -> Void
     ) -> Int32 {
         var list = attrlist()
@@ -98,11 +100,13 @@ enum BulkReader {
         let options: UInt64 = extended ? Attr.optCmnExtended : 0
 
         while true {
+            guard !isCancelled() else { return ECANCELED }
             let count = getattrlistbulk(fd, &list, buffer.baseAddress, buffer.count, options)
             if count < 0 { return errno }
             if count == 0 { return 0 }
             var offset = 0
             for _ in 0..<count {
+                guard !isCancelled() else { return ECANCELED }
                 guard let base = buffer.baseAddress else { return EINVAL }
                 let entryStart = base.advanced(by: offset)
                 let length = Int(entryStart.loadUnaligned(as: UInt32.self))
@@ -187,6 +191,7 @@ enum BulkReader {
         }
         if returned.forkattr & Attr.cmnextExtFlags != 0 {
             entry.extFlags = cursor.loadUnaligned(as: UInt64.self)
+            entry.sharingFlagsAreKnown = true
             cursor = cursor.advanced(by: 8)
         }
         return entry
