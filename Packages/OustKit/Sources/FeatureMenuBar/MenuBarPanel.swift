@@ -11,7 +11,6 @@ public struct MenuBarPanel: View {
     @Bindable var model: AppModel
     @Bindable var navigation: MenuBarNavigation
     @Environment(\.openSettings) private var openSettings
-    @State private var storageHeight: CGFloat = 182
 
     init(model: AppModel, navigation: MenuBarNavigation) {
         self.model = model
@@ -23,14 +22,9 @@ public struct MenuBarPanel: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: Spacing.medium) {
             if navigation.page == .storage {
-                ScrollView {
+                MenuPanelViewport(maximumHeight: navigation.height - 40) {
                     storage
-                        .fixedSize(horizontal: false, vertical: true)
-                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { storageHeight = $0 }
                 }
-                .scrollIndicators(.hidden)
-                .scrollBounceBehavior(.basedOnSize)
-                .frame(height: max(1, min(storageHeight, navigation.height - 40)))
             } else {
                 BatteryMenuPanel(watch: model.watch, navigation: navigation)
             }
@@ -93,7 +87,7 @@ public struct MenuBarPanel: View {
                 if volume.id != disks.first?.id {
                     Divider()
                 }
-                VolumeLine(volume: volume, isLow: isLow(volume))
+                VolumeLine(volume: volume, isLow: isLow(volume), presented: navigation.presented)
             }
             if model.watch.isLow, let threshold = model.watch.thresholdBytes {
                 Label { Text(verbatim: L10n.string("menubar.low", Formatters.compactBytes(threshold))) }
@@ -179,6 +173,7 @@ public struct MenuBarPanel: View {
 private struct VolumeLine: View {
     let volume: VolumeDescriptor
     let isLow: Bool
+    let presented: Bool
 
     var body: some View {
         let free = Formatters.compactBytes(volume.capacity.availableForImportantUsage)
@@ -211,7 +206,7 @@ private struct VolumeLine: View {
                 .foregroundStyle(isLow ? AnyShapeStyle(Palette.color(for: .review)) : AnyShapeStyle(.primary))
             }
             if volume.capacity.total > 0 {
-                DiskBar(used: volume.capacity.occupiedFraction, isLow: isLow)
+                DiskBar(used: volume.capacity.occupiedFraction, isLow: isLow, presented: presented)
                 HStack(spacing: Spacing.small) {
                     Text(verbatim: L10n.string("menubar.disk_occupied", Formatters.compactBytes(volume.capacity.occupied),
                                               Formatters.compactBytes(volume.capacity.total)))
@@ -235,6 +230,7 @@ private struct VolumeLine: View {
 private struct DiskBar: View {
     let used: Double
     let isLow: Bool
+    let presented: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
@@ -249,6 +245,8 @@ private struct DiskBar: View {
                 Capsule().fill(Color.primary.opacity(0.12))
                 Capsule()
                     .fill(isLow ? AnyShapeStyle(Palette.vivid(for: .review)) : AnyShapeStyle(Self.ring))
+                    .overlay { MenuSheen(active: presented && !reduceMotion) }
+                    .clipShape(Capsule())
                     .frame(width: proxy.size.width * min(1, max(0, used)))
                     .opacity(appeared || reduceMotion ? 1 : 0.35)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.24), value: used)
@@ -258,6 +256,46 @@ private struct DiskBar: View {
         .frame(height: 8)
         .onAppear { appeared = true }
         .accessibilityHidden(true)
+    }
+}
+
+/// The natural content is the first choice. A bounded scroll container exists
+/// only when the content really cannot fit on the screen, never while a stale
+/// geometry measurement catches up with a collapsing disclosure.
+struct MenuPanelViewport<Content: View>: View {
+    let maximumHeight: CGFloat
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            content.fixedSize(horizontal: false, vertical: true)
+            ScrollView { content.fixedSize(horizontal: false, vertical: true) }
+                .scrollIndicators(.never)
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(height: max(1, maximumHeight))
+        }
+        .frame(maxHeight: max(1, maximumHeight), alignment: .top)
+    }
+}
+
+struct MenuSheen: View {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        if active && !reduceMotion {
+            GeometryReader { proxy in
+                TimelineView(.animation(minimumInterval: 1.0 / 24)) { timeline in
+                    let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3.2) / 3.2
+                    let width = min(75, proxy.size.width * 0.4)
+                    LinearGradient(colors: [.clear, .white.opacity(0.32), .clear], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: width)
+                        .position(x: -width + (proxy.size.width + 2 * width) * phase, y: proxy.size.height / 2)
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 }
 

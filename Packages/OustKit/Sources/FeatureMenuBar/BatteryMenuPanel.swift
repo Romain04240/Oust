@@ -18,7 +18,7 @@ struct BatteryMenuPanel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsCharger = false
     @State private var showsAllDevices = false
-    @State private var contentHeight: CGFloat = 325
+    @State private var showsDetails = false
     @State private var devicesRead = false
     @State private var diagnosticsRead = false
 
@@ -31,7 +31,7 @@ struct BatteryMenuPanel: View {
     }
 
     var body: some View {
-        ScrollView {
+        MenuPanelViewport(maximumHeight: navigation.height - 40) {
             VStack(alignment: .leading, spacing: Spacing.small) {
                 if let battery = watch.battery {
                     charge(battery)
@@ -53,12 +53,7 @@ struct BatteryMenuPanel: View {
                     }
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
         }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(height: max(1, min(contentHeight, navigation.height - 40)))
         .task(id: presented) {
             guard presented else { return }
             if let read = navigation.batteryHealthReadAt, ContinuousClock.now - read < .seconds(300) { return }
@@ -133,7 +128,7 @@ struct BatteryMenuPanel: View {
                 .multilineTextAlignment(.trailing)
             }
             BatteryLevelBar(level: battery.level, color: levelColor(battery.level),
-                            shimmering: presented && battery.state == .charging && !reduceMotion, height: 8)
+                            shimmering: presented && battery.state != .onBattery && !reduceMotion, height: 8)
                 .accessibilityHidden(true)
         }
         .batteryCard(tint: color, inset: Spacing.medium)
@@ -266,7 +261,24 @@ struct BatteryMenuPanel: View {
     }
 
     private func detailedReadings(_ readings: BatteryDiagnostics) -> some View {
-        DisclosureGroup {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            Button {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { showsDetails.toggle() }
+            } label: {
+                HStack {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(showsDetails ? 90 : 0))
+                    Text("menubar.battery_details", bundle: .oust)
+                    Spacer(minLength: 0)
+                }
+                .font(Typography.body.weight(.semibold))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(Text(showsDetails ? "group.show_less" : "group.show_more", bundle: .oust))
+            if showsDetails {
             VStack(spacing: Spacing.tight + 2) {
                 if let voltage = readings.batteryVoltage {
                     detailLine("menubar.battery_voltage", value: L10n.string("menubar.battery_volts", voltage.formatted(.number.precision(.fractionLength(2)))))
@@ -293,9 +305,7 @@ struct BatteryMenuPanel: View {
                 }
             }
             .padding(.top, Spacing.tight)
-        } label: {
-            Text("menubar.battery_details", bundle: .oust)
-                .font(Typography.body.weight(.semibold))
+            }
         }
         .batteryCard()
     }
@@ -318,8 +328,11 @@ struct BatteryMenuPanel: View {
             .font(Typography.caption)
             .foregroundStyle(.secondary)
             Text(verbatim: value ?? L10n.string("menubar.battery_device_level_unknown"))
-                .font(value == nil ? Typography.caption : Typography.headline.monospacedDigit())
+                .font(value == nil ? Typography.caption : .system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(value == nil ? .secondary : .primary)
+                .frame(maxWidth: .infinity, minHeight: 30, alignment: .center)
+                .contentTransition(.numericText())
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: value)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(minHeight: 39, alignment: .topLeading)
@@ -340,10 +353,10 @@ struct BatteryMenuPanel: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(Text("menubar.battery_charger_unknown", bundle: .oust))
             }
-            flowArrow
+            flowArrow.frame(width: 24)
             powerReading(battery)
                 .frame(maxWidth: .infinity)
-            flowArrow
+            flowArrow.frame(width: 24)
             Image(systemName: "laptopcomputer")
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(Text("menubar.battery_mac_short", bundle: .oust))
@@ -352,10 +365,18 @@ struct BatteryMenuPanel: View {
     }
 
     private var flowArrow: some View {
-        Image(systemName: "arrow.right")
-            .font(Typography.caption)
-            .foregroundStyle(.tertiary)
+        Capsule().fill(Color.blue.opacity(0.45))
+            .overlay { MenuSheen(active: presented && hasEnergyFlow) }
+            .clipShape(Capsule())
+            .frame(height: 3)
             .accessibilityHidden(true)
+    }
+
+    private var hasEnergyFlow: Bool {
+        switch diagnostics?.inputPower {
+        case .measured(let watts), .estimated(let watts): watts > 0
+        case nil: (diagnostics?.batteryWatts ?? 0) > 0
+        }
     }
 
     @ViewBuilder private func powerReading(_ battery: BatteryReading) -> some View {
@@ -376,14 +397,18 @@ struct BatteryMenuPanel: View {
     }
 
     private func powerValue(_ watts: Double, caption: String) -> some View {
-        HStack(spacing: Spacing.tight + 2) {
+        VStack(spacing: Spacing.tight) {
             Text(verbatim: L10n.string("menubar.battery_watts", decimal(watts)))
-                .font(Typography.headline.monospacedDigit())
+                .font(.system(size: 23, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.blue)
+                .contentTransition(.numericText())
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: watts)
                 .fixedSize()
             Text(LocalizedStringKey(caption), bundle: .oust)
                 .font(Typography.caption)
                 .foregroundStyle(.secondary)
         }
+        .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
     }
 
@@ -442,14 +467,7 @@ private struct BatteryLevelBar: View {
                 Capsule().fill(color)
                     .overlay {
                         if shimmering, fill > 0 {
-                            TimelineView(.animation(minimumInterval: 1.0 / 24)) { timeline in
-                                let progress = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.8) / 2.8
-                                let highlight = min(50, fill / 2)
-                                LinearGradient(colors: [.clear, .white.opacity(0.45), .clear], startPoint: .leading, endPoint: .trailing)
-                                    .frame(width: highlight)
-                                    .position(x: -highlight + (fill + 2 * highlight) * progress, y: proxy.size.height / 2)
-                            }
-                            .clipShape(Capsule())
+                            MenuSheen(active: true).clipShape(Capsule())
                         }
                     }
                     .frame(width: fill)
@@ -465,6 +483,11 @@ private extension View {
         return self.padding(inset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint?.opacity(0.08) ?? Color.primary.opacity(0.038), in: shape)
+            .overlay {
+                shape.fill(LinearGradient(colors: [.white.opacity(0.045), .clear], startPoint: .top, endPoint: .bottom))
+                    .allowsHitTesting(false)
+            }
             .overlay { shape.strokeBorder(tint?.opacity(0.22) ?? Color.primary.opacity(0.09)).allowsHitTesting(false) }
+            .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
     }
 }

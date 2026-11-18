@@ -9,14 +9,10 @@ enum MenuBarBadge {
 
     static func storage(icon: NSImage, value: String?) -> NSImage {
         let glyphWidth: CGFloat = 15
-        return pill(glyphWidth: glyphWidth, value: value, tint: .systemPurple,
-                    fillOpacity: 0.20, borderOpacity: 0.34) { x in
+        return pill(glyphWidth: glyphWidth, value: value, tint: .systemGreen,
+                    fillOpacity: 0.22, borderOpacity: 0.38) { x in
             let rect = NSRect(x: x, y: (height - glyphWidth) / 2, width: glyphWidth, height: glyphWidth)
-            if icon.isTemplate {
-                drawTinted(icon, in: rect, tint: .systemCyan)
-            } else {
-                icon.draw(in: rect)
-            }
+            drawTinted(icon, in: rect, tint: .systemGreen)
         }
     }
 
@@ -107,5 +103,20 @@ enum MenuBarBadge {
         context.fill(rect)
         context.restoreGState()
         context.endTransparencyLayer()
+    }
+}
+
+/// Keep NSStatusBarButton's event handling and accessibility, but draw only
+/// Oust's image. The system status-cell bezel ignores its highlight mask on
+/// some macOS versions and otherwise adds a second glass capsule.
+@MainActor
+final class MenuBarBadgeCell: NSButtonCell {
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+        guard let image else { return }
+        let rect = NSRect(x: cellFrame.midX - image.size.width / 2,
+                          y: cellFrame.midY - image.size.height / 2,
+                          width: image.size.width, height: image.size.height)
+        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
+                   respectFlipped: true, hints: nil)
     }
 }

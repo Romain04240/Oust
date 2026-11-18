@@ -194,6 +194,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     }
 
     static func configureAppearance(_ button: NSButton) {
+        button.cell = MenuBarBadgeCell(imageCell: button.image)
+        button.imagePosition = .imageOnly
         button.isBordered = false
         // The image already draws its colored pill. A native highlighted
         // bezel adds a second, wider background around it while pressed.
@@ -270,6 +272,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.show(relativeTo: rect, of: sender, preferredEdge: .minY)
         guard popover.isShown else { return false }
         anchor = sender
+        sender.highlight(false)
+        sender.state = .off
         if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, let layer = sender.layer {
             let pulse = CABasicAnimation(keyPath: "opacity")
             pulse.fromValue = 0.65
