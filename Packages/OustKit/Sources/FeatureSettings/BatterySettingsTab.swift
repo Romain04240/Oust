@@ -10,6 +10,12 @@ struct BatterySettingsTab: View {
 
     var body: some View {
         SettingsForm {
+            Picker(selection: $watch.settings.batteryPercentageStyle) {
+                Text("settings.battery.percent_beside", bundle: .oust).tag(WatchSettings.BatteryPercentageStyle.beside)
+                Text("settings.battery.percent_inside", bundle: .oust).tag(WatchSettings.BatteryPercentageStyle.inside)
+            } label: {
+                Text("settings.battery.percent_position", bundle: .oust)
+            }
             Picker(selection: $watch.settings.batteryTemperatureUnit) {
                 Text("settings.battery.celsius", bundle: .oust).tag(WatchSettings.TemperatureUnit.celsius)
                 Text("settings.battery.fahrenheit", bundle: .oust).tag(WatchSettings.TemperatureUnit.fahrenheit)

@@ -62,6 +62,12 @@ public struct MenuBarPanel: View {
                     .padding(.horizontal, Spacing.small)
                 }
             }
+            Button { open(.overview) } label: {
+                Label { Text("menubar.open", bundle: .oust) } icon: { Image(systemName: "macwindow") }
+                    .frame(maxWidth: .infinity, minHeight: 26)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
             bin
             if let retention = retentionLine {
                 Label { Text(verbatim: retention) } icon: { Image(systemName: "calendar.badge.clock") }
@@ -196,31 +202,37 @@ private struct VolumeLine: View {
                     }
                 }
                 Spacer(minLength: Spacing.hair)
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
-                    Text(verbatim: free)
-                        .font(Typography.size)
-                    Text("watch.capsule.word", bundle: .oust)
-                        .font(Typography.caption)
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(isLow ? AnyShapeStyle(Palette.color(for: .review)) : AnyShapeStyle(.primary))
             }
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
+                Text(verbatim: free)
+                    .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(isLow ? Palette.color(for: .review) : .purple)
+                    .contentTransition(.numericText())
+                Text("watch.capsule.word", bundle: .oust)
+                    .font(Typography.caption)
+            }
+            .fixedSize(horizontal: true, vertical: false)
             if volume.capacity.total > 0 {
                 DiskBar(used: volume.capacity.occupiedFraction, isLow: isLow, presented: presented)
-                HStack(spacing: Spacing.small) {
-                    Text(verbatim: L10n.string("menubar.disk_occupied", Formatters.compactBytes(volume.capacity.occupied),
-                                              Formatters.compactBytes(volume.capacity.total)))
-                    Spacer(minLength: 0)
-                    if volume.capacity.purgeable > 0 {
-                        Text(verbatim: L10n.string("menubar.disk_purgeable",
-                                                  Formatters.compactBytes(volume.capacity.purgeable)))
-                    }
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], spacing: Spacing.small) {
+                    storageMetric("menubar.storage_immediate", volume.capacity.available)
+                    storageMetric("menubar.storage_purgeable", volume.capacity.purgeable)
+                    storageMetric("menubar.storage_occupied", volume.capacity.occupied)
+                    storageMetric("menubar.storage_total", volume.capacity.total)
                 }
                 .font(Typography.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
         }
         .help(L10n.string("menubar.volume_free", free, Formatters.compactBytes(volume.capacity.total)))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func storageMetric(_ title: String, _ bytes: Int64) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.hair) {
+            Text(LocalizedStringKey(title), bundle: .oust).foregroundStyle(.secondary)
+            Text(verbatim: Formatters.compactBytes(bytes)).fontWeight(.semibold).foregroundStyle(.primary)
+        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -288,7 +300,7 @@ struct MenuSheen: View {
                 TimelineView(.animation(minimumInterval: 1.0 / 24)) { timeline in
                     let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3.2) / 3.2
                     let width = min(75, proxy.size.width * 0.4)
-                    LinearGradient(colors: [.clear, .white.opacity(0.32), .clear], startPoint: .leading, endPoint: .trailing)
+                    LinearGradient(colors: [.clear, .white.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
                         .frame(width: width)
                         .position(x: -width + (proxy.size.width + 2 * width) * phase, y: proxy.size.height / 2)
                 }

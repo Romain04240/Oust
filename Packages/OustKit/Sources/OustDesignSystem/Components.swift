@@ -162,6 +162,7 @@ public struct Tag: View {
 public struct SizeBar: View {
     let fraction: Double
     let tint: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(fraction: Double, tint: Color) {
         self.fraction = fraction
@@ -179,7 +180,7 @@ public struct SizeBar: View {
             }
         }
         .frame(height: 6)
-        .animation(.snappy, value: fraction)
+        .animation(reduceMotion ? nil : .snappy, value: fraction)
     }
 }
 
@@ -190,6 +191,7 @@ public struct SizeBar: View {
 public struct StorageBar: View {
     let capacity: Capacity
     let selected: Int64
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(capacity: Capacity, selected: Int64) {
         self.capacity = capacity
@@ -212,7 +214,8 @@ public struct StorageBar: View {
             .clipShape(Capsule())
         }
         .frame(height: 14)
-        .animation(.snappy, value: selected)
+        .animation(reduceMotion ? nil : .snappy, value: selected)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: capacity)
     }
 }
 

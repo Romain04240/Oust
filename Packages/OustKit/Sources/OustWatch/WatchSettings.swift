@@ -26,6 +26,10 @@ public struct WatchSettings: Sendable, Hashable, Codable {
 
     public var batteryAlerts: BatteryAlertSettings
     public var batteryTemperatureUnit: TemperatureUnit = .celsius
+    public enum BatteryPercentageStyle: String, CaseIterable, Codable, Sendable {
+        case beside, inside
+    }
+    public var batteryPercentageStyle: BatteryPercentageStyle = .beside
 
     public init(alertsLowDisk: Bool = true, alsoNotifies: Bool = false, threshold: LowDiskThreshold = .standard,
                 policies: [RetentionPolicy] = RetentionFamily.allCases.map { RetentionPolicy(family: $0) },
@@ -49,6 +53,8 @@ public struct WatchSettings: Sendable, Hashable, Codable {
         batteryAlerts = (try? container.decode(BatteryAlertSettings.self, forKey: .batteryAlerts)) ?? defaults.batteryAlerts
         batteryTemperatureUnit = (try? container.decode(TemperatureUnit.self, forKey: .batteryTemperatureUnit))
             ?? defaults.batteryTemperatureUnit
+        batteryPercentageStyle = (try? container.decode(BatteryPercentageStyle.self, forKey: .batteryPercentageStyle))
+            ?? defaults.batteryPercentageStyle
     }
 
     /// La règle d'une famille ; désactivée si elle n'a jamais été enregistrée.

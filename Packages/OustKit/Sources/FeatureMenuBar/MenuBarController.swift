@@ -158,7 +158,10 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
 
     private func trackBattery(on button: NSStatusBarButton) {
         guard batteryItem?.button === button else { return }
-        let reading = withObservationTracking { model.watch.battery } onChange: { [weak self, weak button] in
+        let reading = withObservationTracking {
+            _ = model.watch.settings.batteryPercentageStyle
+            return model.watch.battery
+        } onChange: { [weak self, weak button] in
             Task { @MainActor in if let button { self?.trackBattery(on: button) } }
         }
         updateBatteryBadge(reading, on: button)
@@ -167,7 +170,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     private func updateBatteryBadge(_ reading: BatteryReading?, on button: NSStatusBarButton) {
         let label = L10n.string("menubar.battery")
         let percent = reading.map { L10n.string("menubar.battery_percent", Formatters.count($0.level)) }
-        let badge = MenuBarBadge.battery(reading, percentage: percent)
+        let badge = MenuBarBadge.battery(reading, percentage: percent, style: model.watch.settings.batteryPercentageStyle)
         batteryItem?.length = badge.size.width
         button.image = badge
         if let reading, let percent {
@@ -335,6 +338,18 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         guard let rect = visibleRect(of: button), let window = button.window else { return }
         let screenRect = window.convertToScreen(button.convert(rect, to: nil))
         let menu = NSMenu()
+        if let disk = model.watch.boot ?? model.bootVolume {
+            let detail = NSMenuItem(title: disk.name + " · " + L10n.string("menubar.volume_free",
+                Formatters.compactBytes(disk.capacity.availableForImportantUsage), Formatters.compactBytes(disk.capacity.total)),
+                action: nil, keyEquivalent: "")
+            menu.addItem(detail)
+        }
+        if let battery = model.watch.battery {
+            menu.addItem(NSMenuItem(title: L10n.string("menubar.battery") + " · "
+                + L10n.string("menubar.battery_percent", Formatters.count(battery.level)) + " · "
+                + L10n.string(battery.state.localizationKey), action: nil, keyEquivalent: ""))
+        }
+        menu.addItem(.separator())
         for (key, action) in [
             ("menubar.open", #selector(openApp)),
             ("menu.settings", #selector(openSettings)),
@@ -342,6 +357,9 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         ] {
             let item = NSMenuItem(title: L10n.string(key), action: action, keyEquivalent: "")
             item.target = self
+            let symbol = key == "menubar.open" ? "macwindow" : key == "menu.settings" ? "gearshape" : "power"
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            if key == "menubar.quit" { menu.addItem(.separator()) }
             menu.addItem(item)
         }
         menu.popUp(positioning: nil, at: .init(x: screenRect.minX, y: screenRect.minY - 2), in: nil)

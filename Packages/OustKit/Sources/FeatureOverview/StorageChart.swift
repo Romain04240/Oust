@@ -26,6 +26,8 @@ struct StorageChart: View {
     let capacity: Capacity
     let date: Date?
     var showSystemDetails: (() -> Void)?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var revealed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.medium) {
@@ -38,6 +40,11 @@ struct StorageChart: View {
                     }
                 }
                 .clipShape(Capsule())
+                .mask(alignment: .leading) {
+                    Rectangle().scaleEffect(x: revealed || reduceMotion ? 1 : 0, y: 1, anchor: .leading)
+                }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.55), value: revealed)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: parts.map(\.bytes))
             }
             .frame(height: 18)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), alignment: .leading)], alignment: .leading,
@@ -61,6 +68,8 @@ struct StorageChart: View {
                     .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
             }
         }
+        .onAppear { revealed = true }
+        .onDisappear { revealed = false }
     }
 
     private func legend(_ part: StoragePart) -> some View {

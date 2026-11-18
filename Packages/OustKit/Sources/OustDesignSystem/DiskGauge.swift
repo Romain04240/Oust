@@ -27,6 +27,7 @@ public struct DiskGauge: View {
     let beat: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var kick = false
+    @State private var appeared = false
 
     public init(segments: [Segment], cart: Int64, capacity: Capacity, beat: Int = 0) {
         self.segments = segments
@@ -70,10 +71,15 @@ public struct DiskGauge: View {
                 .foregroundStyle(.white)
             }
             .frame(width: size, height: size)
+            .scaleEffect(appeared || reduceMotion ? 1 : 0.92)
+            .opacity(appeared || reduceMotion ? 1 : 0)
+            .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.12), value: appeared)
             .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-            .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.25), value: arcs.map(\.end))
+            .animation(reduceMotion ? nil : .spring(duration: 0.25), value: arcs.map(\.end))
         }
         .aspectRatio(1, contentMode: .fit)
+        .onAppear { appeared = true }
+        .onDisappear { appeared = false }
         .onChange(of: beat) {
             guard !reduceMotion else { return }
             withAnimation(.easeOut(duration: 0.08)) { kick = true }

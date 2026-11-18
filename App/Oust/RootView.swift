@@ -26,6 +26,7 @@ struct RootView: View {
     /// La largeur de la colonne de détail : les disques de la barre d'outils
     /// s'y tiennent, et défilent au-delà.
     @State private var detailWidth: CGFloat = 800
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationSplitView {
@@ -42,9 +43,10 @@ struct RootView: View {
         } detail: {
             // Une recherche en cours passe devant la section : on cherche partout.
             Group {
-                if model.isSearching { SearchView(model: model) } else { detail }
+                if model.isSearching { SearchView(model: model) } else {
+                    detail.modifier(SectionEntrance()).id(model.section).transition(.identity)
+                }
             }
-            .animation(.snappy, value: model.section)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
             // Cocher ne servait à rien tant qu'on ne savait pas où aller ensuite :
             // aucune section ne disait comment faire le vide (Romain, 18/10/2026).
@@ -54,7 +56,7 @@ struct RootView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.snappy, value: model.cart.isEmpty)
+            .animation(reduceMotion ? nil : .snappy, value: model.cart.isEmpty)
             // Les disques au centre ; à droite, l'Historique seul, en icône : les
             // Réglages ont quitté la barre d'outils (⌘, et le panneau de la barre
             // des menus y mènent), toute la place va aux disques (Romain,
@@ -106,6 +108,22 @@ struct RootView: View {
         case .history: HistoryView(model: model)
         case .cart: CartView(model: model)
         }
+    }
+}
+
+/// Animate only the incoming page. Keeping an outgoing scanner view alive for
+/// a crossfade can delay its cancellation until the new page has started work.
+private struct SectionEntrance: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared || reduceMotion ? 1 : 0)
+            .offset(y: appeared || reduceMotion ? 0 : 5)
+            .onAppear {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { appeared = true }
+            }
     }
 }
 

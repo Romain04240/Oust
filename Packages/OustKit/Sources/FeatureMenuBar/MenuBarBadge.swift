@@ -9,23 +9,22 @@ enum MenuBarBadge {
 
     static func storage(icon: NSImage, value: String?) -> NSImage {
         let glyphWidth: CGFloat = 15
-        return pill(glyphWidth: glyphWidth, value: value, tint: .systemGreen,
-                    fillOpacity: 0.22, borderOpacity: 0.38) { x in
+        return pill(glyphWidth: glyphWidth, value: value, tint: .systemPurple) { x in
             let rect = NSRect(x: x, y: (height - glyphWidth) / 2, width: glyphWidth, height: glyphWidth)
-            drawTinted(icon, in: rect, tint: .systemGreen)
+            drawTinted(icon, in: rect, tint: .systemPurple)
         }
     }
 
-    static func battery(_ reading: BatteryReading?, percentage: String?) -> NSImage {
+    static func battery(_ reading: BatteryReading?, percentage: String?,
+                        style: WatchSettings.BatteryPercentageStyle = .beside) -> NSImage {
         let tint: NSColor = switch reading {
         case .none: .secondaryLabelColor
         case .some(let reading):
-            switch (reading.state, reading.level) {
-            case (.onBattery, ...10): .systemRed
-            case (.onBattery, ...20): .systemOrange
-            case (.onBattery, ...40): .systemYellow
-            case (.onAC, _): .systemTeal
-            default: .systemGreen
+            switch reading.level {
+            case ...10: .systemRed
+            case ...20: .systemOrange
+            case ...40: .systemYellow
+            default: reading.state == .onAC ? .systemTeal : .systemGreen
             }
         }
         let source: String? = switch reading?.state {
@@ -33,11 +32,12 @@ enum MenuBarBadge {
         case .onAC: "powerplug.fill"
         default: nil
         }
-        let glyphWidth: CGFloat = source == nil ? 24 : 38
-        return pill(glyphWidth: glyphWidth, value: percentage, tint: tint,
-                    fillOpacity: 0.22, borderOpacity: 0.38) { x in
+        let bodyWidth: CGFloat = style == .inside ? 34 : 21
+        let bodyHeight: CGFloat = style == .inside ? 14 : 11
+        let glyphWidth: CGFloat = bodyWidth + (source == nil ? 3 : 17)
+        return pill(glyphWidth: glyphWidth, value: style == .inside ? nil : percentage, tint: tint) { x in
             let center = height / 2
-            let body = NSRect(x: x, y: center - 5.5, width: 21, height: 11)
+            let body = NSRect(x: x, y: center - bodyHeight / 2, width: bodyWidth, height: bodyHeight)
             let outline = NSBezierPath(roundedRect: body, xRadius: 3, yRadius: 3)
             tint.setStroke()
             outline.lineWidth = 1.25
@@ -49,7 +49,7 @@ enum MenuBarBadge {
                 let fill = body.insetBy(dx: 2.1, dy: 2.1)
                 let fraction = CGFloat(min(100, reading.level)) / 100
                 let charge = NSRect(x: fill.minX, y: fill.minY, width: fill.width * fraction, height: fill.height)
-                tint.withAlphaComponent(0.9).setFill()
+                tint.withAlphaComponent(style == .inside ? 0.28 : 0.9).setFill()
                 NSBezierPath(roundedRect: charge, xRadius: min(1.5, charge.width / 2), yRadius: 1.5).fill()
             } else if reading == nil {
                 let slash = NSBezierPath()
@@ -58,14 +58,21 @@ enum MenuBarBadge {
                 slash.lineWidth = 1.2
                 slash.stroke()
             }
+            if style == .inside, let reading {
+                let number = NSAttributedString(string: String(min(100, max(0, reading.level))), attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold),
+                    .foregroundColor: NSColor.labelColor,
+                ])
+                let size = number.size()
+                number.draw(at: NSPoint(x: body.midX - size.width / 2, y: center - size.height / 2))
+            }
             if let source, let symbol = NSImage(systemSymbolName: source, accessibilityDescription: nil) {
-                drawTinted(symbol, in: NSRect(x: x + 28, y: center - 5, width: 10, height: 10), tint: tint)
+                drawTinted(symbol, in: NSRect(x: x + bodyWidth + 7, y: center - 5, width: 10, height: 10), tint: tint)
             }
         }
     }
 
     private static func pill(glyphWidth: CGFloat, value: String?, tint: NSColor,
-                             fillOpacity: CGFloat, borderOpacity: CGFloat,
                              drawGlyph: @escaping (CGFloat) -> Void) -> NSImage {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
@@ -74,14 +81,7 @@ enum MenuBarBadge {
         let text = value.map { NSAttributedString(string: $0, attributes: attributes) }
         let textSize = text?.size() ?? .zero
         let width = padding * 2 + glyphWidth + (text == nil ? 0 : gap + ceil(textSize.width))
-        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { bounds in
-            let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-                                     xRadius: height / 2, yRadius: height / 2)
-            tint.withAlphaComponent(fillOpacity).setFill()
-            shape.fill()
-            tint.withAlphaComponent(borderOpacity).setStroke()
-            shape.lineWidth = 1
-            shape.stroke()
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
             drawGlyph(padding)
             text?.draw(at: NSPoint(x: padding + glyphWidth + gap, y: (height - textSize.height) / 2))
             return true

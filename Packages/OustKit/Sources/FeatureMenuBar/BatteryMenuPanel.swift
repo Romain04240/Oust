@@ -353,13 +353,19 @@ struct BatteryMenuPanel: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel(Text("menubar.battery_charger_unknown", bundle: .oust))
             }
-            flowArrow.frame(width: 24)
+            flowArrow.frame(minWidth: 38, maxWidth: 55)
             powerReading(battery)
                 .frame(maxWidth: .infinity)
-            flowArrow.frame(width: 24)
-            Image(systemName: "laptopcomputer")
-                .foregroundStyle(.secondary)
-                .accessibilityLabel(Text("menubar.battery_mac_short", bundle: .oust))
+            flowArrow.frame(minWidth: 38, maxWidth: 55)
+            VStack(spacing: Spacing.tight) {
+                Image(systemName: "laptopcomputer")
+                    .font(.system(size: 29, weight: .medium))
+                    .foregroundStyle(.blue)
+                Text("menubar.battery_mac_short", bundle: .oust)
+                    .font(Typography.caption).foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 48)
+            .accessibilityElement(children: .combine)
         }
         .batteryCard()
     }
@@ -368,7 +374,7 @@ struct BatteryMenuPanel: View {
         Capsule().fill(Color.blue.opacity(0.45))
             .overlay { MenuSheen(active: presented && hasEnergyFlow) }
             .clipShape(Capsule())
-            .frame(height: 3)
+            .frame(height: 5)
             .accessibilityHidden(true)
     }
 
@@ -407,6 +413,7 @@ struct BatteryMenuPanel: View {
             Text(LocalizedStringKey(caption), bundle: .oust)
                 .font(Typography.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
