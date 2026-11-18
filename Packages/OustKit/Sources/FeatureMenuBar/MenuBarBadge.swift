@@ -9,11 +9,11 @@ enum MenuBarBadge {
 
     static func storage(icon: NSImage, value: String?) -> NSImage {
         let glyphWidth: CGFloat = 15
-        return pill(glyphWidth: glyphWidth, value: value, tint: .labelColor,
-                    fillOpacity: 0.10, borderOpacity: 0.12) { x in
+        return pill(glyphWidth: glyphWidth, value: value, tint: .systemPurple,
+                    fillOpacity: 0.20, borderOpacity: 0.34) { x in
             let rect = NSRect(x: x, y: (height - glyphWidth) / 2, width: glyphWidth, height: glyphWidth)
             if icon.isTemplate {
-                drawTinted(icon, in: rect, tint: .labelColor)
+                drawTinted(icon, in: rect, tint: .systemCyan)
             } else {
                 icon.draw(in: rect)
             }
@@ -91,9 +91,9 @@ enum MenuBarBadge {
             return true
         }
         image.isTemplate = false
-        // La couleur du texte est résolue au dessin, y compris quand macOS
-        // change le contraste de la barre en changeant d'espace ou d'écran.
-        image.cacheMode = .never
+        // Reuse the raster while the sample is unchanged. The controller
+        // recreates it when the button's effective appearance changes.
+        image.cacheMode = .bySize
         return image
     }
 

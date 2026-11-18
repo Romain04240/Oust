@@ -56,6 +56,7 @@ struct BatteryMenuPanel: View {
             .fixedSize(horizontal: false, vertical: true)
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
         }
+        .scrollIndicators(.hidden)
         .scrollBounceBehavior(.basedOnSize)
         .frame(height: max(1, min(contentHeight, navigation.height - 40)))
         .task(id: presented) {

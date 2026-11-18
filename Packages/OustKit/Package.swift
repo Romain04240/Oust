@@ -226,6 +226,8 @@ let package = Package(
 
         // MARK: Tests
 
+        .testTarget(name: "FeatureMenuBarTests", dependencies: ["FeatureMenuBar", "OustWatch"]),
+
         .testTarget(name: "OustCoreTests", dependencies: ["OustCore"]),
         .testTarget(name: "OustScanTests", dependencies: ["OustScan"]),
         .testTarget(name: "OustVolumeTests", dependencies: ["OustVolume"]),

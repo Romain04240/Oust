@@ -39,6 +39,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     private var icon: NSImage
     private var item: NSStatusItem?
     private var batteryItem: NSStatusItem?
+    private var storageAppearance: NSKeyValueObservation?
+    private var batteryAppearance: NSKeyValueObservation?
     private weak var anchor: NSStatusBarButton?
     private enum PendingPresentation {
         case panel(MenuBarPage, NSStatusBarButton)
@@ -57,7 +59,9 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         navigation.close = { [weak self] in self?.close() }
         popover.behavior = .transient
         popover.delegate = self
-        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        // The content animates locally. Animating the native window as well
+        // serializes close/reopen when switching between the two status items.
+        popover.animates = false
         let host = NSHostingController(rootView: MenuBarPanel(model: model, navigation: navigation))
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
@@ -84,6 +88,12 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
             configure(button)
         }
         self.item = item
+        storageAppearance = item.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.updateStorageBadge(available: self.model.watch.boot?.capacity.availableForImportantUsage)
+            }
+        }
         trackLabel()
     }
 
@@ -92,6 +102,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         if let anchor, anchor === item.button { close() }
         NSStatusBar.system.removeStatusItem(item)
         self.item = nil
+        storageAppearance = nil
     }
 
     private func installBattery() {
@@ -99,6 +110,12 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.autosaveName = "fr.meaillais.oust.menubar.battery"
         batteryItem = item
+        batteryAppearance = item.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self, let button = self.batteryItem?.button else { return }
+                self.updateBatteryBadge(self.model.watch.battery, on: button)
+            }
+        }
         if let button = item.button {
             button.imagePosition = .imageOnly
             configure(button)
@@ -111,6 +128,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         if let anchor, anchor === batteryItem.button { close() }
         NSStatusBar.system.removeStatusItem(batteryItem)
         self.batteryItem = nil
+        batteryAppearance = nil
     }
 
     /// Le disponible macOS à côté de l'icône : le même chiffre que la fenêtre,
@@ -143,6 +161,10 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         let reading = withObservationTracking { model.watch.battery } onChange: { [weak self, weak button] in
             Task { @MainActor in if let button { self?.trackBattery(on: button) } }
         }
+        updateBatteryBadge(reading, on: button)
+    }
+
+    private func updateBatteryBadge(_ reading: BatteryReading?, on button: NSStatusBarButton) {
         let label = L10n.string("menubar.battery")
         let percent = reading.map { L10n.string("menubar.battery_percent", Formatters.count($0.level)) }
         let badge = MenuBarBadge.battery(reading, percentage: percent)
@@ -156,9 +178,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     }
 
     private func configure(_ button: NSStatusBarButton) {
-        button.isBordered = false
-        button.imageScaling = .scaleNone
-        button.wantsLayer = true
+        Self.configureAppearance(button)
         button.target = self
         button.action = #selector(toggle(_:))
         button.setAccessibilityCustomActions([
@@ -171,6 +191,18 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         let secondary = NSClickGestureRecognizer(target: self, action: #selector(contextClick(_:)))
         secondary.buttonMask = 0x2
         button.addGestureRecognizer(secondary)
+    }
+
+    static func configureAppearance(_ button: NSButton) {
+        button.isBordered = false
+        // The image already draws its colored pill. A native highlighted
+        // bezel adds a second, wider background around it while pressed.
+        if let cell = button.cell as? NSButtonCell {
+            cell.highlightsBy = []
+            cell.showsStateBy = []
+        }
+        button.imageScaling = .scaleNone
+        button.wantsLayer = true
     }
 
     @objc private func contextClick(_ gesture: NSClickGestureRecognizer) {
@@ -234,7 +266,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
             return true
         }
         navigation.page = page
-        navigation.height = min(520, max(180, (sender.window?.screen?.visibleFrame.height ?? 600) - 70))
+        navigation.height = max(100, (sender.window?.screen?.visibleFrame.height ?? 600) - 70)
         popover.show(relativeTo: rect, of: sender, preferredEdge: .minY)
         guard popover.isShown else { return false }
         anchor = sender

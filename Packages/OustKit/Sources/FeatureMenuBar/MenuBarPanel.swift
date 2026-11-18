@@ -28,6 +28,7 @@ public struct MenuBarPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { storageHeight = $0 }
                 }
+                .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
                 .frame(height: max(1, min(storageHeight, navigation.height - 40)))
             } else {
