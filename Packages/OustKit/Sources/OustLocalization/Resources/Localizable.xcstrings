@@ -1,6 +1,499 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "guided_review.startup_explorer_required": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explorer is showing another location. Choose the startup disk in Explorer or skip this step."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’Explorateur affiche un autre emplacement. Choisissez le disque de démarrage dans l’Explorateur ou passez cette étape."
+          }
+        }
+      }
+    },
+    "guided_review.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guided review"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parcours guidé"
+          }
+        }
+      }
+    },
+    "guided_review.start_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review this Mac"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faire le tour de ce Mac"
+          }
+        }
+      }
+    },
+    "guided_review.start_detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explore the startup disk tools at your own pace. You choose the items and confirm each action."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parcourez les outils du disque de démarrage à votre rythme. Vous choisissez les éléments et confirmez chaque action."
+          }
+        }
+      }
+    },
+    "guided_review.start": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start guided review"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Commencer le parcours"
+          }
+        }
+      }
+    },
+    "guided_review.progress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steps visited: %@ of %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Étapes parcourues : %@ sur %@"
+          }
+        }
+      }
+    },
+    "guided_review.examine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examiner"
+          }
+        }
+      }
+    },
+    "guided_review.skip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passer"
+          }
+        }
+      }
+    },
+    "guided_review.complete_step": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step complete"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Étape terminée"
+          }
+        }
+      }
+    },
+    "guided_review.finish": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terminer"
+          }
+        }
+      }
+    },
+    "guided_review.pause": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause"
+          }
+        }
+      }
+    },
+    "guided_review.resume": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reprendre"
+          }
+        }
+      }
+    },
+    "guided_review.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fermer"
+          }
+        }
+      }
+    },
+    "guided_review.safety": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No automatic selection or cleanup."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune présélection ni aucun nettoyage automatiques."
+          }
+        }
+      }
+    },
+    "guided_review.examining_detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review the results, then mark this step complete to see the next step in Overview."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les résultats, puis marquez cette étape terminée pour retrouver la suite dans la Vue d’ensemble."
+          }
+        }
+      }
+    },
+    "guided_review.cart_detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review your choices and confirmations. Finishing the review does not start cleanup."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifiez vos choix et leurs confirmations. Terminer le parcours ne lance aucun nettoyage."
+          }
+        }
+      }
+    },
+    "guided_review.paused_detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The review is paused. Resume this step whenever you are ready."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le parcours est en pause. Reprenez cette étape quand vous le souhaitez."
+          }
+        }
+      }
+    },
+    "guided_review.detail.applications": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Look through applications and their leftover files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repérez les applications et les restes à examiner."
+          }
+        }
+      }
+    },
+    "guided_review.detail.browsers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review your browsers’ local data and its protections."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les données locales de vos navigateurs et leurs protections."
+          }
+        }
+      }
+    },
+    "guided_review.detail.system": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review caches, downloads, and other system items."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passez en revue les caches, téléchargements et autres éléments du système."
+          }
+        }
+      }
+    },
+    "guided_review.detail.timeMachine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review local snapshots and the available estimates."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les instantanés locaux et les estimations disponibles."
+          }
+        }
+      }
+    },
+    "guided_review.detail.explorer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explore the disk’s folders to understand where space is used."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explorez les dossiers du disque pour comprendre où se trouve l’espace occupé."
+          }
+        }
+      }
+    },
+    "guided_review.detail.largeFiles": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review large or old files before choosing what to keep."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les fichiers volumineux ou anciens avant de choisir quoi garder."
+          }
+        }
+      }
+    },
+    "guided_review.detail.duplicates": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find duplicates, then compare the files before making a choice."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherchez les doublons, puis comparez les fichiers avant tout choix."
+          }
+        }
+      }
+    },
+    "guided_review.detail.photos": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review photos, videos, and similar images with photo library protections."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les photos, vidéos et ressemblances avec les protections de la photothèque."
+          }
+        }
+      }
+    },
+    "guided_review.detail.clouds": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Distinguish files stored on this Mac from those kept only in the cloud."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Distinguez les fichiers gardés sur ce Mac de ceux présents uniquement dans le cloud."
+          }
+        }
+      }
+    },
+    "guided_review.detail.developer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review developer tools, their caches, and their protected data."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les outils de développement, leurs caches et leurs données protégées."
+          }
+        }
+      }
+    },
+    "guided_review.detail.archive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review projects you could archive and the available destinations."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examinez les projets que vous pourriez archiver et les destinations disponibles."
+          }
+        }
+      }
+    },
+    "guided_review.detail.cart": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review the items selected in Oust’s bin and the required confirmations."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relisez les éléments choisis dans la corbeille d’Oust et les confirmations requises."
+          }
+        }
+      }
+    },
     "overview.open_selection": {
       "extractionState": "manual",
       "localizations": {

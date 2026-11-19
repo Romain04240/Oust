@@ -59,21 +59,28 @@ public final class AppModel {
 
     // MARK: Navigation
 
-    public var section: AppSection = .overview
+    public var section: AppSection = .overview {
+        didSet { if section != oldValue { guidedReviewNavigationChanged() } }
+    }
+    public internal(set) var guidedReview: GuidedReviewSession?
     /// L'onglet de la fenêtre Réglages : le dernier ouvert, ou celui où mène un lien.
     public var settingsTab: SettingsTab = .general
 
     // MARK: Recherche et filtres
 
     /// La recherche globale : nom, chemin, propriétaire, sur tout ce qui a été trouvé.
-    public var searchText = ""
+    public var searchText = "" {
+        didSet { if isSearching { pauseGuidedReviewForNavigation() } }
+    }
     /// Les filtres de chaque section, oubliés à la fermeture : un filtre resté
     /// posé d'une fois sur l'autre cacherait des éléments sans qu'on s'en souvienne.
     public var filters: [AppSection: ItemFilter] = [:]
 
     // MARK: Volumes
 
-    public internal(set) var volumes: [VolumeDescriptor] = []
+    public internal(set) var volumes: [VolumeDescriptor] = [] {
+        didSet { invalidateStaleGuidedReview() }
+    }
     @ObservationIgnored private var volumeRead: Task<Bool, Never>?
     @ObservationIgnored private var volumeRevision = 0
     @ObservationIgnored private(set) var mountGeneration = 0
@@ -94,7 +101,10 @@ public final class AppModel {
     // MARK: Analyse par règles
 
     public internal(set) var analysis: Phase = .idle {
-        didSet { if oldValue.isRunning && !analysis.isRunning { drainOverviewAnalysisRequest() } }
+        didSet {
+            invalidateStaleGuidedReview()
+            if oldValue.isRunning && !analysis.isRunning { drainOverviewAnalysisRequest() }
+        }
     }
     public internal(set) var items: [String: CleanupItem] = [:]
     @ObservationIgnored private var analysisLocations: [String: AnalyzedItemLocation] = [:]
@@ -108,7 +118,9 @@ public final class AppModel {
     public internal(set) var tree: TreeNode? {
         didSet { if oldValue !== tree { largeFiles.invalidateResult() } }
     }
-    public internal(set) var treeVolume: VolumeDescriptor?
+    public internal(set) var treeVolume: VolumeDescriptor? {
+        didSet { guidedReviewExplorerChanged() }
+    }
     @ObservationIgnored var displayedExplorerIndex: ScanIndex?
     @ObservationIgnored var explorerGainCheck: (root: TreeNode, work: Task<ScanIndex, Never>)?
     public internal(set) var scanProgress = ScanProgress()
@@ -123,10 +135,14 @@ public final class AppModel {
 
     /// Le disque que la vue d'ensemble analyse, choisi en haut de celle-ci
     /// (demande de Romain, 18/10/2026) ; `nil` : le disque de démarrage.
-    public internal(set) var analysisVolumeID: String?
+    public internal(set) var analysisVolumeID: String? {
+        didSet { invalidateStaleGuidedReview() }
+    }
     @ObservationIgnored var analysisVolumeGainCheck: Task<Void, Never>?
     /// Quand chaque disque a été analysé par les règles, par son point de montage.
-    public internal(set) var volumeAnalysisDates: [String: Date] = [:]
+    public internal(set) var volumeAnalysisDates: [String: Date] = [:] {
+        didSet { invalidateStaleGuidedReview() }
+    }
     var analysisReviews: [String: AnalysisReview] = [:]
     /// Le disque dont l'analyse par règles tourne en ce moment.
     public internal(set) var analyzingVolumeID: String?
@@ -173,7 +189,9 @@ public final class AppModel {
 
     // MARK: Nettoyage en direct
 
-    public private(set) var cleaning: Cleaning = .idle
+    public private(set) var cleaning: Cleaning = .idle {
+        didSet { invalidateStaleGuidedReview() }
+    }
     public private(set) var liveQueue: [CleanupItem] = []
     public private(set) var liveOutcomes: [CleanupOutcome] = []
     public private(set) var currentItemID: String?

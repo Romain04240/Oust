@@ -20,6 +20,7 @@ public struct OverviewView: View {
         // principale (remarque de Romain, 18/10/2026).
         SectionScaffold(.overview, subtitle: "overview.subtitle") {
             if model.fullDiskAccess == false { AccessBanner(model: model) }
+            if model.canStartGuidedReview { GuidedReviewStartCard(model: model) }
             // Le disque analysé se choisit ici, en haut : un disque externe
             // s'analyse comme le disque de démarrage (Romain, 18/10/2026), au
             // lieu d'attendre tout en bas avec un simple « Explorer ».

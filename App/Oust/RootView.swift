@@ -48,6 +48,9 @@ struct RootView: View {
                 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                GuidedReviewBanner(model: model)
+            }
             // Cocher ne servait à rien tant qu'on ne savait pas où aller ensuite :
             // aucune section ne disait comment faire le vide (Romain, 18/10/2026).
             .safeAreaInset(edge: .bottom, spacing: 0) {
