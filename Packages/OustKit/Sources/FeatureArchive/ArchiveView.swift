@@ -21,6 +21,9 @@ public struct ArchiveView: View {
     public var body: some View {
         SectionScaffold(.archive, subtitle: "archive.subtitle") {
             HStack(spacing: Spacing.small) {
+                ContextHelpButton(text: L10n.string("archive.step_copy") + "\n\n"
+                                  + L10n.string("archive.step_verify") + "\n\n"
+                                  + L10n.string("archive.step_trash"))
                 Picker(selection: Binding(get: { archive.inactiveMonths }, set: { archive.inactiveMonths = $0 })) {
                     ForEach([0, 1, 3, 6, 12, 24], id: \.self) { months in
                         Text(verbatim: months == 0 ? L10n.string("archive.all_projects")
@@ -59,7 +62,6 @@ public struct ArchiveView: View {
                     Candidates(archive: archive)
                     Destination(archive: archive)
                 }
-                StepsCard()
                 rootsCard
                 if archive.focusedProjectID == nil {
                     Destination(archive: archive)
@@ -106,27 +108,6 @@ public struct ArchiveView: View {
 }
 
 // MARK: - Avant
-
-private struct StepsCard: View {
-    var body: some View {
-        GlassCard {
-            HStack(alignment: .top, spacing: Spacing.large) {
-                step("1.circle.fill", "archive.step_copy")
-                step("2.circle.fill", "archive.step_verify")
-                step("3.circle.fill", "archive.step_trash")
-            }
-        }
-    }
-
-    private func step(_ symbol: String, _ key: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: Spacing.small) {
-            Image(systemName: symbol).font(.system(size: 18, weight: .bold)).foregroundStyle(Palette.onGradient)
-            Text(key, bundle: .oust).font(Typography.body).foregroundStyle(Palette.onGradient)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
 
 private struct Destination: View {
     let archive: ArchiveModel

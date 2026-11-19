@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "help.developer_protections": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A lock means an item is protected or an action is unavailable. The row and its explanation show the reasons when known. If a tool or app is using it, finish the current work or close the relevant app, then analyze again. Some items and actions remain protected or unavailable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un cadenas indique qu’un élément est protégé ou qu’une action n’est pas disponible. La ligne et sa fiche d’explication indiquent les raisons connues. Si un outil ou une application l’utilise, terminez le travail en cours ou fermez l’application concernée, puis relancez l’analyse. Certains éléments et certaines actions restent protégés ou indisponibles."
+          }
+        }
+      }
+    },
     "explorer.trash_unavailable": {
       "extractionState": "manual",
       "localizations": {

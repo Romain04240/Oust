@@ -25,6 +25,8 @@ public struct DeveloperView: View {
                 }
                 FilterMenu(filter: Binding(get: { model.filter(for: .developer) },
                                            set: { model.setFilter($0, for: .developer) }))
+                ContextHelpButton("help.developer_protections")
+                    .foregroundStyle(Palette.onGradient)
                 AnalyzeHeaderButton(model: model)
             }
         } content: {

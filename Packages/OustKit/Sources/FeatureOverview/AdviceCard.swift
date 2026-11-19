@@ -24,9 +24,12 @@ public struct AdviceView: View {
         } content: {
             GlassCard {
                 VStack(alignment: .leading, spacing: Spacing.medium) {
-                    Label { Text("advice.plan_title", bundle: .oust) } icon: { Image(systemName: "lightbulb.fill") }
-                        .font(Typography.title)
-                    Text("advice.plan_detail", bundle: .oust).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Label { Text("advice.plan_title", bundle: .oust) } icon: { Image(systemName: "lightbulb.fill") }
+                            .font(Typography.headline)
+                        Spacer()
+                        ContextHelpButton("advice.plan_detail")
+                    }
                     if model.adviceSearch.isRunning {
                         Label { Text("advice.searching", bundle: .oust) } icon: { ProgressView().controlSize(.small).tint(.white) }
                     } else if !model.storageAdvice.isEmpty {
@@ -86,7 +89,8 @@ private struct AdviceActionCard: View {
                         VStack(alignment: .leading, spacing: Spacing.tight) {
                             Text(verbatim: advice.title).font(Typography.headline).multilineTextAlignment(.leading)
                             Text(verbatim: advice.detail).font(Typography.caption)
-                                .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                                .multilineTextAlignment(.leading).lineLimit(expanded ? nil : 2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: Spacing.small)
                         VStack(alignment: .trailing, spacing: Spacing.tight) {

@@ -69,30 +69,30 @@ public struct DuplicatesView: View {
     private var identical: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: Spacing.small) {
-                Toggle(isOn: $model.duplicatesAsClones) {
-                    VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: Spacing.small) {
+                    Toggle(isOn: $model.duplicatesAsClones) {
                         Text("duplicates.as_clones", bundle: .oust).font(Typography.headline).foregroundStyle(Palette.onGradient)
-                        Text("duplicates.as_clones_detail", bundle: .oust).font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .toggleStyle(.switch)
+                    .disabled(model.duplicatesAsClones ? !model.canMoveFiles : !model.canCloneDuplicates)
+                    ContextHelpButton("duplicates.as_clones_detail")
+                        .foregroundStyle(Palette.onGradient)
                 }
-                .toggleStyle(.switch)
-                .disabled(model.duplicatesAsClones ? !model.canMoveFiles : !model.canCloneDuplicates)
                 Divider().overlay(Color.white.opacity(0.2))
                 // Rien n'est coché sans cette case (RULES.md, règle 4) ;
                 // cochée, Oust! garde un exemplaire par groupe et coche le reste.
-                Toggle(isOn: Binding(get: { model.preferences.duplicateAutoSelect },
-                                     set: { model.setDuplicateAutoSelect($0) })) {
-                    VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: Spacing.small) {
+                    Toggle(isOn: Binding(get: { model.preferences.duplicateAutoSelect },
+                                         set: { model.setDuplicateAutoSelect($0) })) {
                         Text("duplicates.auto_select", bundle: .oust).font(Typography.headline).foregroundStyle(Palette.onGradient)
-                        Text("duplicates.auto_select_detail", bundle: .oust).font(Typography.caption)
-                            .foregroundStyle(Palette.onGradientSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .toggleStyle(.switch)
+                    .disabled(!model.canCleanDuplicates)
+                    ContextHelpButton("duplicates.auto_select_detail")
+                        .foregroundStyle(Palette.onGradient)
                 }
-                .toggleStyle(.switch)
-                .disabled(!model.canCleanDuplicates)
             }
         }
         // Les groupes d'un autre disque que celui choisi ne se montrent pas :
