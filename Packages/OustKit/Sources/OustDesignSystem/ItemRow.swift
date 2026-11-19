@@ -12,6 +12,8 @@ public struct ItemRow: View {
     let showsPreview: Bool
     let preview: (() -> Void)?
     let onToggle: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var explaining = false
     @State private var hovering = false
 
@@ -34,9 +36,9 @@ public struct ItemRow: View {
                 Image(systemName: checkSymbol)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(enabled ? (isSelected ? Palette.color(for: item.category) : .secondary) : .secondary.opacity(0.6))
-                    .contentTransition(.symbolEffect(.replace))
+                    .contentTransition(reduceMotion || !isEnabled || !enabled ? .identity : .symbolEffect(.replace))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SelectionFeedbackStyle())
             .disabled(!enabled)
             .accessibilityLabel(Text("row.select", bundle: .oust))
 
@@ -147,6 +149,24 @@ public struct ItemRow: View {
     private var checkSymbol: String {
         if !enabled { return "lock.circle" }
         return isSelected ? "checkmark.circle.fill" : "circle"
+    }
+}
+
+/// L'appui anime uniquement le label : les lignes et leurs cibles restent fixes.
+private struct SelectionFeedbackStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(isEnabled && configuration.isPressed ? 0.7 : 1)
+            .animation(isEnabled && !reduceMotion ? .easeOut(duration: 0.13) : nil, value: configuration.isPressed)
+            .transaction { transaction in
+                if !isEnabled || reduceMotion {
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
+            }
     }
 }
 
@@ -265,6 +285,8 @@ public struct SelectAllRow: View {
     let count: Int
     let tint: Color
     let onToggle: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(state: State, count: Int, tint: Color, onToggle: @escaping () -> Void) {
         self.state = state
@@ -279,7 +301,7 @@ public struct SelectAllRow: View {
                 Image(systemName: symbol)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(state == .none ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
-                    .contentTransition(.symbolEffect(.replace))
+                    .contentTransition(reduceMotion || !isEnabled ? .identity : .symbolEffect(.replace))
                 Text(state == .all ? "group.deselect_all" : "group.select_all", bundle: .oust)
                     .font(Typography.body.weight(.semibold))
                 Text(verbatim: L10n.string("group.selectable_count", Formatters.count(count)))
@@ -290,7 +312,7 @@ public struct SelectAllRow: View {
             .padding(.vertical, Spacing.small)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SelectionFeedbackStyle())
         .accessibilityValue(Text(state == .all ? "group.deselect_all" : "group.select_all", bundle: .oust))
     }
 
