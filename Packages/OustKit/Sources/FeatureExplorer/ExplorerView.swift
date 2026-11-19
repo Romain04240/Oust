@@ -287,11 +287,9 @@ private struct Summary: View {
                 // avant, l'en-tête annonçait « 0 dossiers » pendant deux ou trois
                 // secondes après chaque arbre neuf (vérification du 18/10/2026).
                 Text(verbatim: state.analytics == nil
-                     ? L10n.string("explorer.summary", Formatters.count(state.focus.fileCount),
-                                   Formatters.compactBytes(state.focus.total.freeable))
+                     ? L10n.string("explorer.summary", Formatters.count(state.focus.fileCount))
                      : L10n.string("explorer.summary_full", Formatters.count(state.focus.fileCount),
-                                   Formatters.count(state.folders(in: state.focus)),
-                                   Formatters.compactBytes(state.focus.total.freeable)))
+                                   Formatters.count(state.folders(in: state.focus))))
                     .font(Typography.body).foregroundStyle(Palette.onGradient)
                 HStack(spacing: Spacing.large) {
                     if root.inaccessibleCount > 0 {
@@ -416,6 +414,8 @@ private struct Toolbar: View {
                 }
                 .buttonStyle(OnGradientButtonStyle())
                 .fixedSize()
+                .disabled(!model.canMoveFiles)
+                .help(Text(model.canMoveFiles ? "row.add_to_cart" : "explorer.trash_unavailable", bundle: .oust))
             }
             Button { export() } label: {
                 if compactButtons {
@@ -435,6 +435,7 @@ private struct Toolbar: View {
 
     /// Tout ce qui est sélectionné dans le tableau part dans la corbeille d'Oust!.
     private func throwSelection() {
+        guard model.canMoveFiles else { return }
         let items = state.selection.compactMap { state.row($0) }.compactMap { row -> CleanupItem? in
             switch row.kind {
             case .folder(let node): model.item(for: node)

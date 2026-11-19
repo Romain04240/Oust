@@ -283,9 +283,11 @@ extension AppModel {
         beforeDestinationCheck: (() -> Void)? = nil
     ) async throws -> Bool {
         guard tree === root, await revalidateExplorerGains(), tree === root else { return false }
-        // La redirection MobileSync et le remplacement du CSV sont deux
-        // opérations indépendantes. Le CSV conserve les octets occupés.
-        let includeGains = displayedExplorerIndex?.hasDeviceBackupProtection == false
+        // Le scanner décrit des blocs physiquement récupérables après une
+        // suppression. Tant que cette méthode est indisponible, ce n'est pas
+        // un gain autorisé : le rapport conserve uniquement les octets occupés.
+        // La protection MobileSync reste indépendante du remplacement du CSV.
+        let includeGains = canMoveFiles && displayedExplorerIndex?.hasDeviceBackupProtection == false
         guard let csv = render(includeGains) else { return false }
         let original = try await throwingStorageIO { try ExplorerCSVPermissions(at: destination) }
         let directory = try await throwingStorageIO {

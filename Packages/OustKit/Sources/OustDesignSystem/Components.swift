@@ -229,6 +229,8 @@ public struct StorageBar: View {
 public struct PrimaryButtonStyle: ButtonStyle {
     let section: AppSection
     let eclat: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(section: AppSection, eclat: Bool = false) {
         self.section = section
@@ -244,13 +246,16 @@ public struct PrimaryButtonStyle: ButtonStyle {
             .background(eclat ? AnyShapeStyle(Palette.eclat) : AnyShapeStyle(Color.white), in: Capsule())
             .shadow(color: (eclat ? Palette.eclatSolid : .black).opacity(0.35), radius: configuration.isPressed ? 4 : 16,
                     y: configuration.isPressed ? 1 : 6)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
+            .scaleEffect(!reduceMotion && configuration.isPressed ? 0.97 : 1)
+            .opacity(isEnabled ? 1 : 0.45)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.15), value: configuration.isPressed)
     }
 }
 
 /// Un bouton secondaire sur fond coloré.
 public struct OnGradientButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -260,7 +265,7 @@ public struct OnGradientButtonStyle: ButtonStyle {
             .padding(.horizontal, Spacing.large)
             .padding(.vertical, Spacing.small)
             .glassEffect(.regular.tint(.black.opacity(0.14)).interactive(), in: Capsule())
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.45)
     }
 }
 

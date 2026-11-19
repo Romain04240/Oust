@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "explorer.trash_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moving to the bin is unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mise à la corbeille indisponible"
+          }
+        }
+      }
+    },
     "browsers.cookies_consequence": {
       "extractionState": "manual",
       "localizations": {
@@ -9571,13 +9588,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ files · %2$@ actually freeable"
+            "value": "%1$@ files"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ fichiers · %2$@ réellement libérables"
+            "value": "%1$@ fichiers"
           }
         }
       }
@@ -9588,13 +9605,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ files · %2$@ folders · %3$@ actually freeable"
+            "value": "%1$@ files · %2$@ folders"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ fichiers · %2$@ dossiers · %3$@ réellement libérables"
+            "value": "%1$@ fichiers · %2$@ dossiers"
           }
         }
       }
