@@ -29,7 +29,7 @@ struct MenuRenderingTests {
             let pixels = raster(image)
             #expect((pixels.colorAt(x: 1, y: 1)?.alphaComponent ?? 1) < 0.01)
             #expect(image.size.width > 25)
-            let edge = pixels.colorAt(x: 7, y: Int(image.size.height / 2))!.usingColorSpace(.deviceRGB)!
+            let edge = pixels.colorAt(x: 2, y: Int(image.size.height / 2))!.usingColorSpace(.deviceRGB)!
             if level <= 20 {
                 #expect(edge.redComponent > edge.greenComponent)
             } else if level <= 40 {
@@ -40,6 +40,34 @@ struct MenuRenderingTests {
         }
         let storage = MenuBarBadge.storage(icon: NSImage(systemSymbolName: "internaldrive", accessibilityDescription: nil)!, value: "300 GB")
         #expect((raster(storage).colorAt(x: 1, y: 1)?.alphaComponent ?? 1) < 0.01)
+    }
+
+    @Test("Compact menu images keep their content clear of both edges")
+    func compactImageMargins() throws {
+        let icon = try #require(NSImage(systemSymbolName: "internaldrive", accessibilityDescription: nil))
+        var images = [MenuBarBadge.storage(icon: icon, value: "280 Go"),
+                      MenuBarBadge.storage(icon: icon, value: "280 Go", isLow: true),
+                      MenuBarBadge.storage(icon: icon, value: nil)]
+        for style in WatchSettings.BatteryPercentageStyle.allCases {
+            images.append(MenuBarBadge.battery(nil, percentage: nil, style: style))
+            for state in [BatteryReading.State.onBattery, .onAC, .charging, .charged] {
+                for level in [0, 9, 20, 40, 100] {
+                    images.append(MenuBarBadge.battery(.init(level: level, state: state), percentage: "\(level) %", style: style))
+                }
+            }
+        }
+        for image in images {
+            let pixels = raster(image)
+            var minX = pixels.pixelsWide, maxX = -1
+            for x in 0..<pixels.pixelsWide {
+                for y in 0..<pixels.pixelsHigh where (pixels.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.01 {
+                    minX = min(minX, x); maxX = max(maxX, x)
+                }
+            }
+            #expect(minX >= 1 && minX <= 4)
+            #expect(maxX >= minX && maxX < pixels.pixelsWide - 1)
+            #expect(pixels.pixelsWide - maxX - 1 <= 5)
+        }
     }
 
     @Test("Inline percentage stays compact and missing readings stay distinct")

@@ -4,7 +4,9 @@ import OustWatch
 @MainActor
 enum MenuBarBadge {
     private static var height: CGFloat { max(20, NSStatusBar.system.thickness - 2) }
-    private static let padding: CGFloat = 7
+    // macOS already spaces status items. Keep only enough image inset for
+    // the battery outline and anti-aliasing, rather than padding it twice.
+    private static let padding: CGFloat = 2
     private static let gap: CGFloat = 5
 
     static func storage(icon: NSImage, value: String?, isLow: Bool = false) -> NSImage {
