@@ -231,6 +231,9 @@ public final class AppModel {
     @ObservationIgnored var overviewAnalysisStarted = false
     @ObservationIgnored var overviewAnalysisTask: Task<Void, Never>?
     public internal(set) var overviewAnalysisInterrupted = false
+    public private(set) var overviewAnalysisStopping = false
+    @ObservationIgnored var browserRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var browserRefreshGeneration = UUID()
 
     public convenience init(home: URL = FileManager.default.homeDirectoryForCurrentUser, defaults: UserDefaults = .standard) {
         self.init(home: home, defaults: defaults, disk: DiskIndexModel())
@@ -314,8 +317,10 @@ public final class AppModel {
     nonisolated static func backgroundStorageTask(
         _ operation: @escaping @MainActor @Sendable () async -> Void
     ) -> Task<Void, Never> {
-        StorageOperationContext.withUnboundContext {
-            Task { @MainActor in await operation() }
+        CommandCancellationContext.$cancelsReadOnlyCommands.withValue(false) {
+            StorageOperationContext.withUnboundContext {
+                Task { @MainActor in await operation() }
+            }
         }
     }
 
@@ -497,86 +502,160 @@ public final class AppModel {
     }
 
     func runBootAnalysis(_ request: BootAnalysisRequest, context supplied: RuleContext? = nil,
-                         finders: [FinderKind] = FinderKind.allCases) async {
+                         finders: [FinderKind] = FinderKind.allCases,
+                         readBrowsers: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)? = nil,
+                         readLocation: (@Sendable (URL) -> AnalysisReview.Location?)? = nil) async {
+        // Le retour d’une lecture native, y compris après Arrêter, appartient
+        // encore à cette opération : aucune nouvelle admission entre-temps.
+        await StorageOperationContext.$isBound.withValue(true) {
+            await CommandCancellationContext.$cancelsReadOnlyCommands.withValue(true) {
+                await collectBootAnalysis(request, context: supplied, finders: finders,
+                                          readBrowsers: readBrowsers, readLocation: readLocation)
+            }
+        }
+    }
+
+    private func collectBootAnalysis(_ request: BootAnalysisRequest, context supplied: RuleContext?,
+                                     finders: [FinderKind],
+                                     readBrowsers: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)?,
+                                     readLocation: (@Sendable (URL) -> AnalysisReview.Location?)?) async {
         var completed = false
         defer {
             if bootAnalysisRequest?.id == request.id {
                 bootAnalysisRequest = nil
                 analyzingVolumeID = nil
+                overviewAnalysisStopping = false
+                cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
                 if !completed { overviewAnalysisInterrupted = true }
                 analysis = completed ? .done(Date()) : .idle
             }
         }
+        // Une mesure lancée depuis Navigateurs ne doit pas survivre dans la
+        // génération suivante. Son retrait réel précède la nouvelle collecte.
+        browserRefreshGeneration = UUID()
+        let precedingBrowserRead = browserRefreshTask
+        precedingBrowserRead?.cancel()
+        await precedingBrowserRead?.value
+        browserRefreshTask = nil
         guard !Task.isCancelled, let reviewVolume = request.volume,
-              let reviewLocation = await checkStorageIO({ AnalysisReview.Location(reviewVolume.scanRoot) }) ?? nil,
+              let reviewLocation = await checkStorageIO({
+                  if let readLocation { return readLocation(reviewVolume.scanRoot) }
+                  return AnalysisReview.Location(reviewVolume.scanRoot)
+              }) ?? nil,
               await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
-        analysisReviews.removeValue(forKey: reviewVolume.id)
-        var reviewIDs = Set<String>()
-        finishedFinders = []
-        // On ne coche d'office que la première fois pour ce disque : ce qui est
-        // coché sur un disque externe ne compte pas.
         let firstTime = request.preselect && !cart.contains { items[$0].map { isOnBootVolume($0) } ?? false }
-        // Les photos, les fichiers des nuages et les images similaires (section
-        // Doublons) ne viennent pas des règles : ceux de la corbeille y restent.
-        // Les éléments des autres disques restent aussi : leur analyse est à part.
+        var context = supplied ?? RuleContext(home: home, projectRoots: preferences.projectRoots,
+                                  historyRetentionDays: preferences.historyRetentionDays,
+                                  compressionAgeDays: preferences.compressionAgeMonths * 30)
+        let tree = request.preselect ? disk.treeProvider() : nil
+        context.tree = tree
+        let measurer: Measurer = tree.map(Measurer.tree) ?? .disk
+        let policy = PreselectionPolicy(recencyDays: preferences.recencyDays)
+        let operation = RuleEngine.runWithinStorageOperation(context, finders: finders, measurer: measurer)
+        var batches: [RuleBatch] = []
+        var findersDone = Set<FinderKind>()
+        let accepted = await withTaskCancellationHandler { @MainActor in
+            for await batch in operation.batches {
+                guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return false }
+                batches.append(batch)
+                findersDone.insert(batch.finder)
+            }
+            return !Task.isCancelled
+        } onCancel: {
+            operation.completion.cancel()
+        }
+        operation.completion.cancel()
+        // Annuler le flux ne signifie pas que simctl ou la lecture a fini.
+        await operation.completion.value
+        guard accepted, Set(finders).isSubset(of: findersDone),
+              await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
+        let browserSnapshot: BrowserAnalysisSnapshot?
+        if let readBrowsers {
+            guard let snapshot = await readBrowsers() else { return }
+            browserSnapshot = snapshot
+        } else if supplied == nil {
+            guard let snapshot = await readBrowserSnapshot() else { return }
+            browserSnapshot = snapshot
+        } else { browserSnapshot = nil }
+        guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
+        if request.preselect { await refreshSnapshots() }
+        // Les preuves des lots se relisent hors du fil d’interface, sans
+        // publier les tailles d’une génération arrêtée ou remplacée.
+        let staged = batches
+        guard let fresh = await checkStorageIO({ () -> [(CleanupItem, AnalyzedItemLocation?)]? in
+            let rows = staged.flatMap { batch in batch.revalidatedItems().map { ($0, batch.analysisLocation(for: $0)) } }
+            guard reviewLocation.matches(reviewVolume.scanRoot) else { return nil }
+            return rows
+        }) ?? nil, await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
+        // L’ancien résultat reste visible en cas d’arrêt. Le panier vivant est
+        // conservé : une case décochée pendant l’attente ne revient jamais.
         items = items.filter { $0.value.category == .snapshots || $0.value.category.section == .duplicates
             || $0.value.category.section == .photos || $0.value.category.section == .clouds
             || !isOnBootVolume($0.value) }
         analysisLocations = analysisLocations.filter { items[$0.key] != nil }
         backupAnalysisTokens = backupAnalysisTokens.filter { analysisLocations[$0.key] != nil }
         stopReadOnlyRevalidationIfEmpty()
-        // Les sections qui suivent l'arbre de l'Explorateur (gros fichiers)
-        // reviennent au disque de démarrage.
-        if request.preselect, let boot = bootVolume, treeVolume?.isBoot == false, !explorer.isRunning { explore(boot) }
-        var context = supplied ?? RuleContext(home: home, projectRoots: preferences.projectRoots,
-                                  historyRetentionDays: preferences.historyRetentionDays,
-                                  compressionAgeDays: preferences.compressionAgeMonths * 30)
-        // Une seule passe : les chercheurs démarrent tout de suite, et lisent les
-        // tailles dans l'arbre partagé (rafraîchi par FSEvents) au lieu de
-        // remesurer chaque élément sur le disque.
-        // La consultation automatique n'attend pas un cache ou un index global.
-        let tree = request.preselect ? disk.treeProvider() : nil
-        context.tree = tree
-        let measurer: Measurer = tree.map(Measurer.tree) ?? .disk
-        let policy = PreselectionPolicy(recencyDays: preferences.recencyDays)
-
-        if supplied == nil { refreshBrowsers() }
-        for await batch in RuleEngine.run(context, finders: finders, measurer: measurer) {
-            guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
-            recordAnalyzedBatch(batch, preselect: firstTime, policy: policy)
-            reviewIDs.formUnion(batch.items.map(\.id))
-            finishedFinders.insert(batch.finder)
+        var reviewIDs = Set<String>()
+        for (item, location) in fresh {
+            recordAnalyzedItem(item, analysisLocation: location, preselect: firstTime, policy: policy)
+            reviewIDs.insert(item.id)
         }
-        guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
+        if let browserSnapshot { publishBrowserSnapshot(browserSnapshot) }
+        finishedFinders = findersDone
         cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
-        // Le démarrage gère les snapshots séparément ; ne pas attendre leur
-        // mesure pour publier les résultats de la consultation automatique.
-        if request.preselect { await refreshSnapshots() }
-        guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
-        if supplied == nil { refreshVolumes() }
         saveAnalysisReview(for: reviewVolume, location: reviewLocation, ids: reviewIDs, locationWasVerified: true)
         volumeAnalysisDates[reviewVolume.id] = Date()
         completed = true
+        if supplied == nil { refreshVolumes() }
     }
 
-    public func refreshBrowsers() {
-        browserProfiles = BrowserFinder.profiles(home: home)
-        for profile in browserProfiles {
-            let running = BrowserFinder.isRunning(profile.browser)
-            for item in BrowserFinder.items(for: profile, isRunning: running) {
-                items[item.id] = items[item.id].map { old in var fresh = item; fresh.sizes = old.sizes; return fresh } ?? item
+    func setOverviewAnalysisStopping(_ value: Bool) { overviewAnalysisStopping = value }
+
+    public func refreshBrowsers() { _ = startBrowserRefresh() }
+
+    @discardableResult
+    func startBrowserRefresh(read: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)? = nil) -> Task<Void, Never>? {
+        guard bootAnalysisRequest == nil else { return nil }
+        let previous = browserRefreshTask
+        previous?.cancel()
+        let generation = UUID()
+        browserRefreshGeneration = generation
+        let task = Self.backgroundStorageTask { [self] in
+            defer { if browserRefreshGeneration == generation { browserRefreshTask = nil } }
+            await previous?.value
+            guard !Task.isCancelled, browserRefreshGeneration == generation, bootAnalysisRequest == nil else { return }
+            let snapshot = await StorageOperationContext.$isBound.withValue(true) {
+                if let read { return await read() }
+                return await readBrowserSnapshot()
             }
+            guard !Task.isCancelled, browserRefreshGeneration == generation, bootAnalysisRequest == nil,
+                  let snapshot else { return }
+            publishBrowserSnapshot(snapshot)
         }
-        // Les tailles des caches de navigateurs, mesurées à part.
-        let browserItems = items.values.filter { $0.category == .browsers }
-        Task {
-            let paths = browserItems.flatMap(\.paths)
-            let measures = await Scanner.measure(paths)
-            for item in browserItems {
-                let size = item.paths.compactMap { measures[$0]?.sizes }.total()
-                self.items[item.id]?.sizes = size
-            }
+        browserRefreshTask = task
+        return task
+    }
+
+    func readBrowserSnapshot() async -> BrowserAnalysisSnapshot? {
+        let home = home
+        let running = Set(BrowserKind.allCases.filter { BrowserFinder.isRunning($0) })
+        guard !Task.isCancelled, let snapshot = await checkStorageIO({
+            let profiles = BrowserFinder.profiles(home: home)
+            let rows = profiles.flatMap { BrowserFinder.items(for: $0, isRunning: running.contains($0.browser)) }
+            return BrowserAnalysisSnapshot(profiles: profiles, items: rows)
+        }), !Task.isCancelled else { return nil }
+        let measures = await Scanner.measure(snapshot.items.flatMap(\.paths))
+        guard !Task.isCancelled else { return nil }
+        var result = snapshot
+        for index in result.items.indices {
+            result.items[index].sizes = result.items[index].paths.compactMap { measures[$0]?.sizes }.total()
         }
+        return result
+    }
+
+    private func publishBrowserSnapshot(_ snapshot: BrowserAnalysisSnapshot) {
+        browserProfiles = snapshot.profiles
+        for item in snapshot.items { items[item.id] = item }
     }
 
     /// Les éléments d'une section, triés du plus libérable au moins. Ceux des

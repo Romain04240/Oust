@@ -24,7 +24,10 @@ func storageColor(_ category: StorageCategory) -> Color {
 struct StorageChart: View {
     let parts: [StoragePart]
     let capacity: Capacity
-    let date: Date?
+    let classificationDate: Date?
+    let hasClassification: Bool
+    var isLoadingClassification = false
+    var isRefreshingClassification = false
     var showSystemDetails: (() -> Void)?
     var compact = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -61,12 +64,24 @@ struct StorageChart: View {
                     .help(Text(verbatim: L10n.string(part.category.localizationKey) + " · " + Formatters.bytes(part.bytes)))
                 }
             }
-            if !compact, let date {
-                Text(verbatim: L10n.string("storage.based_on_scan", Formatters.timestamp(date)))
+            if isLoadingClassification {
+                Text("storage.classification_loading", bundle: .oust)
                     .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
-            } else if !compact {
+            } else if hasClassification, let classificationDate {
+                Text(verbatim: L10n.string("storage.based_on_scan", Formatters.timestamp(classificationDate)))
+                    .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
+            } else if hasClassification {
+                Text("storage.classification_date_unknown", bundle: .oust)
+                    .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
+            } else {
                 Text("storage.needs_scan", bundle: .oust)
                     .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
+            }
+            if isRefreshingClassification {
+                HStack(spacing: Spacing.small) {
+                    ProgressView().controlSize(.small).tint(.white)
+                    Text("storage.classification_refreshing", bundle: .oust).font(Typography.caption)
+                }
             }
         }
         .onAppear { revealed = true }

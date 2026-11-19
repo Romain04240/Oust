@@ -110,12 +110,12 @@ public enum RuleEngine {
     /// The model's outer operation owns the deadline and waits for all native
     /// work to exit. Opening a second gate here would deadlock that operation.
     package static func runWithinStorageOperation(
-        _ context: RuleContext, finders: [FinderKind] = FinderKind.allCases
+        _ context: RuleContext, finders: [FinderKind] = FinderKind.allCases, measurer: Measurer = .disk
     ) -> RuleOperation {
         guard StorageOperationContext.isBound else {
             return RuleOperation(batches: AsyncStream { $0.finish() }, completion: Task {})
         }
-        return makeOperation(context, finders: finders, measurer: .disk)
+        return makeOperation(context, finders: finders, measurer: measurer)
     }
 
     private static func runUnbounded(_ context: RuleContext, finders: [FinderKind],

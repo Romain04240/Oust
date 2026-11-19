@@ -1,6 +1,108 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "storage.classification_loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing the local file breakdown…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Préparation de la répartition locale…"
+          }
+        }
+      }
+    },
+    "overview.stopping_analysis": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stopping…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêt en cours…"
+          }
+        }
+      }
+    },
+    "overview.rules_collected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cleanup findings collected: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pistes de nettoyage collectées : %@"
+          }
+        }
+      }
+    },
+    "storage.refresh_classification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh file categories"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actualiser la répartition"
+          }
+        }
+      }
+    },
+    "storage.classification_date_unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File categories from a local file scan; its date is unavailable. Live capacity; approximate breakdown."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Catégories issues d’une analyse locale des fichiers dont la date est indisponible. Capacité actualisée ; répartition indicative."
+          }
+        }
+      }
+    },
+    "storage.classification_refreshing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local file classification in progress…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Classement local des fichiers en cours…"
+          }
+        }
+      }
+    },
     "settings.battery.percent_position": {
       "extractionState": "manual",
       "localizations": {
@@ -31132,13 +31234,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "File categories from the scan on %@. Live capacity; approximate breakdown."
+            "value": "File categories from the local file scan on %@. Live capacity; approximate breakdown."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Catégories de fichiers d’après l’analyse du %@. Capacité actualisée ; répartition indicative."
+            "value": "Catégories issues de l’analyse locale des fichiers du %@. Capacité actualisée ; répartition indicative."
           }
         }
       }
@@ -31149,13 +31251,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Analyze this disk to see its file categories. Available, purgeable and immediately free space are already shown."
+            "value": "No file category index for this disk. Refresh the breakdown to classify its files locally; current capacity is already shown."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Analysez ce disque pour voir les catégories de fichiers. Le disponible, le purgeable et le libre immédiat sont déjà affichés."
+            "value": "Aucun index des fichiers pour ce disque. Actualisez la répartition pour classer les fichiers localement ; la capacité est déjà actualisée."
           }
         }
       }
@@ -33597,13 +33699,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "When Overview first opens, Oust scans the startup disk once per session, without selecting or cleaning anything. Other disks are scanned on request. Inaccessible locations may limit the results."
+            "value": "When Overview first opens, Oust collects cleanup findings on the startup disk once per session, without selecting or cleaning anything. File categories use the last local file scan and can be refreshed separately. Other disks are analyzed on request. Inaccessible locations may limit the results."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "À la première ouverture de la Vue d’ensemble, Oust analyse le disque de démarrage une fois par session, sans présélection ni nettoyage. Les autres disques s’analysent sur demande. Les zones inaccessibles peuvent limiter les résultats."
+            "value": "À la première ouverture de la Vue d’ensemble, Oust collecte les pistes de nettoyage du disque de démarrage une fois par session, sans présélection ni nettoyage. Les catégories de fichiers proviennent de la dernière analyse locale et s’actualisent séparément. Les autres disques s’analysent sur demande. Les zones inaccessibles peuvent limiter les résultats."
           }
         }
       }

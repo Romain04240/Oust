@@ -12,6 +12,8 @@ struct StorageDetailsView: View {
     let model: AppModel
     let volume: VolumeDescriptor
     let breakdown: StorageBreakdown
+    let classificationDate: Date?
+    let hasClassification: Bool
     @State private var container: APFSContainerUsage?
     @State private var loading = true
     @Environment(\.dismiss) private var dismiss
@@ -44,9 +46,21 @@ struct StorageDetailsView: View {
                             amount("storage.details.remainder", residual)
                         }.padding(Spacing.small)
                     }
-                    if let date = model.analysisDate(for: volume) {
+                    if let date = classificationDate {
                         Text(verbatim: L10n.string("storage.based_on_scan", Formatters.timestamp(date)))
                             .font(Typography.caption).foregroundStyle(.secondary)
+                    } else if hasClassification {
+                        Text("storage.classification_date_unknown", bundle: .oust)
+                            .font(Typography.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("storage.needs_scan", bundle: .oust)
+                            .font(Typography.caption).foregroundStyle(.secondary)
+                    }
+                    if model.isRefreshingStorageClassification(for: volume) {
+                        HStack(spacing: Spacing.small) {
+                            ProgressView().controlSize(.small)
+                            Text("storage.classification_refreshing", bundle: .oust).font(Typography.caption)
+                        }
                     }
                     Divider()
                     Text("storage.details.volumes", bundle: .oust).font(Typography.headline)

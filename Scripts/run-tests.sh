@@ -29,8 +29,12 @@ fi
 total=0
 echecs=()
 
+# Les cas qui retiennent volontairement une lecture native doivent garder leur
+# budget de trois secondes : les lancer tous ensemble saturait les exécuteurs
+# et créait des échecs intermittents sans lever le veto. Les courses entre
+# tâches restent exercées explicitement à l’intérieur des tests concernés.
 for cible in $CIBLES; do
-    sortie=$(swift test --filter "^${cible}\." 2>&1)
+    sortie=$(swift test --no-parallel --filter "^${cible}\." 2>&1)
     ligne=$(echo "$sortie" | grep -E 'Test run with' | tail -1)
     nombre=$(echo "$ligne" | grep -oE '[0-9]+ tests?' | head -1 | grep -oE '[0-9]+')
     if echo "$ligne" | grep -q 'passed'; then
@@ -38,7 +42,7 @@ for cible in $CIBLES; do
         total=$((total + ${nombre:-0}))
     else
         printf '  %-24s ÉCHEC\n' "$cible"
-        echo "$sortie" | grep -E '✘|error:' | head -15
+        echo "$sortie" | grep -E '✘|error:|recorded an issue|Expectation failed|failed after' | head -15
         echecs+=("$cible")
     fi
 done

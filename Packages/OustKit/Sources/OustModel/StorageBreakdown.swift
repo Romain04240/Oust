@@ -36,14 +36,38 @@ public struct StorageBreakdown: Sendable {
     }
 }
 
+/// La date décrit l’arbre utilisé pour ces nombres, jamais une collecte de règles.
+public struct StorageClassificationSnapshot: Sendable {
+    public let breakdown: StorageBreakdown
+    public let date: Date?
+    public let hasClassification: Bool
+}
+
 extension AppModel {
     public func storageTreeIdentifier(for volume: VolumeDescriptor) -> ObjectIdentifier? {
         analyzedTree(for: volume).map(ObjectIdentifier.init)
     }
 
+    public func storageClassificationDate(for volume: VolumeDescriptor) -> Date? { analysisDate(for: volume) }
+
+    public func isRefreshingStorageClassification(for volume: VolumeDescriptor) -> Bool { isAnalyzing(volume) }
+
+    public func refreshStorageClassification(for volume: VolumeDescriptor) {
+        guard !analysis.isRunning, cleaning != .running, !isAnalyzing(volume), canAnalyzeVolume(volume),
+              volumes.contains(where: { $0.id == volume.id && $0.mountIdentity == volume.mountIdentity }) else { return }
+        reanalyze(volume)
+    }
+
     public func storageBreakdown(for volume: VolumeDescriptor) async -> StorageBreakdown {
-        guard let root = analyzedTree(for: volume) else { return StorageBreakdown() }
-        return await Task.detached(priority: .utility) {
+        await storageClassification(for: volume).breakdown
+    }
+
+    public func storageClassification(for volume: VolumeDescriptor) async -> StorageClassificationSnapshot {
+        guard let root = analyzedTree(for: volume) else {
+            return StorageClassificationSnapshot(breakdown: StorageBreakdown(), date: nil, hasClassification: false)
+        }
+        let sourceDate = storageClassificationDate(for: volume)
+        let value = await Task.detached(priority: .utility) {
             let analytics = TreeAnalytics.compute(root, largestLimit: 0)
             var totals: [StorageCategory: Int64] = [:]
             for entry in analytics.kinds {
@@ -62,5 +86,6 @@ extension AppModel {
             totals[.other, default: 0] += analytics.smallFiles.bytes
             return StorageBreakdown(observed: totals)
         }.value
+        return StorageClassificationSnapshot(breakdown: value, date: sourceDate, hasClassification: true)
     }
 }

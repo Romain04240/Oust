@@ -74,9 +74,14 @@ private struct HeroCard: View {
     let volume: VolumeDescriptor
     let showReview: () -> Void
 
-    @State private var breakdown = StorageBreakdown()
+    @State private var classification: StorageClassificationSnapshot?
+    @State private var classificationVolumeID: String?
     @State private var showsStorageDetails = false
 
+    private var displayedClassification: StorageClassificationSnapshot? {
+        classificationVolumeID == volume.id ? classification : nil
+    }
+    private var breakdown: StorageBreakdown { displayedClassification?.breakdown ?? StorageBreakdown() }
     private var parts: [StoragePart] { breakdown.parts(capacity: volume.capacity) }
     private var gaugeSegments: [DiskGauge.Segment] {
         parts.filter { $0.category != .free && $0.category != .purgeable }.map {
@@ -92,8 +97,9 @@ private struct HeroCard: View {
                 HStack(spacing: Spacing.small) {
                     Label { Text(verbatim: volume.name) } icon: { Image(systemName: volume.symbol) }
                         .font(Typography.headline)
-                    if let date = model.analysisDate(for: volume) {
-                        Text(verbatim: Formatters.timestamp(date)).font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
+                    if case let .done(date) = phase {
+                        Text(verbatim: L10n.string("overview.rules_collected", Formatters.timestamp(date)))
+                            .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
                     }
                     Spacer(minLength: Spacing.small)
                     Text(verbatim: L10n.string("disks.available", Formatters.compactBytes(volume.capacity.availableForImportantUsage)))
@@ -101,9 +107,23 @@ private struct HeroCard: View {
                     ContextHelpButton(text: L10n.string("storage.explanation") + "\n\n" + L10n.string("overview.auto_help"))
                 }
                 HStack(spacing: Spacing.large) {
-                    StorageChart(parts: parts, capacity: volume.capacity, date: model.analysisDate(for: volume),
-                                 showSystemDetails: { showsStorageDetails = true }, compact: true)
-                        .frame(maxWidth: .infinity)
+                    VStack(alignment: .leading, spacing: Spacing.small) {
+                        StorageChart(parts: parts, capacity: volume.capacity,
+                                     classificationDate: displayedClassification?.date,
+                                     hasClassification: displayedClassification?.hasClassification == true,
+                                     isLoadingClassification: displayedClassification == nil,
+                                     isRefreshingClassification: model.isRefreshingStorageClassification(for: volume),
+                                     showSystemDetails: { showsStorageDetails = true }, compact: true)
+                        Button { model.refreshStorageClassification(for: volume) } label: {
+                            Label { Text("storage.refresh_classification", bundle: .oust) } icon: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.plain).font(Typography.caption.weight(.semibold))
+                        .disabled(model.isRefreshingStorageClassification(for: volume) || model.analysis.isRunning
+                                  || model.cleaning == .running || !model.canAnalyzeVolume(volume))
+                    }
+                    .frame(maxWidth: .infinity)
                     DiskGauge(segments: gaugeSegments, cart: 0, capacity: volume.capacity, beat: model.beat)
                         .frame(width: 108, height: 108)
                 }
@@ -112,25 +132,33 @@ private struct HeroCard: View {
                         Label { Text("storage.details.open", bundle: .oust) } icon: { Image(systemName: "chart.pie") }
                     }
                     .buttonStyle(.plain).font(Typography.caption.weight(.semibold))
+                    .disabled(displayedClassification == nil)
                     if phase.isRunning {
                         ProgressView().controlSize(.small).tint(.white)
                         Text("overview.analyzing", bundle: .oust).font(Typography.caption)
                     }
                     Spacer(minLength: Spacing.small)
                     if selected > 0 {
-                        Text(verbatim: L10n.string("overview.go_clean", Formatters.compactBytes(selected)))
-                            .font(Typography.caption.monospacedDigit())
+                        Button { model.section = .cart } label: {
+                            Text(verbatim: L10n.string("overview.go_clean", Formatters.compactBytes(selected)))
+                                .font(Typography.caption.monospacedDigit())
+                        }
+                        .buttonStyle(OnGradientButtonStyle())
                     }
                     if model.analysisReview(for: volume) != nil {
                         Button(action: showReview) { Text("analysis_review.open", bundle: .oust) }
                             .buttonStyle(OnGradientButtonStyle())
                     }
-                    if model.canStopOverviewAnalysis {
-                        Button { model.stopOverviewAnalysis() } label: { Text("overview.stop_analysis", bundle: .oust) }
-                            .buttonStyle(OnGradientButtonStyle())
+                    if model.canStopOverviewAnalysis(on: volume) {
+                        Button { model.stopOverviewAnalysis(on: volume) } label: {
+                            Text(model.overviewAnalysisStopping ? "overview.stopping_analysis" : "overview.stop_analysis", bundle: .oust)
+                        }
+                        .buttonStyle(OnGradientButtonStyle())
+                        .disabled(model.overviewAnalysisStopping)
                     } else {
                         Button { Task { await model.analyzeOverview() } } label: {
-                            Text(model.overviewAnalysisInterrupted ? "overview.retry_analysis" : (phase.hasRun ? "overview.reanalyze" : "overview.analyze"), bundle: .oust)
+                            Text(volume.isBoot && model.overviewAnalysisInterrupted ? "overview.retry_analysis"
+                                 : (phase.hasRun ? "overview.reanalyze" : "overview.analyze"), bundle: .oust)
                         }
                         .buttonStyle(OnGradientButtonStyle()).disabled(model.analysis.isRunning)
                     }
@@ -138,13 +166,17 @@ private struct HeroCard: View {
             }
             .foregroundStyle(Palette.onGradient)
         }
-        .task(id: StorageChartKey(volume: volume.id, tree: model.storageTreeIdentifier(for: volume))) {
-            let value = await model.storageBreakdown(for: volume)
+        .task(id: StorageChartKey(volume: volume.id, tree: model.storageTreeIdentifier(for: volume),
+                                 date: model.storageClassificationDate(for: volume))) {
+            let value = await model.storageClassification(for: volume)
             guard !Task.isCancelled else { return }
-            breakdown = value
+            classification = value
+            classificationVolumeID = volume.id
         }
         .sheet(isPresented: $showsStorageDetails) {
-            StorageDetailsView(model: model, volume: volume, breakdown: breakdown)
+            StorageDetailsView(model: model, volume: volume, breakdown: breakdown,
+                               classificationDate: displayedClassification?.date,
+                               hasClassification: displayedClassification?.hasClassification == true)
         }
     }
 }
@@ -152,6 +184,7 @@ private struct HeroCard: View {
 private struct StorageChartKey: Hashable {
     let volume: String
     let tree: ObjectIdentifier?
+    let date: Date?
 }
 
 /// Une tuile par grande famille, qui mène à sa section.
