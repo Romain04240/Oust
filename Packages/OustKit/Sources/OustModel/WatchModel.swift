@@ -279,7 +279,11 @@ public final class WatchModel {
             guard let peer = preference.bluetoothPeer else { return nil }
             return (preference.id, peer)
         }, uniquingKeysWith: { first, _ in first })
-        let fresh = await BatteryDevice.read(requestBluetoothPermission: requestBluetoothPermission, knownBluetooth: remembered)
+        let watches = Dictionary(batteryDevicePreferences.compactMap { preference -> (String, WatchRelayBinding)? in
+            guard let binding = preference.watchRelayBinding else { return nil }
+            return (preference.id, binding)
+        }, uniquingKeysWith: { first, _ in first })
+        let fresh = await BatteryDevice.read(requestBluetoothPermission: requestBluetoothPermission, knownBluetooth: remembered, knownWatches: watches)
         guard !Task.isCancelled, cycle == deviceReadCycle, !batteryAsleep else { return }
         batteryDevices = fresh
         batteryDevicesReadAt = fresh == nil ? nil : startedAt
@@ -291,11 +295,19 @@ public final class WatchModel {
             batteryDevicesObservedAt = observedAt
             var preferences = BatteryDevicePreference.reconciled(batteryDevicePreferences, devices: lastKnownBatteryDevices)
             for device in fresh {
-                guard let peer = device.bluetoothPeerID, let index = preferences.firstIndex(where: { $0.id == device.id }),
-                      preferences[index].bluetoothPeer == nil || preferences[index].bluetoothPeer == peer else { continue }
-                preferences[index].bluetoothPeer = peer
+                guard let index = preferences.firstIndex(where: { $0.id == device.id }) else { continue }
+                if let peer = device.bluetoothPeerID,
+                   preferences[index].bluetoothPeer == nil || preferences[index].bluetoothPeer == peer {
+                    preferences[index].bluetoothPeer = peer
+                }
+                if let binding = device.watchRelay?.binding,
+                   preferences[index].watchRelayBinding == nil || preferences[index].watchRelayBinding == binding {
+                    preferences[index].watchRelayBinding = binding
+                }
             }
             if preferences != batteryDevicePreferences { storeBatteryPreferences(preferences) }
+        } else {
+            lastKnownBatteryDevices = lastKnownBatteryDevices.map { $0.droppingWatchRelay() }
         }
         if !deviceAlerts.observe(fresh ?? [], preferences: batteryDevicePreferences).isEmpty {
             scheduleDeviceDelivery()
@@ -321,7 +333,7 @@ public final class WatchModel {
               let snapshot = batteryDevicesReadAt, ContinuousClock.now - snapshot <= .seconds(45) else { return }
         for id in (batteryDevices ?? []).map(\.id) {
             guard cycle == deviceReadCycle, snapshot == batteryDevicesReadAt,
-                  let device = batteryDevices?.first(where: { $0.id == id && $0.connected }),
+                  let device = batteryDevices?.first(where: { $0.id == id && $0.connected && $0.watchRelay == nil }),
                   let alert = deviceAlerts.pendingAlert(for: id),
                   let level = device.level, level <= alert.threshold else { continue }
             let preference = batteryPreference(for: device.id)

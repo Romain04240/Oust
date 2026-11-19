@@ -183,7 +183,9 @@ struct BatteryMenuPanel: View {
                         .font(Typography.caption.weight(.semibold))
                         .lineLimit(1).truncationMode(.tail)
                         .help(name)
-                    if !device.connected {
+                    if let relay = device.watchRelay {
+                        relayLevel(relay)
+                    } else if !device.connected {
                         Text("settings.battery.offline", bundle: .oust)
                             .font(Typography.caption).foregroundStyle(.secondary)
                     } else if let parts = device.components {
@@ -208,9 +210,38 @@ struct BatteryMenuPanel: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .topLeading)
                 .batteryCard()
-                .opacity(device.connected ? 1 : 0.5)
+                .opacity(device.connected || device.watchRelay != nil ? 1 : 0.5)
                 .help(deviceHelp(device))
                 .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    @ViewBuilder private func relayLevel(_ reading: WatchRelayReading) -> some View {
+        if presented {
+            TimelineView(.periodic(from: .now, by: 10)) { context in
+                relayContent(reading, at: context.date)
+            }
+        } else {
+            relayContent(reading, at: Date())
+        }
+    }
+
+    private func relayContent(_ reading: WatchRelayReading, at date: Date) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if reading.isRecent(at: date) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    percentage(reading.level).font(Typography.headline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Text("menubar.battery_relay_via_phone", bundle: .oust)
+                        .font(.system(size: 8)).foregroundStyle(.teal).lineLimit(1).minimumScaleFactor(0.8)
+                }
+                BatteryLevelBar(level: reading.level, color: .teal, shimmering: false, height: 4)
+                    .accessibilityHidden(true)
+            } else {
+                Text("menubar.battery_relay_expired", bundle: .oust)
+                    .font(Typography.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -245,6 +276,9 @@ struct BatteryMenuPanel: View {
     }
 
     private func deviceHelp(_ device: BatteryDevice) -> String {
+        if let relay = device.watchRelay {
+            return L10n.string("menubar.battery_relay_help", relay.receivedAt.formatted(date: .omitted, time: .shortened))
+        }
         guard device.connected, let parts = device.components else {
             return L10n.string(device.levelSource == .bluetooth ? "menubar.battery_device_bluetooth_help" : "menubar.battery_devices")
         }

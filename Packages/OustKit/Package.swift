@@ -89,6 +89,7 @@ let package = Package(
         // d'aucune section de l'interface.
         .executable(name: "oust", targets: ["OustCLI"]),
         .library(name: "OustAgentKit", type: .static, targets: ["OustAgent"]),
+        .library(name: "OustDeviceRelay", targets: ["OustDeviceRelay"]),
     ],
     targets: [
 
@@ -163,6 +164,7 @@ let package = Package(
         // MARK: Veille (phase 3)
 
         .target(name: "OustWatch", dependencies: ["OustCore", "OustRules"], swiftSettings: .strict),
+        .target(name: "OustDeviceRelay", linkerSettings: [.linkedFramework("CoreFoundation")]),
 
         // MARK: Photothèque
 
@@ -194,7 +196,7 @@ let package = Package(
             ],
             swiftSettings: .strict
         ),
-        .executableTarget(name: "OustCLI", dependencies: ["OustAgent"], swiftSettings: .strict),
+        .executableTarget(name: "OustCLI", dependencies: ["OustAgent", "OustDeviceRelay"], swiftSettings: .strict),
 
         // MARK: Sections de l'interface
 

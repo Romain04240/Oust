@@ -33471,6 +33471,74 @@
           }
         }
       }
+    },
+    "menubar.battery_relay_via_phone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Via iPhone"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Via iPhone"
+          }
+        }
+      }
+    },
+    "menubar.battery_relay_expired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relevé indisponible"
+          }
+        }
+      }
+    },
+    "menubar.battery_relay_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Value received via your iPhone at %@. It may be cached; the watch’s measurement time is unknown. This does not indicate a direct connection to this Mac and is not used for battery alerts. The initial match uses unique names; ambiguous identities stay unavailable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valeur reçue via l’iPhone à %@. Elle peut être en cache ; l’heure de mesure par la montre est inconnue. Elle n’indique pas une connexion directe à ce Mac et ne déclenche pas d’alerte de batterie. Le rapprochement initial utilise des noms uniques ; les identités ambiguës restent indisponibles."
+          }
+        }
+      }
+    },
+    "settings.battery.relay_alert_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alerts are unavailable for values relayed by iPhone because their measurement time is unknown. Your previous threshold is preserved."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les valeurs transmises par l’iPhone n’ont pas d’heure de mesure connue : les alertes sont indisponibles. Ton ancien seuil est conservé."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

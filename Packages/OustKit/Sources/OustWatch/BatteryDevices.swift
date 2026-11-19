@@ -26,8 +26,9 @@ public struct BatteryDevice: Sendable, Equatable, Identifiable {
         public var lowestEarbud: Int? { [left, right].compactMap { $0 }.min() }
     }
     public let components: Components?
+    public let watchRelay: WatchRelayReading?
 
-    public init(id: String, name: String, connected: Bool, level: Int?, levelSource: LevelSource = .system, bluetoothPeerID: UUID? = nil, components: Components? = nil) {
+    public init(id: String, name: String, connected: Bool, level: Int?, levelSource: LevelSource = .system, bluetoothPeerID: UUID? = nil, components: Components? = nil, watchRelay: WatchRelayReading? = nil) {
         self.id = id
         self.name = name
         self.connected = connected
@@ -35,9 +36,16 @@ public struct BatteryDevice: Sendable, Equatable, Identifiable {
         self.levelSource = levelSource
         self.bluetoothPeerID = bluetoothPeerID
         self.components = connected ? components : nil
+        self.watchRelay = watchRelay
     }
 
-    public static func read(requestBluetoothPermission: Bool = false, knownBluetooth: [String: UUID] = [:]) async -> [Self]? {
+    public func droppingWatchRelay() -> Self {
+        guard watchRelay != nil else { return self }
+        return Self(id: id, name: name, connected: connected, level: level, levelSource: levelSource,
+                    bluetoothPeerID: bluetoothPeerID, components: components)
+    }
+
+    public static func read(requestBluetoothPermission: Bool = false, knownBluetooth: [String: UUID] = [:], knownWatches: [String: WatchRelayBinding] = [:]) async -> [Self]? {
         let result = await Command.run("/usr/sbin/system_profiler", ["-json", "SPBluetoothDataType"], timeout: 4)
         guard result.succeeded, !Task.isCancelled, let devices = parse(result.stdout) else { return nil }
         let hid = await ConnectedBattery.read() ?? []
@@ -48,14 +56,23 @@ public struct BatteryDevice: Sendable, Equatable, Identifiable {
         let pairedIDs = Set(system.map(\.id))
         let owners = Dictionary(grouping: knownBluetooth.values, by: { $0 })
         let remembered = knownBluetooth.filter { pairedIDs.contains($0.key) && owners[$0.value]?.count == 1 }
+        async let relayRead = readRelayIfNeeded(system, known: knownWatches)
         let bluetooth = await BatteryBluetooth.snapshot(peers: nil, requestPermission: requestBluetoothPermission,
                                                        knownPeers: Set(remembered.values))
+        let relay = await relayRead
         guard !Task.isCancelled else { return nil }
-        guard !bluetooth.samples.isEmpty else { return system }
+        guard !bluetooth.samples.isEmpty || relay != nil else { return system }
         let after = await Command.run("/usr/sbin/system_profiler", ["-json", "SPBluetoothDataType"], timeout: 4)
         guard !Task.isCancelled else { return nil }
         guard after.succeeded, let current = parse(after.stdout) else { return nil }
-        return merging(bluetooth, before: system, after: current, knownBluetooth: knownBluetooth)
+        let combined = merging(bluetooth, before: system, after: current, knownBluetooth: knownBluetooth)
+        guard let relay else { return combined }
+        return WatchRelay.merging(relay, before: system, after: combined, known: knownWatches)
+    }
+
+    private static func readRelayIfNeeded(_ devices: [Self], known: [String: WatchRelayBinding]) async -> WatchRelaySnapshot? {
+        guard devices.contains(where: { WatchRelay.isWatchProfile($0, known: known) }) else { return nil }
+        return await WatchRelay.read()
     }
 
     static func fillingHID(_ devices: [Self], readings: [ConnectedBattery]) -> [Self] {
@@ -168,6 +185,7 @@ public struct BatteryDevicePreference: Sendable, Codable, Equatable {
     public var alias = ""
     public var threshold: Int?
     public var bluetoothPeer: UUID?
+    public var watchRelayBinding: WatchRelayBinding?
 
     public init(id: String) { self.id = id }
 
@@ -227,7 +245,7 @@ public struct DeviceBatteryAlertTracker: Sendable {
         var next: [String: Int] = [:]
         pending = pending.filter { configured[$0.key] == $0.value.threshold }
         for device in devices {
-            guard device.connected, let level = device.level, let threshold = configured[device.id] else { continue }
+            guard device.watchRelay == nil, device.connected, let level = device.level, let threshold = configured[device.id] else { continue }
             next[device.id] = level
             if level >= min(100, threshold + 3) { sent.remove(device.id) }
             if thresholds[device.id] == threshold, let before = previous[device.id], before > threshold,

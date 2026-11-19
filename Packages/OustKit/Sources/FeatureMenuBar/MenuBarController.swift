@@ -55,6 +55,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     private var isClosing = false
     private let navigation = MenuBarNavigation()
     private let popover = NSPopover()
+    private let dismissal = MenuDismissalMonitor()
 
     public init(model: AppModel, icon: NSImage) {
         self.model = model
@@ -290,6 +291,13 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
             window.level = .popUpMenu
             window.orderFrontRegardless()
             window.makeKey()
+            dismissal.start(window: window, statusRects: { [weak self] in
+                guard let self else { return [] }
+                return [self.item?.button, self.batteryItem?.button].compactMap { button in
+                    guard let button, let window = button.window, window.isVisible else { return nil }
+                    return window.convertToScreen(button.convert(button.bounds, to: nil))
+                }
+            }, close: { [weak self] in self?.close() })
         }
         return true
     }
@@ -300,6 +308,7 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     }
 
     public func popoverWillClose(_ notification: Notification) {
+        dismissal.stop()
         isClosing = true
         navigation.presented = false
     }

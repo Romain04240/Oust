@@ -90,6 +90,11 @@ struct BatterySettingsTab: View {
                 Spacer()
                 if !watch.hasFreshBatteryDevices(since: batteryTabOpenedAt) {
                     Text("menubar.battery_device_level_unknown", bundle: .oust).foregroundStyle(.secondary)
+                } else if let relay = device.watchRelay, relay.isRecent(at: Date()) {
+                    VStack(alignment: .trailing) {
+                        Text(verbatim: L10n.string("menubar.battery_percent", Formatters.count(relay.level))).monospacedDigit()
+                        Text("menubar.battery_relay_via_phone", bundle: .oust).font(.caption).foregroundStyle(.secondary)
+                    }
                 } else if let level = device.level {
                     Text(verbatim: L10n.string("menubar.battery_percent", Formatters.count(level))).monospacedDigit()
                 } else {
@@ -107,13 +112,20 @@ struct BatterySettingsTab: View {
                 Text("settings.battery.alias", bundle: .oust)
             }
             let threshold = preference(device.id, \.threshold)
+            let relayed = device.watchRelay != nil || watch.batteryPreference(for: device.id).watchRelayBinding != nil
             Toggle(isOn: Binding(get: { threshold.wrappedValue != nil }, set: { threshold.wrappedValue = $0 ? 20 : nil })) {
                 Text("settings.battery.device_alert", bundle: .oust)
+            }
+            .disabled(relayed)
+            if relayed {
+                Text("settings.battery.relay_alert_unavailable", bundle: .oust)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if let level = threshold.wrappedValue {
                 Stepper(value: Binding(get: { threshold.wrappedValue ?? 20 }, set: { threshold.wrappedValue = $0 }), in: 1...99) {
                     Text(verbatim: L10n.string("settings.watch.battery_low_level", Formatters.count(level)))
                 }
+                .disabled(relayed)
             }
         }
     }
