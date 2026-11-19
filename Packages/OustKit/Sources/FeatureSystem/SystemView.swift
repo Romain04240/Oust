@@ -13,11 +13,13 @@ public struct SystemView: View {
     }
 
     public var body: some View {
-        SectionScaffold(.system, subtitle: "system.subtitle") {
+        SectionScaffold(.system, subtitle: "system.subtitle_short") {
             HStack(spacing: Spacing.small) {
                 if let volume = model.analyzedVolume, !volume.isBoot {
                     VolumeBadge(name: volume.name, symbol: volume.symbol)
                 }
+                ContextHelpButton("system.subtitle")
+                    .foregroundStyle(Palette.onGradient)
                 FilterMenu(filter: Binding(get: { model.filter(for: .system) }, set: { model.setFilter($0, for: .system) }))
                 Button { Task { await model.analyze() } } label: {
                     Text(model.analysis.isRunning ? "overview.analyzing" : "overview.reanalyze", bundle: .oust)
@@ -26,14 +28,14 @@ public struct SystemView: View {
                 .disabled(model.analysis.isRunning)
             }
         } content: {
+            if model.analyzedVolume?.isBoot != false {
+                LoginDiagnosticsCard()
+            }
             HiddenByFilters(count: model.hiddenCount(in: Set(Self.categories), section: .system)) {
                 model.setFilter(.none, for: .system)
             }
             ForEach(Self.categories, id: \.self) { category in
                 SystemCategory(model: model, category: category)
-            }
-            if model.analyzedVolume?.isBoot != false {
-                LoginDiagnosticsCard()
             }
         }
     }

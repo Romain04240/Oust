@@ -7,20 +7,26 @@ import OustWatch
 struct BatterySettingsTab: View {
     @Bindable var watch: WatchModel
     @State private var batteryTabOpenedAt: ContinuousClock.Instant?
+    @State private var expandedDeviceIDs: Set<String> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         SettingsForm {
-            Picker(selection: $watch.settings.batteryPercentageStyle) {
-                Text("settings.battery.percent_beside", bundle: .oust).tag(WatchSettings.BatteryPercentageStyle.beside)
-                Text("settings.battery.percent_inside", bundle: .oust).tag(WatchSettings.BatteryPercentageStyle.inside)
-            } label: {
-                Text("settings.battery.percent_position", bundle: .oust)
-            }
-            Picker(selection: $watch.settings.batteryTemperatureUnit) {
-                Text("settings.battery.celsius", bundle: .oust).tag(WatchSettings.TemperatureUnit.celsius)
-                Text("settings.battery.fahrenheit", bundle: .oust).tag(WatchSettings.TemperatureUnit.fahrenheit)
-            } label: {
-                Text("menubar.battery_temperature_short", bundle: .oust)
+            Section {
+                Picker(selection: $watch.settings.batteryPercentageStyle) {
+                    Text("settings.battery.percent_beside", bundle: .oust).tag(WatchSettings.BatteryPercentageStyle.beside)
+                    Text("settings.battery.percent_inside", bundle: .oust).tag(WatchSettings.BatteryPercentageStyle.inside)
+                } label: {
+                    Text("settings.battery.percent_position", bundle: .oust)
+                }
+                Picker(selection: $watch.settings.batteryTemperatureUnit) {
+                    Text("settings.battery.celsius", bundle: .oust).tag(WatchSettings.TemperatureUnit.celsius)
+                    Text("settings.battery.fahrenheit", bundle: .oust).tag(WatchSettings.TemperatureUnit.fahrenheit)
+                } label: {
+                    Text("menubar.battery_temperature_short", bundle: .oust)
+                }
+            } header: {
+                Text("settings.battery.display_section", bundle: .oust)
             }
             Section {
                 Toggle(isOn: $watch.settings.batteryAlerts.warnsLow) {
@@ -38,7 +44,7 @@ struct BatterySettingsTab: View {
                 }
                 .disabled(!watch.settings.batteryAlerts.warnsCharged)
             } header: {
-                Text("settings.watch.battery_section", bundle: .oust)
+                Text("settings.battery.mac_alerts_section", bundle: .oust)
             }
             Section {
                 let devices = watch.orderedLastKnownBatteryDevices
@@ -52,7 +58,7 @@ struct BatterySettingsTab: View {
                 }
             } header: {
                 HStack {
-                    Text("menubar.battery_devices", bundle: .oust)
+                    Text("settings.battery.devices_section", bundle: .oust)
                     Spacer()
                     Text(verbatim: L10n.string("settings.battery.device_count", Formatters.count(watch.shownBatteryDeviceCount),
                                               Formatters.count(BatteryDevicePreference.maximumShown)))
@@ -83,9 +89,13 @@ struct BatterySettingsTab: View {
 
     private func deviceRow(_ device: BatteryDevice, first: Bool, last: Bool) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            let threshold = preference(device.id, \.threshold)
+            let relayed = device.watchRelay != nil || watch.batteryPreference(for: device.id).watchRelayBinding != nil
             HStack {
                 Toggle(isOn: preference(device.id, \.shown)) { Text(verbatim: device.name) }
                     .toggleStyle(.checkbox)
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(Text(verbatim: device.name))
                     .disabled(!watch.batteryPreference(for: device.id).shown && watch.shownBatteryDeviceCount >= BatteryDevicePreference.maximumShown)
                 Spacer()
                 if !watch.hasFreshBatteryDevices(since: batteryTabOpenedAt) {
@@ -108,24 +118,49 @@ struct BatterySettingsTab: View {
                     .disabled(last)
                     .accessibilityLabel(Text("settings.battery.move_down", bundle: .oust))
             }
-            TextField(text: preference(device.id, \.alias), prompt: Text(verbatim: device.name)) {
-                Text("settings.battery.alias", bundle: .oust)
+            // Replier les commandes ne doit pas masquer une alerte configurée.
+            // Un seuil relayé reste mémorisé, sans devenir une alerte active.
+            if let level = threshold.wrappedValue {
+                Label {
+                    Text(verbatim: L10n.string(relayed ? "settings.battery.device_alert_saved_threshold"
+                                               : "settings.battery.device_alert_active",
+                                               Formatters.percent(Double(level) / 100)))
+                } icon: {
+                    Image(systemName: relayed ? "bell.slash" : "bell.badge")
+                }
+                .font(.caption).monospacedDigit()
             }
-            let threshold = preference(device.id, \.threshold)
-            let relayed = device.watchRelay != nil || watch.batteryPreference(for: device.id).watchRelayBinding != nil
-            Toggle(isOn: Binding(get: { threshold.wrappedValue != nil }, set: { threshold.wrappedValue = $0 ? 20 : nil })) {
-                Text("settings.battery.device_alert", bundle: .oust)
-            }
-            .disabled(relayed)
             if relayed {
                 Text("settings.battery.relay_alert_unavailable", bundle: .oust)
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let level = threshold.wrappedValue {
-                Stepper(value: Binding(get: { threshold.wrappedValue ?? 20 }, set: { threshold.wrappedValue = $0 }), in: 1...99) {
-                    Text(verbatim: L10n.string("settings.watch.battery_low_level", Formatters.count(level)))
+            DisclosureGroup(isExpanded: Binding(get: { expandedDeviceIDs.contains(device.id) }, set: { expanded in
+                if expanded { expandedDeviceIDs.insert(device.id) } else { expandedDeviceIDs.remove(device.id) }
+            })) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField(text: preference(device.id, \.alias), prompt: Text(verbatim: device.name)) {
+                        Text("settings.battery.alias", bundle: .oust)
+                    }
+                    Toggle(isOn: Binding(get: { threshold.wrappedValue != nil }, set: { threshold.wrappedValue = $0 ? 20 : nil })) {
+                        Text("settings.battery.device_alert", bundle: .oust)
+                    }
+                    .disabled(relayed)
+                    if let level = threshold.wrappedValue {
+                        Stepper(value: Binding(get: { threshold.wrappedValue ?? 20 }, set: { threshold.wrappedValue = $0 }), in: 1...99) {
+                            Text(verbatim: L10n.string("settings.watch.battery_low_level", Formatters.count(level)))
+                        }
+                        .disabled(relayed)
+                    }
                 }
-                .disabled(relayed)
+                .padding(.top, 4)
+            } label: {
+                Text("settings.battery.device_details", bundle: .oust)
+            }
+            .transaction { transaction in
+                if reduceMotion {
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
             }
         }
     }

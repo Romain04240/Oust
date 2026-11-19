@@ -12,8 +12,12 @@ struct LoginDiagnosticsCard: View {
         ItemGroup(title: L10n.string("system.login_diagnostics_title"), symbol: "person.badge.clock",
                   tint: .blue, total: 0) {
             VStack(alignment: .leading, spacing: Spacing.small) {
-                Text("system.login_diagnostics_detail", bundle: .oust)
-                    .font(Typography.caption).foregroundStyle(.secondary)
+                HStack(spacing: Spacing.small) {
+                    Text("system.login_diagnostics_scope", bundle: .oust)
+                        .font(Typography.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: Spacing.small)
+                    ContextHelpButton("system.login_diagnostics_help")
+                }
                 switch result {
                 case nil:
                     Label {

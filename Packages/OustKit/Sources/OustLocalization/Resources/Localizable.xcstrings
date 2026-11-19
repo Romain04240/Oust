@@ -1,6 +1,159 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "system.subtitle_short": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files, backups and diagnostics."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichiers, sauvegardes et diagnostics."
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_scope": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Targeted diagnostic · Read only"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnostic ciblé · Lecture seule"
+          }
+        }
+      }
+    },
+    "system.login_diagnostics_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This diagnostic flags some apps that are missing at the path recorded for opening at login. It does not list every app or service configured to start. Open Login Items settings to review login items."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce diagnostic signale certaines applications absentes à leur chemin enregistré dans les ouvertures de session. Il ne liste pas toutes les applications ni tous les services configurés pour démarrer. Pour examiner les ouvertures de session, ouvrez les réglages de connexion."
+          }
+        }
+      }
+    },
+    "settings.battery.display_section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Affichage"
+          }
+        }
+      }
+    },
+    "settings.battery.mac_alerts_section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Mac’s alerts"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alertes de ce Mac"
+          }
+        }
+      }
+    },
+    "settings.battery.devices_section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Devices"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appareils"
+          }
+        }
+      }
+    },
+    "settings.battery.device_details": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alias and battery alert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alias et alerte de batterie"
+          }
+        }
+      }
+    },
+    "settings.battery.device_alert_active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Low battery alert enabled: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alerte basse activée : %@"
+          }
+        }
+      }
+    },
+    "settings.battery.device_alert_saved_threshold": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved threshold: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seuil conservé : %@"
+          }
+        }
+      }
+    },
     "help.developer_protections": {
       "extractionState": "manual",
       "localizations": {
