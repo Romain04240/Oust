@@ -17,9 +17,21 @@ public enum LoginDiagnostics {
     }
 
     public static func scan() async -> Result {
-        let command = await Command.run("/usr/bin/sfltool", ["dumpbtm"], timeout: 12)
+        await scan(read: {
+            await Command.run("/usr/bin/sfltool", ["dumpbtm"], timeout: 12)
+        })
+    }
+
+    static func scan(read: @Sendable () async -> CommandResult) async -> Result {
+        guard !Task.isCancelled else { return .unavailable }
+        // Seul le sous-processus de cette lecture appartient au diagnostic.
+        let command = await CommandCancellationContext.$cancelsReadOnlyCommands.withValue(true) {
+            await read()
+        }
         guard command.succeeded, command.stderr.isEmpty, !Task.isCancelled else { return .unavailable }
-        return await checkStorageIO { inspect(command.output, uid: getuid()) } ?? .unavailable
+        let result = await checkStorageIO { inspect(command.output, uid: getuid()) }
+        guard !Task.isCancelled else { return .unavailable }
+        return result ?? .unavailable
     }
 
     static func inspect(_ output: String, uid: uid_t) -> Result {
