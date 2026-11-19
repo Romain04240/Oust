@@ -1,6 +1,108 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "browsers.cookies_consequence": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cookies: sign-in required again"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cookies : reconnexion requise"
+          }
+        }
+      }
+    },
+    "photos.sync_warning_short": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deletion syncs with Photos and your other devices if iCloud is enabled."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suppression synchronisée avec Photos et vos autres appareils si iCloud est activé."
+          }
+        }
+      }
+    },
+    "photos.recovery_short": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recoverable for 30 days in Recently Deleted; space is freed afterward or when emptied."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Récupérable 30 jours dans « Supprimés récemment » ; espace libéré ensuite ou après vidage."
+          }
+        }
+      }
+    },
+    "snapshot.listing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading local snapshots…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lecture des snapshots locaux…"
+          }
+        }
+      }
+    },
+    "largefiles.scroll_previous": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous categories"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Catégories précédentes"
+          }
+        }
+      }
+    },
+    "largefiles.scroll_next": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More categories"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Catégories suivantes"
+          }
+        }
+      }
+    },
     "guided_review.startup_explorer_required": {
       "extractionState": "manual",
       "localizations": {

@@ -163,13 +163,15 @@ private struct Results: View {
     private var content: some View {
         // Rien à rendre : pas de grand chiffre, un « — » de 64 pt ressemblerait à
         // une barre blanche posée sur le fond (vu dans Gros et vieux fichiers).
-        if photos.reclaimableTotal > 0 {
-            HStack(alignment: .bottom) {
-                HeroSize(photos.reclaimableTotal, caption: "photos.total_caption")
-                Spacer()
+        VStack(alignment: .leading, spacing: Spacing.small) {
+            if photos.reclaimableTotal > 0 {
+                HStack(alignment: .bottom) {
+                    HeroSize(photos.reclaimableTotal, caption: "photos.total_caption")
+                    Spacer()
+                }
             }
+            Honesty(photos: photos)
         }
-        Honesty(photos: photos)
         TabBar(photos: photos)
         switch photos.tab {
         case .videos:
@@ -199,16 +201,20 @@ private struct Honesty: View {
     let photos: PhotosModel
 
     var body: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: Spacing.small) {
-                line("trash.square", L10n.string("photos.recently_deleted_note"))
-                if photos.cloudOnlyTotal > 0 {
-                    line("icloud", L10n.string("photos.cloud_note", Formatters.compactBytes(photos.cloudOnlyTotal)))
-                }
-                line("arrow.triangle.2.circlepath.icloud", L10n.string("photos.sync_note"))
-                if photos.hasIncompleteSizes {
-                    line("questionmark.circle", L10n.string("photos.incomplete_note"))
-                }
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            HStack(alignment: .top, spacing: Spacing.small) {
+                line("arrow.triangle.2.circlepath.icloud", L10n.string("photos.sync_warning_short"))
+                Spacer(minLength: Spacing.small)
+                ContextHelpButton(text: L10n.string("photos.recently_deleted_note") + "\n\n"
+                                  + L10n.string("photos.sync_note"))
+                    .foregroundStyle(Palette.onGradient)
+            }
+            line("trash.square", L10n.string("photos.recovery_short"))
+            if photos.cloudOnlyTotal > 0 {
+                line("icloud", L10n.string("photos.cloud_note", Formatters.compactBytes(photos.cloudOnlyTotal)))
+            }
+            if photos.hasIncompleteSizes {
+                line("questionmark.circle", L10n.string("photos.incomplete_note"))
             }
         }
     }
@@ -219,7 +225,7 @@ private struct Honesty: View {
         } icon: {
             Image(systemName: symbol).frame(width: 20)
         }
-        .font(Typography.body)
+        .font(Typography.caption)
         .foregroundStyle(Palette.onGradient)
     }
 }

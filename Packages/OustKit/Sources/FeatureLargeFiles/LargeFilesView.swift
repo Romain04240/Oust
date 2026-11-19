@@ -135,35 +135,89 @@ private struct Filters: View {
                     Spacer()
                     if largeFiles.computing { ProgressView().controlSize(.small) }
                 }
-                // La famille d'un fichier, d'un clic ; aucune cochée : toutes.
-                // Colonnes de 170 pt et une seule ligne : à 140, « Images disque
-                // et VM » passait sur deux lignes et dépassait des autres puces.
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: Spacing.small, alignment: .leading)],
-                          alignment: .leading, spacing: Spacing.small) {
-                    ForEach(FileKind.allCases) { kind in
-                        let on = largeFiles.kinds.contains(kind)
-                        Button { largeFiles.toggleKind(kind) } label: {
-                            Label { Text(LocalizedStringKey(kind.localizationKey), bundle: .oust) } icon: {
-                                Image(systemName: kind.symbol)
-                            }
-                            .lineLimit(1)
-                            .font(Typography.caption.weight(.semibold))
-                            .padding(.horizontal, Spacing.small)
-                            .padding(.vertical, Spacing.tight)
-                            .foregroundStyle(Palette.onGradient)
-                            .background(on ? AnyShapeStyle(Palette.color(for: .largeFiles).opacity(0.55))
-                                           : AnyShapeStyle(Color.black.opacity(0.25)), in: Capsule())
-                            .overlay(Capsule().strokeBorder(.white.opacity(on ? 0.6 : 0.2), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(on ? .isSelected : [])
-                    }
-                }
+                KindFilters(largeFiles: largeFiles)
                 Text("largefiles.dates_note", bundle: .oust)
                     .font(Typography.caption).foregroundStyle(Palette.onGradient)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// Les flèches gardent toutes les familles accessibles à la souris sans
+/// recouvrir une catégorie ni modifier le choix des filtres.
+private struct KindFilters: View {
+    @Bindable var largeFiles: LargeFilesModel
+    @State private var availableWidth: CGFloat = 0
+    @State private var contentWidth: CGFloat = 0
+    @State private var position = ScrollPosition(idType: String.self)
+    @State private var visible: Set<String> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var ids: [String] { FileKind.allCases.map(\.id) }
+    private var overflows: Bool { availableWidth > 0 && contentWidth > availableWidth + 0.5 }
+    private var hiddenBefore: Bool { ids.first.map { !visible.contains($0) } == true }
+    private var hiddenAfter: Bool { ids.last.map { !visible.contains($0) } == true }
+
+    var body: some View {
+        HStack(spacing: Spacing.tight) {
+            if overflows { arrow("chevron.left", step: -1).disabled(!hiddenBefore) }
+            ScrollView(.horizontal) {
+                row
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+            }
+            .scrollIndicators(.never)
+            .scrollDisabled(!overflows)
+            .scrollPosition($position)
+            .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.9) { visible = Set($0) }
+            if overflows { arrow("chevron.right", step: 1).disabled(!hiddenAfter) }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
+    }
+
+    private var row: some View {
+        HStack(spacing: Spacing.small) {
+            ForEach(FileKind.allCases) { kind in
+                let on = largeFiles.kinds.contains(kind)
+                Button { largeFiles.toggleKind(kind) } label: {
+                    Label { Text(LocalizedStringKey(kind.localizationKey), bundle: .oust) } icon: {
+                        Image(systemName: kind.symbol)
+                    }
+                    .lineLimit(1)
+                    .font(Typography.caption.weight(.semibold))
+                    .padding(.horizontal, Spacing.small)
+                    .padding(.vertical, Spacing.tight)
+                    .foregroundStyle(Palette.onGradient)
+                    .background(on ? AnyShapeStyle(Palette.color(for: .largeFiles).opacity(0.55))
+                                   : AnyShapeStyle(Color.black.opacity(0.25)), in: Capsule())
+                    .overlay(Capsule().strokeBorder(.white.opacity(on ? 0.6 : 0.2), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .id(kind.id)
+            }
+        }
+        .scrollTargetLayout()
+        .fixedSize()
+    }
+
+    private func arrow(_ symbol: String, step: Int) -> some View {
+        Button {
+            let shown = ids.enumerated().filter { visible.contains($0.element) }.map(\.offset)
+            guard let edge = step > 0 ? shown.max() : shown.min() else { return }
+            let target = min(max(edge + step, 0), ids.count - 1)
+            withAnimation(reduceMotion ? nil : .snappy) {
+                position.scrollTo(id: ids[target], anchor: step > 0 ? .trailing : .leading)
+            }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .bold))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .help(Text(step > 0 ? "largefiles.scroll_next" : "largefiles.scroll_previous", bundle: .oust))
+        .accessibilityLabel(Text(step > 0 ? "largefiles.scroll_next" : "largefiles.scroll_previous", bundle: .oust))
     }
 }
 

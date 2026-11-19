@@ -257,7 +257,15 @@ private struct ExplorerContent: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+            // Le profond bleu conserve la lisibilité du texte secondaire sans
+            // la surface grise du matériau système, distincte du reste de l’outil.
+            .background(Palette.colors(for: .explorer).deep.opacity(0.82),
+                        in: RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.large, style: .continuous)
+                    .strokeBorder(Palette.colors(for: .explorer).glow.opacity(0.2), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
             .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -569,6 +577,7 @@ private struct TreeTable: View {
             .width(28)
             .customizationID("bin")
         }
+        .tableStyle(.inset(alternatesRowBackgrounds: false))
         .scrollContentBackground(.hidden)
         .contextMenu(forSelectionType: ExplorerRow.ID.self) { ids in
             if let id = ids.first, let row = state.row(id) {

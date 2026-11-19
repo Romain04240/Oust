@@ -21,14 +21,18 @@ public struct BrowsersView: View {
                     .buttonStyle(OnGradientButtonStyle())
             }
         } content: {
-            HStack {
+            HStack(alignment: .bottom, spacing: Spacing.medium) {
                 HeroSize(model.total(of: [.browsers], headlineOnly: false), caption: "browsers.total_caption")
-                Spacer()
-            }
-            GlassCard(padding: Spacing.medium) {
-                Label { Text("browsers.cookies_warning", bundle: .oust) } icon: { Image(systemName: "exclamationmark.triangle.fill") }
-                    .font(Typography.body)
-                    .foregroundStyle(Palette.onGradient)
+                Spacer(minLength: Spacing.small)
+                HStack(spacing: Spacing.tight) {
+                    Label { Text("browsers.cookies_consequence", bundle: .oust) } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                    }
+                    .font(Typography.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+                    ContextHelpButton("browsers.cookies_warning")
+                }
+                .foregroundStyle(Palette.onGradient)
             }
             if model.browserProfiles.isEmpty {
                 EmptyState(symbol: "globe", title: "browsers.empty_title", message: "browsers.empty_detail")

@@ -54,12 +54,24 @@ public struct TimeMachineView: View {
         let deletable = model.deletableSnapshots
         return GlassCard(padding: Spacing.xLarge) {
             VStack(alignment: .leading, spacing: Spacing.medium) {
-                Text("system.snapshots_title", bundle: .oust)
-                    .font(Typography.title).foregroundStyle(Palette.onGradient)
-                Text(verbatim: model.snapshotReadFailed ? L10n.string("snapshot.error.listing") : deletable.isEmpty
-                     ? L10n.string("system.snapshots_none")
-                     : L10n.string("system.snapshots_number", Formatters.count(deletable.count)))
-                    .font(Typography.headline).foregroundStyle(Palette.onGradientSecondary)
+                HStack(spacing: Spacing.small) {
+                    Text("system.snapshots_title", bundle: .oust)
+                        .font(Typography.title).foregroundStyle(Palette.onGradient)
+                    Spacer(minLength: Spacing.small)
+                    ContextHelpButton(text: L10n.string("system.snapshots_detail") + "\n\n"
+                                      + L10n.string("system.snapshots_size_unknown"))
+                }
+                if model.snapshotsRefreshing {
+                    Label { Text("snapshot.listing", bundle: .oust) } icon: {
+                        ProgressView().controlSize(.small).tint(.white)
+                    }
+                    .foregroundStyle(Palette.onGradientSecondary)
+                } else {
+                    Text(verbatim: model.snapshotReadFailed ? L10n.string("snapshot.error.listing") : deletable.isEmpty
+                         ? L10n.string("system.snapshots_none")
+                         : L10n.string("system.snapshots_number", Formatters.count(deletable.count)))
+                        .font(Typography.headline).foregroundStyle(Palette.onGradientSecondary)
+                }
                 if let bytes = model.snapshotRetainedBytes {
                     Text(verbatim: L10n.string("snapshot.retained_total", Formatters.bytes(bytes)))
                         .font(Typography.headline.monospacedDigit()).foregroundStyle(Palette.onGradient)
@@ -68,9 +80,10 @@ public struct TimeMachineView: View {
                         ProgressView().controlSize(.small).tint(.white)
                     }
                     .foregroundStyle(Palette.onGradientSecondary)
+                } else if !deletable.isEmpty, !model.snapshotsRefreshing {
+                    Text("snapshot.size_unknown", bundle: .oust)
+                        .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
                 }
-                Text("system.snapshots_detail", bundle: .oust)
-                Text("system.snapshots_size_unknown", bundle: .oust).font(Typography.caption)
                 Text("snapshot.irreversible", bundle: .oust).font(Typography.caption)
                 if !deletable.isEmpty {
                     Button {

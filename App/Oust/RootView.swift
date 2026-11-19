@@ -170,12 +170,14 @@ private struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: Spacing.small) {
+            HStack(spacing: Spacing.small) {
                 BinTile(model: model)
+                    .frame(maxWidth: .infinity)
                 FeedbackTile()
+                    .fixedSize()
             }
-            .padding(Spacing.medium)
-            .padding(.bottom, Spacing.small)
+            .padding(Spacing.small)
+            .padding(.bottom, Spacing.tight)
         }
     }
 
@@ -211,24 +213,15 @@ private struct FeedbackTile: View {
 
     var body: some View {
         Button { showsPanel.toggle() } label: {
-            HStack(spacing: Spacing.medium) {
-                Image(systemName: "envelope.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(Palette.linearGradient(for: .history), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("feedback.menu", bundle: .oust).font(Typography.caption.weight(.semibold))
-                    Text("feedback.tagline", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
-                }
-                .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Spacing.small)
-            .padding(.vertical, Spacing.tight)
-            .contentShape(Rectangle())
+            Image(systemName: "ladybug")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(Palette.linearGradient(for: .history), in: RoundedRectangle(cornerRadius: Radius.small))
         }
         .buttonStyle(.plain)
+        .help(Text("feedback.menu", bundle: .oust))
+        .accessibilityLabel(Text("feedback.menu", bundle: .oust))
         .popover(isPresented: $showsPanel, arrowEdge: .trailing) {
             FeedbackPanel { kind in
                 showsPanel = false
@@ -354,6 +347,7 @@ enum FeedbackMail {
 /// coup d'œil (Romain, 18/10/2026).
 private struct BinTile: View {
     let model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isCurrent: Bool { model.section == .cart && !model.isSearching }
 
@@ -362,11 +356,11 @@ private struct BinTile: View {
             model.searchText = ""
             model.section = .cart
         } label: {
-            HStack(spacing: Spacing.medium) {
+            HStack(spacing: Spacing.small) {
                 Image(systemName: AppSection.cart.symbol)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 26, height: 26)
                     .background(Palette.linearGradient(for: .cart), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: Spacing.hair) {
                     Text(LocalizedStringKey(AppSection.cart.localizationKey), bundle: .oust)
@@ -400,7 +394,7 @@ private struct BinTile: View {
             .contentShape(RoundedRectangle(cornerRadius: Radius.medium, style: .continuous))
         }
         .buttonStyle(.plain)
-        .animation(.snappy, value: model.cartTotal)
+        .animation(reduceMotion ? nil : .snappy, value: model.cartTotal)
     }
 }
 
