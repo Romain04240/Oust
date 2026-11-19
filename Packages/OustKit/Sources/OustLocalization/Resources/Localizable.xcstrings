@@ -1,6 +1,210 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "system.login_inventory_count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Login item declarations: %@ · partial source"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inscriptions à l’ouverture de session : %@ · source partielle"
+          }
+        }
+      }
+    },
+    "system.login_inventory_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partial inventory unavailable. Check macOS Login Items settings."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inventaire partiel indisponible. Consultez les réglages de connexion de macOS."
+          }
+        }
+      }
+    },
+    "system.login_inventory_empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No readable entries in this partial source. This does not describe all login items."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune entrée lisible dans cette source partielle. Cela ne décrit pas toutes les ouvertures de session."
+          }
+        }
+      }
+    },
+    "system.login_inventory_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This partial list shows some login item declarations for the current account. A component may be a helper without a window. Enabled and Allowed are separate states; neither proves an app or component has started. An unknown state remains undetermined. macOS Login Items settings remain the reference."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette liste partielle reprend certaines déclarations d’ouverture de session du compte courant. Un composant peut être un auxiliaire sans fenêtre. « Activé » et « Autorisé » sont des états distincts ; ils ne prouvent pas qu’une application ou un composant a démarré. Un état inconnu reste indéterminé. Les réglages de connexion de macOS restent la référence."
+          }
+        }
+      }
+    },
+    "system.login_inventory_application": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Application"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Application"
+          }
+        }
+      }
+    },
+    "system.login_inventory_component": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Component"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Composant"
+          }
+        }
+      }
+    },
+    "system.login_inventory_enabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activé"
+          }
+        }
+      }
+    },
+    "system.login_inventory_disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disabled"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé"
+          }
+        }
+      }
+    },
+    "system.login_inventory_enabled_unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled state unknown"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activation inconnue"
+          }
+        }
+      }
+    },
+    "system.login_inventory_allowed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisé"
+          }
+        }
+      }
+    },
+    "system.login_inventory_disallowed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not allowed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non autorisé"
+          }
+        }
+      }
+    },
+    "system.login_inventory_allowed_unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed state unknown"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisation inconnue"
+          }
+        }
+      }
+    },
     "system.subtitle_short": {
       "extractionState": "manual",
       "localizations": {
@@ -29896,13 +30100,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No login items flagged for review."
+            "value": "This targeted check reports no entries."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aucune ouverture de session signalée."
+            "value": "Ce diagnostic ciblé ne signale aucune entrée."
           }
         }
       }
@@ -29960,13 +30164,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Login Items to Check"
+            "value": "Login Items"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ouvertures de session à vérifier"
+            "value": "Ouverture de session"
           }
         }
       }

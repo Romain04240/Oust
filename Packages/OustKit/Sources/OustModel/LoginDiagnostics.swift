@@ -16,22 +16,56 @@ public enum LoginDiagnostics {
         case checked(volumeIndeterminate: [Finding])
     }
 
+    public struct SessionSnapshot: Equatable, Sendable {
+        public let diagnostic: Result
+        public let inventory: LoginSessionInventory
+
+        public init(diagnostic: Result, inventory: LoginSessionInventory) {
+            self.diagnostic = diagnostic
+            self.inventory = inventory
+        }
+    }
+
     public static func scan() async -> Result {
-        await scan(read: {
+        await readSession().diagnostic
+    }
+
+    public static func readSession() async -> SessionSnapshot {
+        await readSession(read: {
             await Command.run("/usr/bin/sfltool", ["dumpbtm"], timeout: 12)
         })
     }
 
     static func scan(read: @Sendable () async -> CommandResult) async -> Result {
-        guard !Task.isCancelled else { return .unavailable }
+        await readSession(read: read).diagnostic
+    }
+
+    static func readSession(read: @Sendable () async -> CommandResult,
+                            readDiagnostic: (@Sendable (String, uid_t) async -> Result?)? = nil) async -> SessionSnapshot {
+        let unavailable = SessionSnapshot(diagnostic: .unavailable, inventory: .unavailable)
+        guard !Task.isCancelled else { return unavailable }
         // Seul le sous-processus de cette lecture appartient au diagnostic.
         let command = await CommandCancellationContext.$cancelsReadOnlyCommands.withValue(true) {
             await read()
         }
-        guard command.succeeded, command.stderr.isEmpty, !Task.isCancelled else { return .unavailable }
-        let result = await checkStorageIO { inspect(command.output, uid: getuid()) }
-        guard !Task.isCancelled else { return .unavailable }
-        return result ?? .unavailable
+        guard command.succeeded, command.stderr.isEmpty, !Task.isCancelled else { return unavailable }
+        let decoded = String(data: command.stdout, encoding: .utf8)
+        let output = decoded ?? command.output
+        let uid = getuid()
+        // Le registre déclaré ne dépend d'aucun accès aux cibles. Une lecture
+        // de métadonnées lente ne doit pas faire disparaître cet inventaire.
+        let inventory: LoginSessionInventory
+        if decoded != nil {
+            inventory = await Task.detached(priority: .utility) {
+                LoginSessionInventory.parse(output, uid: uid)
+            }.value
+        } else { inventory = .unavailable }
+        guard !Task.isCancelled else { return unavailable }
+        let diagnostic: Result?
+        if let readDiagnostic { diagnostic = await readDiagnostic(output, uid) }
+        else { diagnostic = await checkStorageIO { inspect(output, uid: uid) } }
+        guard !Task.isCancelled else { return unavailable }
+        return SessionSnapshot(diagnostic: diagnostic ?? .unavailable, inventory: inventory)
     }
 
     static func inspect(_ output: String, uid: uid_t) -> Result {
