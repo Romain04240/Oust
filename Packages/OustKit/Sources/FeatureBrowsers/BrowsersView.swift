@@ -34,7 +34,13 @@ public struct BrowsersView: View {
                 }
                 .foregroundStyle(Palette.onGradient)
             }
-            if model.browserProfiles.isEmpty {
+            if !model.unavailableBrowserInventories.isEmpty {
+                Text(verbatim: L10n.string("browsers.inventory_unavailable",
+                    model.unavailableBrowserInventories.sorted { $0.rawValue < $1.rawValue }.map(\.displayName).joined(separator: ", ")))
+                    .font(Typography.caption).foregroundStyle(Palette.onGradient)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if model.browserProfiles.isEmpty && model.unavailableBrowserInventories.isEmpty {
                 EmptyState(symbol: "globe", title: "browsers.empty_title", message: "browsers.empty_detail")
             }
             HiddenByFilters(count: model.hiddenCount(in: [.browsers], section: .browsers)) {

@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import OustCore
 
@@ -80,11 +81,64 @@ public struct BrowserProfile: Sendable, Identifiable, Hashable {
     public let historyReadable: Bool
 }
 
-/// Trouve les profils et en fait des éléments pour le panier.
+/// Les profils lisibles et les navigateurs dont l'inventaire reste indéterminé.
+public struct BrowserProfileInventory: Sendable {
+    public let profiles: [BrowserProfile]
+    public let unavailableBrowsers: Set<BrowserKind>
+}
+
 public enum BrowserFinder {
 
     public static func profiles(home: URL) -> [BrowserProfile] {
-        BrowserKind.allCases.flatMap { profiles(of: $0, home: home) }
+        inventory(home: home).profiles
+    }
+
+    /// Un registre Firefox illisible n'est pas une preuve de retrait de ses profils.
+    public static func inventory(home: URL) -> BrowserProfileInventory {
+        var result: [BrowserProfile] = []
+        var unavailable = Set<BrowserKind>()
+        for browser in BrowserKind.allCases {
+            if browser == .firefox {
+                guard let entries = readableFirefoxProfiles(data: home.appendingPathComponent(browser.dataRoot)) else {
+                    unavailable.insert(browser)
+                    continue
+                }
+                guard let profiles = verifiedFirefoxProfiles(home: home, entries: entries) else {
+                    unavailable.insert(browser)
+                    continue
+                }
+                result += profiles
+            } else {
+                result += profiles(of: browser, home: home)
+            }
+        }
+        return BrowserProfileInventory(profiles: result, unavailableBrowsers: unavailable)
+    }
+
+    private static func verifiedFirefoxProfiles(home: URL, entries: [(String, URL)]) -> [BrowserProfile]? {
+        func existing(_ urls: [URL], type: FileAttributeType) -> [URL]? {
+            var result: [URL] = []
+            for url in urls {
+                do {
+                    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+                    guard attributes[.type] as? FileAttributeType == type else { return nil }
+                    result.append(url)
+                } catch {
+                    if !isConfirmedMissing(error) { return nil }
+                }
+            }
+            return result
+        }
+        let cache = home.appendingPathComponent(BrowserKind.firefox.cacheRoot)
+        var profiles: [BrowserProfile] = []
+        for (name, folder) in entries {
+            guard let caches = existing([cache.appendingPathComponent(folder.lastPathComponent)], type: .typeDirectory),
+                  let cookies = existing(["cookies.sqlite", "cookies.sqlite-wal", "cookies.sqlite-shm"].map { folder.appendingPathComponent($0) }, type: .typeRegular),
+                  let databases = existing([folder.appendingPathComponent("places.sqlite")], type: .typeRegular) else { return nil }
+            profiles.append(BrowserProfile(browser: .firefox, name: name, folder: folder, caches: caches,
+                history: [], cookies: cookies, historyDatabase: databases.first, historyReadable: true))
+        }
+        return profiles
     }
 
     static func profiles(of browser: BrowserKind, home: URL) -> [BrowserProfile] {
@@ -109,17 +163,8 @@ public enum BrowserFinder {
                                    history: history, cookies: cookies, historyDatabase: nil, historyReadable: readable)]
 
         case .firefox:
-            return firefoxProfiles(data: data).map { name, folder in
-                let id = folder.lastPathComponent
-                return BrowserProfile(
-                    browser: .firefox, name: name, folder: folder,
-                    caches: existing([cacheRoot.appendingPathComponent(id)]),
-                    history: [],
-                    cookies: existing(["cookies.sqlite", "cookies.sqlite-wal", "cookies.sqlite-shm"].map { folder.appendingPathComponent($0) }),
-                    historyDatabase: existing([folder.appendingPathComponent("places.sqlite")]).first,
-                    historyReadable: true
-                )
-            }
+            guard let entries = readableFirefoxProfiles(data: data) else { return [] }
+            return verifiedFirefoxProfiles(home: home, entries: entries) ?? []
 
         default:
             return chromiumProfiles(data: data).map { name, folder in
@@ -165,33 +210,62 @@ public enum BrowserFinder {
 
     /// Les profils Firefox, lus dans `profiles.ini`.
     static func firefoxProfiles(data: URL) -> [(String, URL)] {
-        guard let text = try? String(contentsOf: data.appendingPathComponent("profiles.ini"), encoding: .utf8) else {
-            return []
+        readableFirefoxProfiles(data: data) ?? []
+    }
+
+    private static func isConfirmedMissing(_ error: any Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSPOSIXErrorDomain { return error.code == Int(ENOENT) }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isConfirmedMissing(underlying)
         }
+        return error.domain == NSCocoaErrorDomain
+            && [NSFileReadNoSuchFileError, NSFileNoSuchFileError].contains(error.code)
+    }
+
+    private static func readableFirefoxProfiles(data: URL) -> [(String, URL)]? {
+        let text: String
+        do { text = try String(contentsOf: data.appendingPathComponent("profiles.ini"), encoding: .utf8) }
+        catch { return isConfirmedMissing(error) ? [] : nil }
         var result: [(String, URL)] = []
-        var name: String?
-        var path: String?
-        var relative = true
-        func flush() {
-            if let path {
-                let url = relative ? data.appendingPathComponent(path) : URL(fileURLWithPath: path)
-                if FileManager.default.fileExists(atPath: url.path) { result.append((name ?? url.lastPathComponent, url)) }
-            }
-            name = nil; path = nil; relative = true
+        var recognized = false
+        var profileSection = false
+        var fields: [String: String] = [:]
+        func finishProfile() -> Bool {
+            guard profileSection else { return true }
+            let relative = fields["IsRelative"]
+            guard let path = fields["Path"], !path.isEmpty,
+                  !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+                  relative == nil || relative == "0" || relative == "1" else { return false }
+            guard relative != "0" || path.hasPrefix("/") else { return false }
+            let folder = relative == "0" ? URL(fileURLWithPath: path) : data.appendingPathComponent(path)
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: folder.path)
+                guard attributes[.type] as? FileAttributeType == .typeDirectory else { return false }
+            } catch { return isConfirmedMissing(error) }
+            result.append((fields["Name"] ?? folder.lastPathComponent, folder))
+            return true
         }
-        for line in text.split(whereSeparator: \.isNewline) {
-            if line.hasPrefix("[") { flush(); continue }
-            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
-            switch parts[0] {
-            case "Name": name = parts[1]
-            case "Path": path = parts[1]
-            case "IsRelative": relative = parts[1] == "1"
-            default: break
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix(";") || line.hasPrefix("#") { continue }
+            if line.hasPrefix("[") {
+                guard line.hasSuffix("]"), finishProfile() else { return nil }
+                let section = String(line.dropFirst().dropLast())
+                profileSection = section.hasPrefix("Profile") && Int(section.dropFirst("Profile".count)) != nil
+                if section.hasPrefix("Profile"), !profileSection { return nil }
+                recognized = recognized || profileSection || section == "General" || section.hasPrefix("Install")
+                fields = [:]
+            } else {
+                let pair = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                guard recognized, pair.count == 2, !pair[0].isEmpty else { return nil }
+                if profileSection {
+                    if let previous = fields[pair[0]], previous != pair[1] { return nil }
+                    fields[pair[0]] = pair[1]
+                }
             }
         }
-        flush()
-        return result
+        return recognized && finishProfile() ? result : nil
     }
 
     /// Les éléments d'un profil : cache (sûr), historique et cookies (à examiner).

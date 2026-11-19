@@ -45,7 +45,11 @@ struct OustApp: App {
             // met elle-même « Réglages… » (⌘,) dans le menu de l'app. Le
             // remplacer en ajoutait un second (vu à l'écran, 18/10/2026).
             CommandGroup(after: .newItem) {
-                Button { Task { await model.analyze() } } label: { Text("menu.analyze", bundle: .oust) }
+                Button {
+                    let section = model.section
+                    let isSearching = model.isSearching
+                    Task { await model.performAnalysisCommand(from: section, isSearching: isSearching) }
+                } label: { Text("menu.analyze", bundle: .oust) }
                     .keyboardShortcut("r", modifiers: .command)
                     .disabled(model.analysis.isRunning)
                 Button {

@@ -179,6 +179,19 @@ public final class AppModel {
     // MARK: Navigateurs
 
     public private(set) var browserProfiles: [BrowserProfile] = []
+    public private(set) var unavailableBrowserInventories: Set<BrowserKind> = []
+
+    public var suspendedBrowserSelectionCount: Int {
+        cart.count { id in
+            items[id].map { $0.category == .browsers && $0.protections.contains(.unknownState) } == true
+        }
+    }
+
+    func preservesBrowserIntent(_ item: CleanupItem) -> Bool {
+        // Un choix suspendu reste effaçable par l'utilisateur, sans entrer dans
+        // cartItems ni aucune file d'exécution tant que le doute subsiste.
+        canSelectForCleanup(item) || (item.category == .browsers && item.protections.contains(.unknownState))
+    }
 
     // MARK: Panier
 
@@ -525,13 +538,15 @@ public final class AppModel {
     func runBootAnalysis(_ request: BootAnalysisRequest, context supplied: RuleContext? = nil,
                          finders: [FinderKind] = FinderKind.allCases,
                          readBrowsers: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)? = nil,
-                         readLocation: (@Sendable (URL) -> AnalysisReview.Location?)? = nil) async {
+                         readLocation: (@Sendable (URL) -> AnalysisReview.Location?)? = nil,
+                         readRunningBrowsers: (@MainActor @Sendable () -> Set<BrowserKind>)? = nil) async {
         // Le retour d’une lecture native, y compris après Arrêter, appartient
         // encore à cette opération : aucune nouvelle admission entre-temps.
         await StorageOperationContext.$isBound.withValue(true) {
             await CommandCancellationContext.$cancelsReadOnlyCommands.withValue(true) {
                 await collectBootAnalysis(request, context: supplied, finders: finders,
-                                          readBrowsers: readBrowsers, readLocation: readLocation)
+                                          readBrowsers: readBrowsers, readLocation: readLocation,
+                                          readRunningBrowsers: readRunningBrowsers)
             }
         }
     }
@@ -539,14 +554,15 @@ public final class AppModel {
     private func collectBootAnalysis(_ request: BootAnalysisRequest, context supplied: RuleContext?,
                                      finders: [FinderKind],
                                      readBrowsers: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)?,
-                                     readLocation: (@Sendable (URL) -> AnalysisReview.Location?)?) async {
+                                     readLocation: (@Sendable (URL) -> AnalysisReview.Location?)?,
+                                     readRunningBrowsers: (@MainActor @Sendable () -> Set<BrowserKind>)?) async {
         var completed = false
         defer {
             if bootAnalysisRequest?.id == request.id {
                 bootAnalysisRequest = nil
                 analyzingVolumeID = nil
                 overviewAnalysisStopping = false
-                cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
+                cart = cart.filter { items[$0].map(preservesBrowserIntent) == true }
                 if !completed { overviewAnalysisInterrupted = true }
                 analysis = completed ? .done(Date()) : .idle
             }
@@ -611,7 +627,7 @@ public final class AppModel {
         // L’ancien résultat reste visible en cas d’arrêt. Le panier vivant est
         // conservé : une case décochée pendant l’attente ne revient jamais.
         let mayPreselect = firstTime && cartSelectionRevision == request.selectionRevision
-        items = items.filter { $0.value.category == .snapshots || $0.value.category.section == .duplicates
+        items = items.filter { $0.value.category == .browsers || $0.value.category == .snapshots || $0.value.category.section == .duplicates
             || $0.value.category.section == .photos || $0.value.category.section == .clouds
             || !isOnBootVolume($0.value) }
         analysisLocations = analysisLocations.filter { items[$0.key] != nil }
@@ -622,9 +638,9 @@ public final class AppModel {
             recordAnalyzedItem(item, analysisLocation: location, preselect: mayPreselect, policy: policy)
             reviewIDs.insert(item.id)
         }
-        if let browserSnapshot { publishBrowserSnapshot(browserSnapshot) }
+        if let browserSnapshot { publishBrowserSnapshot(browserSnapshot, readRunningBrowsers: readRunningBrowsers) }
         finishedFinders = findersDone
-        cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
+        cart = cart.filter { items[$0].map(preservesBrowserIntent) == true }
         saveAnalysisReview(for: reviewVolume, location: reviewLocation, ids: reviewIDs, locationWasVerified: true)
         volumeAnalysisDates[reviewVolume.id] = Date()
         completed = true
@@ -636,7 +652,8 @@ public final class AppModel {
     public func refreshBrowsers() { _ = startBrowserRefresh() }
 
     @discardableResult
-    func startBrowserRefresh(read: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)? = nil) -> Task<Void, Never>? {
+    func startBrowserRefresh(read: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)? = nil,
+                             readRunningBrowsers: (@MainActor @Sendable () -> Set<BrowserKind>)? = nil) -> Task<Void, Never>? {
         guard bootAnalysisRequest == nil else { return nil }
         let previous = browserRefreshTask
         previous?.cancel()
@@ -652,7 +669,7 @@ public final class AppModel {
             }
             guard !Task.isCancelled, browserRefreshGeneration == generation, bootAnalysisRequest == nil,
                   let snapshot else { return }
-            publishBrowserSnapshot(snapshot)
+            publishBrowserSnapshot(snapshot, readRunningBrowsers: readRunningBrowsers)
         }
         browserRefreshTask = task
         return task
@@ -662,9 +679,10 @@ public final class AppModel {
         let home = home
         let running = Set(BrowserKind.allCases.filter { BrowserFinder.isRunning($0) })
         guard !Task.isCancelled, let snapshot = await checkStorageIO({
-            let profiles = BrowserFinder.profiles(home: home)
-            let rows = profiles.flatMap { BrowserFinder.items(for: $0, isRunning: running.contains($0.browser)) }
-            return BrowserAnalysisSnapshot(profiles: profiles, items: rows)
+            let inventory = BrowserFinder.inventory(home: home)
+            let rows = inventory.profiles.flatMap { BrowserFinder.items(for: $0, isRunning: running.contains($0.browser)) }
+            return BrowserAnalysisSnapshot(profiles: inventory.profiles, items: rows,
+                                           unavailableBrowsers: inventory.unavailableBrowsers)
         }), !Task.isCancelled else { return nil }
         let measures = await Scanner.measure(snapshot.items.flatMap(\.paths))
         guard !Task.isCancelled else { return nil }
@@ -675,9 +693,44 @@ public final class AppModel {
         return result
     }
 
-    private func publishBrowserSnapshot(_ snapshot: BrowserAnalysisSnapshot) {
-        browserProfiles = snapshot.profiles
-        for item in snapshot.items { items[item.id] = item }
+    private func publishBrowserSnapshot(_ snapshot: BrowserAnalysisSnapshot,
+                                       readRunningBrowsers: (@MainActor @Sendable () -> Set<BrowserKind>)? = nil) {
+        // La catégorie définit ce que cette lecture possède : un préfixe d’ID
+        // ne suffit pas à retirer le résultat ou le choix d’un autre outil.
+        let previousIDs = Set(items.filter { $0.value.category == .browsers }.keys)
+        // Le même chemin après une lecture indéterminée ne prouve pas la même
+        // identité : une lecture complète ne réactive jamais le choix ancien.
+        let requiresNewChoice = items.values.filter { item in
+            item.category == .browsers && item.protections.contains(.unknownState)
+                && BrowserFinder.browser(of: item).map { !snapshot.unavailableBrowsers.contains($0) } == true
+        }.map(\.id)
+        var refreshed = items.filter { $0.value.category != .browsers }
+        for (id, original) in items where original.category == .browsers
+            && BrowserFinder.browser(of: original).map({ snapshot.unavailableBrowsers.contains($0) }) == true {
+            var item = original
+            item.protect(.unknownState)
+            item.sizes.freeable = 0
+            refreshed[id] = item
+        }
+        let running = readRunningBrowsers?() ?? Set(BrowserKind.allCases.filter { BrowserFinder.isRunning($0) })
+        for var item in snapshot.items where item.category == .browsers {
+            if let browser = BrowserFinder.browser(of: item) {
+                guard !snapshot.unavailableBrowsers.contains(browser) else { continue }
+                if running.contains(browser) { item.protect(.appRunning(name: browser.displayName)) }
+            }
+            guard refreshed[item.id].map({ $0.category == .browsers }) ?? true else { continue }
+            refreshed[item.id] = item
+        }
+        let current = refreshed.filter { $0.value.category == .browsers }
+        let retiredIDs = previousIDs.subtracting(current.keys)
+        let forbiddenIDs = current.compactMap { preservesBrowserIntent($0.value) ? nil : $0.key }
+        items = refreshed
+        browserProfiles = browserProfiles.filter { snapshot.unavailableBrowsers.contains($0.browser) }
+            + snapshot.profiles.filter { !snapshot.unavailableBrowsers.contains($0.browser) }
+        unavailableBrowserInventories = snapshot.unavailableBrowsers
+        cart.subtract(retiredIDs)
+        cart.subtract(forbiddenIDs)
+        cart.subtract(requiresNewChoice)
     }
 
     /// Les éléments d'une section, triés du plus libérable au moins. Ceux des

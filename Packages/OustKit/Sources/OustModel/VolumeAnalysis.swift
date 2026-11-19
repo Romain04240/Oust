@@ -374,7 +374,7 @@ extension AppModel {
             reviewIDs.insert(item.id)
         }
         finishedFinders = stagedFinders
-        cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
+        cart = cart.filter { items[$0].map(preservesBrowserIntent) == true }
         saveAnalysisReview(for: volume, location: reviewLocation, ids: reviewIDs, locationWasVerified: true)
         volumeAnalysisDates[volume.id] = Date()
         StorageOperationContext.withUnboundContext { refreshVolumes() }

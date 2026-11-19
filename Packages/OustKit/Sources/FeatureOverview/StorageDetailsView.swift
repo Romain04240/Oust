@@ -107,10 +107,10 @@ struct StorageDetailsView: View {
                     Text("storage.details.unknown_note", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
                     HStack {
                         Button {
-                            model.reanalyze(volume)
+                            model.refreshStorageClassification(for: volume)
                             dismiss()
                         } label: { Text("disks.reanalyze", bundle: .oust) }
-                        .disabled(model.isAnalyzing(volume))
+                        .disabled(!model.canRefreshStorageClassification(for: volume))
                         if volume.isBoot, model.fullDiskAccess == false {
                             Button {
                                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {

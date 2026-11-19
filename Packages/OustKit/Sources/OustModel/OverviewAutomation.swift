@@ -5,6 +5,7 @@ import OustBrowsers
 struct BrowserAnalysisSnapshot: Sendable {
     var profiles: [BrowserProfile]
     var items: [CleanupItem]
+    var unavailableBrowsers: Set<BrowserKind> = []
 }
 
 struct BootAnalysisRequest: Sendable {

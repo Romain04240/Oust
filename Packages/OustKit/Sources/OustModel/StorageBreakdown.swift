@@ -52,9 +52,14 @@ extension AppModel {
 
     public func isRefreshingStorageClassification(for volume: VolumeDescriptor) -> Bool { isAnalyzing(volume) }
 
+    /// Une feuille déjà ouverte ne doit pas contourner l'admission de la carte.
+    public func canRefreshStorageClassification(for volume: VolumeDescriptor) -> Bool {
+        !analysis.isRunning && cleaning != .running && !isAnalyzing(volume) && canAnalyzeVolume(volume)
+            && volumes.contains(where: { $0.id == volume.id && $0.mountIdentity == volume.mountIdentity })
+    }
+
     public func refreshStorageClassification(for volume: VolumeDescriptor) {
-        guard !analysis.isRunning, cleaning != .running, !isAnalyzing(volume), canAnalyzeVolume(volume),
-              volumes.contains(where: { $0.id == volume.id && $0.mountIdentity == volume.mountIdentity }) else { return }
+        guard canRefreshStorageClassification(for: volume) else { return }
         reanalyze(volume)
     }
 

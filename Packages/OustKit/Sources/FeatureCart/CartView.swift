@@ -39,9 +39,14 @@ private struct ReviewView: View {
                     .buttonStyle(OnGradientButtonStyle())
             }
         } content: {
+            if model.suspendedBrowserSelectionCount > 0 {
+                Text(verbatim: L10n.string("browsers.choices_suspended", Formatters.count(model.suspendedBrowserSelectionCount)))
+                    .font(Typography.caption).foregroundStyle(Palette.onGradient)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if model.cart.isEmpty {
                 EmptyState(symbol: "trash", title: "cart.empty_title", message: "cart.empty_detail")
-            } else {
+            } else if !model.cartItems.isEmpty {
                 GlassCard(padding: Spacing.xLarge) {
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: Spacing.medium) {

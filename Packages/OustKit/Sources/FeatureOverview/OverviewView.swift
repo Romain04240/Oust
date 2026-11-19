@@ -121,8 +121,7 @@ private struct HeroCard: View {
                             }
                         }
                         .buttonStyle(.plain).font(Typography.caption.weight(.semibold))
-                        .disabled(model.isRefreshingStorageClassification(for: volume) || model.analysis.isRunning
-                                  || model.cleaning == .running || !model.canAnalyzeVolume(volume))
+                        .disabled(!model.canRefreshStorageClassification(for: volume))
                     }
                     .frame(maxWidth: .infinity)
                     DiskGauge(segments: gaugeSegments, cart: 0, capacity: volume.capacity, beat: model.beat)

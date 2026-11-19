@@ -34572,6 +34572,40 @@
           }
         }
       }
+    },
+    "browsers.inventory_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to read the profiles for %@. Previous results remain protected, with no reclaimable space claimed. Refresh, then select your choices again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de lire les profils de %@. Les anciens résultats restent protégés, sans gain annoncé. Actualisez, puis cochez à nouveau vos choix."
+          }
+        }
+      }
+    },
+    "browsers.choices_suspended": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ browser choices need review and cannot be processed. Refresh Browsers, then select them again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ choix de navigateur sont à revérifier et ne peuvent pas être traités. Actualisez Navigateurs, puis cochez-les à nouveau."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
