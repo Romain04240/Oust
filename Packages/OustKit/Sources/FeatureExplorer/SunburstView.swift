@@ -32,6 +32,13 @@ struct SunburstView: View {
     /// Joint entre deux segments, de largeur constante comme sur la jauge.
     static let joint: CGFloat = 1.5
 
+    /// Le focus peut changer avant son `onChange` : aucun secteur de l'ancien
+    /// dossier ne doit être interprété avec les coordonnées du nouveau.
+    private var displayedLayout: SunburstLayout? {
+        guard let layout, layout.root === focus else { return nil }
+        return layout
+    }
+
     var body: some View {
         // 260 pt au plus petit : à 1080 × 720, il reste moins de 360 pt sous les
         // onglets, et un minimum de 360 faisait remonter toute la section et
@@ -39,7 +46,7 @@ struct SunburstView: View {
         HStack(alignment: .top, spacing: Spacing.large) {
             chart
                 .frame(minWidth: 260, maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
-            Legend(layout: layout, focus: focus, model: model, highlighted: hoveredID ?? selectedID, open: enter)
+            Legend(layout: displayedLayout, focus: focus, model: model, highlighted: hoveredID ?? selectedID, open: enter)
                 .frame(width: 320)
         }
         .onAppear { relayout() }
@@ -53,7 +60,7 @@ struct SunburstView: View {
     }
 
     private func enter(_ node: TreeNode) {
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .snappy(duration: 0.3)) { open(node) }
+        open(node)
     }
 
     // MARK: Dessin
@@ -62,29 +69,10 @@ struct SunburstView: View {
         GeometryReader { proxy in
             let geometry = Geometry(size: proxy.size, rings: Self.rings)
             ZStack {
-                if let layout {
-                    Canvas { context, _ in
-                        draw(layout, geometry: geometry, in: &context)
-                    }
-                    .id(ObjectIdentifier(layout.root))
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity))
-                }
+                drawing(geometry: geometry)
                 Center(focus: focus, hovered: hovered, canGoUp: focus.parent != nil, diameter: geometry.hole * 2)
                     .allowsHitTesting(false)
             }
-            .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let point):
-                    hoveredID = layout?.segment(at: point, center: geometry.center, holeRadius: geometry.hole,
-                                                ringWidth: geometry.ringWidth)?.id
-                case .ended:
-                    hoveredID = nil
-                }
-            }
-            .gesture(SpatialTapGesture().onEnded { value in
-                tap(at: value.location, geometry: geometry)
-            })
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(verbatim: L10n.string("sunburst.accessibility", focus.name,
                                                            Formatters.compactBytes(focus.total.allocated))))
@@ -94,19 +82,51 @@ struct SunburstView: View {
         }
     }
 
+    @ViewBuilder private func drawing(geometry: Geometry) -> some View {
+        let canvas = Canvas { context, _ in
+            if let layout = displayedLayout { draw(layout, geometry: geometry, in: &context) }
+        }
+        .contentShape(Rectangle())
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let point):
+                hoveredID = displayedLayout?.segment(at: point, center: geometry.center, holeRadius: geometry.hole,
+                                                     ringWidth: geometry.ringWidth)?.id
+            case .ended:
+                hoveredID = nil
+            }
+        }
+        .gesture(SpatialTapGesture().onEnded { value in
+            tap(at: value.location, geometry: geometry)
+        })
+        if reduceMotion {
+            canvas
+        } else {
+            // Un seul dessin : un fondu croisé laisserait d'anciens secteurs
+            // visibles alors que le clic vise déjà le nouveau dossier.
+            canvas.keyframeAnimator(initialValue: CGFloat(1), trigger: layout.map { ObjectIdentifier($0.root) }) { content, opacity in
+                content.opacity(Double(opacity)).allowsHitTesting(opacity > 0)
+            } keyframes: { _ in
+                MoveKeyframe(CGFloat(0))
+                LinearKeyframe(CGFloat(1), duration: 0.25)
+            }
+        }
+    }
+
     private var hovered: SunburstSegment? {
         guard let id = hoveredID else { return nil }
-        return layout?.segments.first { $0.id == id }
+        return displayedLayout?.segments.first { $0.id == id }
     }
 
     private func tap(at point: CGPoint, geometry: Geometry) {
+        guard let layout = displayedLayout else { return }
         let distance = hypot(point.x - geometry.center.x, point.y - geometry.center.y)
         if distance < geometry.hole {
             if let parent = focus.parent { enter(parent) }
             return
         }
-        guard let segment = layout?.segment(at: point, center: geometry.center, holeRadius: geometry.hole,
-                                            ringWidth: geometry.ringWidth) else { return }
+        guard let segment = layout.segment(at: point, center: geometry.center, holeRadius: geometry.hole,
+                                           ringWidth: geometry.ringWidth) else { return }
         if let node = segment.node, !node.children.isEmpty || !node.files.isEmpty {
             enter(node)
         } else {

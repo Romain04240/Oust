@@ -14,13 +14,15 @@ struct StorageDetailsView: View {
     let breakdown: StorageBreakdown
     let classificationDate: Date?
     let hasClassification: Bool
-    @State private var container: APFSContainerUsage?
-    @State private var loading = true
+    @State private var reader = StorageDetailsModel()
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var residual: Int64 { breakdown.parts(capacity: volume.capacity).first { $0.category == .system }?.bytes ?? 0 }
     private var treeCount: Int { model.analyzedTree(for: volume)?.inaccessibleCount ?? 0 }
     private var unreadable: [String] { model.analyzedTree(for: volume)?.inaccessiblePaths(limit: 20) ?? [] }
+    private var loading: Bool { reader.isLoading(for: volume) }
+    private var container: APFSContainerUsage? { reader.usage(for: volume) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.large) {
@@ -64,23 +66,17 @@ struct StorageDetailsView: View {
                     }
                     Divider()
                     Text("storage.details.volumes", bundle: .oust).font(Typography.headline)
-                    if loading {
-                        ProgressView().controlSize(.small)
-                    } else if let container {
-                        Text("storage.details.volumes_note", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
-                        ForEach(container.volumes.filter { $0.id != container.selectedVolume }) { entry in
-                            HStack(alignment: .firstTextBaseline) {
-                                VStack(alignment: .leading, spacing: Spacing.hair) {
-                                    Text(verbatim: L10n.string(entry.roleKey)).fontWeight(.medium)
-                                    Text(verbatim: entry.name).font(Typography.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(verbatim: Formatters.bytes(entry.used)).monospacedDigit()
-                            }
-                        }
-                        if let metadata = container.metadataBytes { amount("storage.details.metadata", metadata) }
+                    if reduceMotion {
+                        apfsContent
                     } else {
-                        Text("storage.details.apfs_unavailable", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
+                        // Seul le relevé apparaît en fondu, sans conserver les
+                        // anciens chiffres sous le titre d'un autre volume.
+                        apfsContent.keyframeAnimator(initialValue: CGFloat(1), trigger: loading) { content, opacity in
+                            content.opacity(Double(opacity))
+                        } keyframes: { _ in
+                            MoveKeyframe(CGFloat(0))
+                            LinearKeyframe(CGFloat(1), duration: 0.2)
+                        }
                     }
                     if volume.isBoot, let snapshots = model.snapshotRetainedBytes {
                         Divider()
@@ -131,10 +127,33 @@ struct StorageDetailsView: View {
         }
         .padding(Spacing.xLarge)
         .frame(width: 720)
-        .task {
-            container = await APFSContainerUsage.read(for: volume.scanRoot)
-            loading = false
+        .task(id: reader.identity(for: volume)) {
+            await reader.load(for: volume)
         }
+    }
+
+    private var apfsContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.large) {
+            if loading {
+                ProgressView().controlSize(.small)
+            } else if let container {
+                Text("storage.details.volumes_note", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
+                ForEach(container.volumes.filter { $0.id != container.selectedVolume }) { entry in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: Spacing.hair) {
+                            Text(verbatim: L10n.string(entry.roleKey)).fontWeight(.medium)
+                            Text(verbatim: entry.name).font(Typography.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(verbatim: Formatters.bytes(entry.used)).monospacedDigit()
+                    }
+                }
+                if let metadata = container.metadataBytes { amount("storage.details.metadata", metadata) }
+            } else {
+                Text("storage.details.apfs_unavailable", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func amount(_ key: LocalizedStringKey, _ bytes: Int64) -> some View {
