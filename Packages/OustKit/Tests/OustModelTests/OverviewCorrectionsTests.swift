@@ -54,9 +54,9 @@ struct OverviewCorrectionsTests {
                 applications: root, systemLibrary: root, sharedFolder: root, temporaryDirectory: root,
                 tools: tools, runningApps: [])
         }
-        func start(_ context: RuleContext, finders: [FinderKind] = [.toolCleanups],
+        func start(_ context: RuleContext, finders: [FinderKind] = [.toolCleanups], preselect: Bool = false,
                    browser: (@MainActor @Sendable () async -> BrowserAnalysisSnapshot?)? = nil) throws -> Task<Void, Never> {
-            let request = try #require(model.reserveBootAnalysis(boot, preselect: false))
+            let request = try #require(model.reserveBootAnalysis(boot, preselect: preselect))
             let task = AppModel.backgroundStorageTask {
                 defer { model.overviewAnalysisTask = nil }
                 await model.runBootAnalysis(request, context: context, finders: finders, readBrowsers: browser)
@@ -102,6 +102,31 @@ struct OverviewCorrectionsTests {
         var forbidden = f.chosen; forbidden.method = .trash
         #expect(!f.model.canSelectForCleanup(forbidden) && !f.model.canMoveFiles)
         #expect(f.model.cleaning == .idle)
+    }
+
+    @Test("Une collecte manuelle ne recochera pas une case décochée pendant l'attente")
+    func manualPreselectionRespectsLiveChanges() async throws {
+        let f = try Fixture(); defer { f.remove() }
+        let gate = PausedRead(); defer { gate.release() }
+        f.model.items[f.chosen.id] = f.chosen
+        let work = try f.start(f.context(gate), preselect: true)
+        try await gate.waitUntilEntered()
+        f.model.toggle(f.chosen); f.model.toggle(f.chosen)
+        #expect(f.model.cart.isEmpty)
+        gate.release(); await work.value
+        #expect(f.model.analysis.hasRun && f.model.items[f.chosen.id] != nil)
+        #expect(f.model.cart.isEmpty && f.model.cleaning == .idle)
+    }
+
+    @Test("Une sélection admise sans gain chiffré garde l'accès au panier")
+    func zeroGainSelectionCount() throws {
+        let f = try Fixture(); defer { f.remove() }
+        var item = f.chosen; item.sizes = .zero
+        f.model.items[item.id] = item; f.model.toggle(item)
+        #expect(f.model.cartCount(on: f.boot) == 1 && f.model.cartTotal(on: f.boot) == 0)
+        #expect(f.model.cartCount(on: f.external) == 0 && f.model.cleaning == .idle)
+        var forbidden = item; forbidden.method = .trash
+        #expect(!f.model.canSelectForCleanup(forbidden))
     }
 
     @Test("Une lecture native retardée reste possédée après Arrêter")

@@ -229,6 +229,10 @@ extension AppModel {
     }
 
     /// Ce que la corbeille d'Oust! rendrait sur ce disque.
+    public func cartCount(on volume: VolumeDescriptor) -> Int {
+        cartItems.filter { belongs($0, to: volume) }.count
+    }
+
     public func cartTotal(on volume: VolumeDescriptor) -> Int64 {
         let regular = cartItems.filter { !$0.method.isSnapshot && belongs($0, to: volume) }
             .reduce(0) { $0 + $1.sizes.freeable }

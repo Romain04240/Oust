@@ -166,7 +166,10 @@ public final class AppModel {
 
     // MARK: Panier
 
-    public internal(set) var cart: Set<String> = []
+    @ObservationIgnored var cartSelectionRevision: UInt64 = 0
+    public internal(set) var cart: Set<String> = [] {
+        didSet { if cart != oldValue { cartSelectionRevision &+= 1 } }
+    }
 
     // MARK: Nettoyage en direct
 
@@ -547,7 +550,7 @@ public final class AppModel {
         var context = supplied ?? RuleContext(home: home, projectRoots: preferences.projectRoots,
                                   historyRetentionDays: preferences.historyRetentionDays,
                                   compressionAgeDays: preferences.compressionAgeMonths * 30)
-        let tree = request.preselect ? disk.treeProvider() : nil
+        let tree = request.preselect && supplied == nil ? disk.treeProvider() : context.tree
         context.tree = tree
         let measurer: Measurer = tree.map(Measurer.tree) ?? .disk
         let policy = PreselectionPolicy(recencyDays: preferences.recencyDays)
@@ -578,7 +581,7 @@ public final class AppModel {
             browserSnapshot = snapshot
         } else { browserSnapshot = nil }
         guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
-        if request.preselect { await refreshSnapshots() }
+        if request.preselect && supplied == nil { await refreshSnapshots() }
         // Les preuves des lots se relisent hors du fil d’interface, sans
         // publier les tailles d’une génération arrêtée ou remplacée.
         let staged = batches
@@ -589,6 +592,7 @@ public final class AppModel {
         }) ?? nil, await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
         // L’ancien résultat reste visible en cas d’arrêt. Le panier vivant est
         // conservé : une case décochée pendant l’attente ne revient jamais.
+        let mayPreselect = firstTime && cartSelectionRevision == request.selectionRevision
         items = items.filter { $0.value.category == .snapshots || $0.value.category.section == .duplicates
             || $0.value.category.section == .photos || $0.value.category.section == .clouds
             || !isOnBootVolume($0.value) }
@@ -597,7 +601,7 @@ public final class AppModel {
         stopReadOnlyRevalidationIfEmpty()
         var reviewIDs = Set<String>()
         for (item, location) in fresh {
-            recordAnalyzedItem(item, analysisLocation: location, preselect: firstTime, policy: policy)
+            recordAnalyzedItem(item, analysisLocation: location, preselect: mayPreselect, policy: policy)
             reviewIDs.insert(item.id)
         }
         if let browserSnapshot { publishBrowserSnapshot(browserSnapshot) }

@@ -62,6 +62,7 @@ public struct DiskGauge: View {
                 VStack(spacing: 2) {
                     Text(verbatim: Formatters.compactBytes(capacity.availableForImportantUsage))
                         .font(.system(size: size * 0.13, weight: .heavy, design: .rounded))
+                        .lineLimit(1).minimumScaleFactor(0.6)
                         .contentTransition(.numericText(value: Double(capacity.availableForImportantUsage)))
                     Text(verbatim: L10n.string("gauge.free_of", Formatters.compactBytes(capacity.total)))
                         .font(.system(size: max(10, size * 0.045), weight: .semibold))

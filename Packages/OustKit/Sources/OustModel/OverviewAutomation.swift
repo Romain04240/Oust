@@ -11,6 +11,7 @@ struct BootAnalysisRequest: Sendable {
     let id = UUID()
     let volume: VolumeDescriptor?
     let preselect: Bool
+    let selectionRevision: UInt64
 }
 
 extension AppModel {
@@ -25,7 +26,7 @@ extension AppModel {
         guard !analysis.isRunning, overviewAnalysisTask == nil, bootAnalysisRequest == nil, volumeAnalysisAttempt == nil,
               let volume, volume.isBoot, volume.isInternal, !volume.isRemovable,
               volumes.contains(where: { $0.id == volume.id && $0.mountIdentity == volume.mountIdentity }) else { return nil }
-        let request = BootAnalysisRequest(volume: volume, preselect: preselect)
+        let request = BootAnalysisRequest(volume: volume, preselect: preselect, selectionRevision: cartSelectionRevision)
         bootAnalysisRequest = request
         analyzingVolumeID = volume.id
         overviewAnalysisInterrupted = false

@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "overview.open_selection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review selection"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Examiner la sélection"
+          }
+        }
+      }
+    },
     "storage.classification_loading": {
       "extractionState": "manual",
       "localizations": {

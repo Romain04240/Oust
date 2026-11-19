@@ -138,10 +138,14 @@ private struct HeroCard: View {
                         Text("overview.analyzing", bundle: .oust).font(Typography.caption)
                     }
                     Spacer(minLength: Spacing.small)
-                    if selected > 0 {
+                    if model.cartCount(on: volume) > 0 {
                         Button { model.section = .cart } label: {
-                            Text(verbatim: L10n.string("overview.go_clean", Formatters.compactBytes(selected)))
-                                .font(Typography.caption.monospacedDigit())
+                            Group {
+                                if selected > 0 {
+                                    Text(verbatim: L10n.string("overview.go_clean", Formatters.compactBytes(selected)))
+                                } else { Text("overview.open_selection", bundle: .oust) }
+                            }
+                            .font(Typography.caption.monospacedDigit())
                         }
                         .buttonStyle(OnGradientButtonStyle())
                     }
