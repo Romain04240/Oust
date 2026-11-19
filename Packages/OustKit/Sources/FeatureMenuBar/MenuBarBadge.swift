@@ -7,11 +7,14 @@ enum MenuBarBadge {
     private static let padding: CGFloat = 7
     private static let gap: CGFloat = 5
 
-    static func storage(icon: NSImage, value: String?) -> NSImage {
+    static func storage(icon: NSImage, value: String?, isLow: Bool = false) -> NSImage {
         let glyphWidth: CGFloat = 15
-        return pill(glyphWidth: glyphWidth, value: value, tint: .systemPurple) { x in
+        return pill(glyphWidth: glyphWidth + (isLow ? 15 : 0), value: value, tint: .systemPurple) { x in
             let rect = NSRect(x: x, y: (height - glyphWidth) / 2, width: glyphWidth, height: glyphWidth)
             drawTinted(icon, in: rect, tint: .systemPurple)
+            if isLow, let warning = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil) {
+                drawTinted(warning, in: NSRect(x: x + glyphWidth + 3, y: (height - 12) / 2, width: 12, height: 12), tint: .systemOrange)
+            }
         }
     }
 
@@ -28,7 +31,7 @@ enum MenuBarBadge {
             }
         }
         let source: String? = switch reading?.state {
-        case .charging: "bolt.fill"
+        case .charging, .charged: "bolt.fill"
         case .onAC: "powerplug.fill"
         default: nil
         }
@@ -37,7 +40,8 @@ enum MenuBarBadge {
         let glyphWidth: CGFloat = bodyWidth + (source == nil ? 3 : 17)
         return pill(glyphWidth: glyphWidth, value: style == .inside ? nil : percentage, tint: tint) { x in
             let center = height / 2
-            let body = NSRect(x: x, y: center - bodyHeight / 2, width: bodyWidth, height: bodyHeight)
+            let bodyX = x + (source == nil ? 0 : 14)
+            let body = NSRect(x: bodyX, y: center - bodyHeight / 2, width: bodyWidth, height: bodyHeight)
             let outline = NSBezierPath(roundedRect: body, xRadius: 3, yRadius: 3)
             tint.setStroke()
             outline.lineWidth = 1.25
@@ -67,7 +71,7 @@ enum MenuBarBadge {
                 number.draw(at: NSPoint(x: body.midX - size.width / 2, y: center - size.height / 2))
             }
             if let source, let symbol = NSImage(systemSymbolName: source, accessibilityDescription: nil) {
-                drawTinted(symbol, in: NSRect(x: x + bodyWidth + 7, y: center - 5, width: 10, height: 10), tint: tint)
+                drawTinted(symbol, in: NSRect(x: x, y: center - 5, width: 10, height: 10), tint: tint)
             }
         }
     }

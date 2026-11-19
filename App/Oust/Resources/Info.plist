@@ -35,6 +35,8 @@
 	<string>Oust! asks the Finder to move items to the Trash, so that “Put Back” keeps working.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Oust! reads your Photos library to find large videos, old screenshots and duplicates. Nothing leaves your Mac, and nothing is deleted without your confirmation.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Oust! reads battery levels from your already connected Bluetooth devices. It does not pair new devices.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>

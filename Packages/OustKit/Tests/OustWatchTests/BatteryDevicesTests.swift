@@ -3,6 +3,63 @@ import Testing
 @testable import OustWatch
 
 struct BatteryDevicesTests {
+    private func earbuds(_ fields: String, connected: Bool = true) throws -> BatteryDevice {
+        let key = connected ? "device_connected" : "device_not_connected"
+        let data = Data("{\"SPBluetoothDataType\":[{\"\(key)\":[{\"Test earbuds\":{\"device_address\":\"02:11:22:33:44:55\",\(fields)}}]}]}".utf8)
+        return try #require(BatteryDevice.parse(data)?.first)
+    }
+
+    @Test("Separate earbud levels retain the real breakdown and use the lowest reported earbud")
+    func separateEarbuds() throws {
+        let device = try earbuds(#""device_batteryLevelLeft":"100 %","device_batteryLevelRight":"37 %","device_batteryLevelCase":"12 %","device_batteryLevelMain":"99%""#)
+        #expect(device.level == 37)
+        #expect(device.components == .init(left: 100, right: 37, chargingCase: 12))
+        let one = try earbuds(#""device_batteryLevelLeft":"0%""#)
+        #expect(one.level == 0 && one.components?.right == nil && one.components?.chargingCase == nil)
+    }
+
+    @Test("Missing, invalid and offline earbud values never become a battery estimate")
+    func missingEarbuds() throws {
+        let onlyCase = try earbuds(#""device_batteryLevelCase":"100%""#)
+        #expect(onlyCase.level == nil && onlyCase.components?.chargingCase == 100)
+        let invalid = try earbuds(#""device_batteryLevelLeft":true,"device_batteryLevelRight":"101%","device_batteryLevelCase":-1"#)
+        #expect(invalid.level == nil && invalid.components == .init())
+        let offline = try earbuds(#""device_batteryLevelLeft":"100%","device_batteryLevelRight":"100%""#, connected: false)
+        #expect(offline.level == nil && offline.components == nil)
+    }
+
+    @Test("An earbud value disappearing during a Bluetooth read is not copied from the earlier inventory")
+    func vanishedEarbud() throws {
+        let before = try earbuds(#""device_batteryLevelLeft":"81%","device_batteryLevelCase":"90%""#)
+        let after = try earbuds(#""device_batteryLevelCase":"90%""#)
+        let report = BluetoothBatterySnapshot(samples: [], names: [:])
+        let result = BatteryDevice.merging(report, before: [before], after: [after])
+        #expect(result == [after] && result.first?.level == nil)
+    }
+
+    @Test("Generic main, HID and BLE readings cannot stand in for missing earbuds")
+    func genericReadingsDoNotFillEarbuds() throws {
+        let before = try earbuds(#""device_batteryLevelMain":"19%""#)
+        let peer = UUID()
+        for fields in [#""device_batteryLevelCase":"90%","device_batteryLevelMain":"55%""#,
+                       #""device_batteryLevelLeft":null,"device_batteryLevelRight":true,"device_batteryLevelCase":"101%","device_batteryLevelMain":"55%""#] {
+            let after = try earbuds(fields)
+            #expect(after.level == nil)
+            let hid = ConnectedBattery(id: 1, name: after.name, level: 19, deviceID: after.id)
+            #expect(BatteryDevice.fillingHID([after], readings: [hid]) == [after])
+            #expect(BatteryDevice.fillingHID([before], readings: [hid]) == [before])
+            for report in [BluetoothBatterySnapshot(samples: [], names: [:]),
+                           .init(samples: [.init(id: peer, name: after.name, level: 19)], names: [peer: after.name])] {
+                let result = BatteryDevice.merging(report, before: [before], after: [after])
+                #expect(result == [after] && result.first?.level == nil)
+            }
+        }
+        let parts = try earbuds(#""device_batteryLevelLeft":"81%""#)
+        let empty = try earbuds(#""device_productID":"0x2027""#)
+        let report = BluetoothBatterySnapshot(samples: [.init(id: peer, name: empty.name, level: 81)], names: [peer: empty.name])
+        #expect(BatteryDevice.merging(report, before: [parts], after: [empty]) == [empty])
+    }
+
     @Test("Deux appareils de même nom gardent leurs réglages propres après reconnexion")
     func identities() throws {
         let devices = try #require(BatteryDevice.parse(Data(#"""

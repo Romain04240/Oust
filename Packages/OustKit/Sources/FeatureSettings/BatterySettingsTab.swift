@@ -41,7 +41,7 @@ struct BatterySettingsTab: View {
                 Text("settings.watch.battery_section", bundle: .oust)
             }
             Section {
-                let devices = watch.orderedBatteryDevices
+                let devices = watch.orderedLastKnownBatteryDevices
                 if devices.isEmpty {
                     Text(watch.batteryDevices == nil ? "settings.battery.devices_unavailable" : "settings.battery.devices_empty",
                          bundle: .oust)
@@ -51,7 +51,13 @@ struct BatterySettingsTab: View {
                     deviceRow(device, first: devices.first?.id == device.id, last: devices.last?.id == device.id)
                 }
             } header: {
-                Text("menubar.battery_devices", bundle: .oust)
+                HStack {
+                    Text("menubar.battery_devices", bundle: .oust)
+                    Spacer()
+                    Text(verbatim: L10n.string("settings.battery.device_count", Formatters.count(watch.shownBatteryDeviceCount),
+                                              Formatters.count(BatteryDevicePreference.maximumShown)))
+                        .monospacedDigit().foregroundStyle(.secondary)
+                }
             }
             Button {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.Battery-Settings.extension") {
@@ -68,7 +74,7 @@ struct BatterySettingsTab: View {
                 if batteryTabOpenedAt == opened { batteryTabOpenedAt = nil }
             }
             while !Task.isCancelled {
-                await watch.refreshBatteryDevices(since: opened)
+                await watch.refreshBatteryDevices(since: opened, requestBluetoothPermission: true)
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
             }
         }
@@ -80,6 +86,7 @@ struct BatterySettingsTab: View {
             HStack {
                 Toggle(isOn: preference(device.id, \.shown)) { Text(verbatim: device.name) }
                     .toggleStyle(.checkbox)
+                    .disabled(!watch.batteryPreference(for: device.id).shown && watch.shownBatteryDeviceCount >= BatteryDevicePreference.maximumShown)
                 Spacer()
                 if !watch.hasFreshBatteryDevices(since: batteryTabOpenedAt) {
                     Text("menubar.battery_device_level_unknown", bundle: .oust).foregroundStyle(.secondary)

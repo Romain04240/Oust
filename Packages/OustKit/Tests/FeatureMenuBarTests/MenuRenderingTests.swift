@@ -1,8 +1,10 @@
 import AppKit
 import SwiftUI
 import OustWatch
+import OustCore
 import Testing
 @testable import FeatureMenuBar
+@testable import OustModel
 
 @Suite("Menu status rendering", .serialized)
 @MainActor
@@ -106,6 +108,21 @@ struct MenuRenderingTests {
         #expect(host.fittingSize.height <= 600)
     }
 
+    @Test("Actual viewport placement does not fill the previous page's taller proposal")
+    func placementAfterTallProposal() {
+        var measured = CGSize.zero
+        let root = MenuPanelViewport(maximumHeight: 800) {
+            Color.clear.frame(height: 80)
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { measured = $0 }
+        .frame(width: 360, height: 600, alignment: .topLeading)
+        let host = NSHostingView(rootView: root)
+        host.setFrameSize(NSSize(width: 360, height: 600))
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        #expect(abs(measured.height - 80) < 1)
+    }
+
     @Test("Storage stays colored in both appearances")
     func colors() throws {
         for name in [NSAppearance.Name.aqua, .darkAqua] {
@@ -132,4 +149,65 @@ struct MenuRenderingTests {
             }
         }
     }
+    @Test("Storage warning and plugged-in charged state remain visible")
+    func stateSymbols() {
+        let icon = NSImage(systemSymbolName: "internaldrive", accessibilityDescription: nil)!
+        let normal = MenuBarBadge.storage(icon: icon, value: "10 GB")
+        let low = MenuBarBadge.storage(icon: icon, value: "10 GB", isLow: true)
+        #expect(low.size.width > normal.size.width)
+        #expect(raster(low).tiffRepresentation != raster(normal).tiffRepresentation)
+        for style in [WatchSettings.BatteryPercentageStyle.inside, .beside] {
+            let charged = MenuBarBadge.battery(BatteryReading(level: 100, state: .charged), percentage: "100%", style: style)
+            let disconnected = MenuBarBadge.battery(BatteryReading(level: 100, state: .onBattery), percentage: "100%", style: style)
+            #expect(charged.size.width > disconnected.size.width)
+        }
+    }
+
+    @Test("Animated storage content keeps the same compact natural height")
+    func storageHeightWithAnimation() {
+        let root = URL(fileURLWithPath: "/oust-fixture-volume", isDirectory: true)
+        let volume = VolumeDescriptor(name: "Test disk", mountURL: root, scanRoot: root, isBoot: true,
+            isInternal: true, isRemovable: false, capacity: Capacity(total: 1_000_000_000, available: 300_000_000, availableForImportantUsage: 400_000_000))
+        func view(_ active: Bool) -> some View {
+            MenuPanelViewport(maximumHeight: 800) {
+                VolumeLine(volume: volume, isLow: false, presented: active, quit: {}, open: {})
+            }.padding(16).frame(width: MenuBarPanel.width)
+        }
+        let host = NSHostingView(rootView: view(false))
+        let still = host.fittingSize.height
+        host.rootView = view(true)
+        let animated = host.fittingSize.height
+        #expect(still > 100 && still < 400)
+        #expect(abs(animated - still) < 1)
+        host.rootView = view(false)
+        #expect(abs(host.fittingSize.height - still) < 1)
+    }
+
+    @Test("The complete storage panel returns to its natural size after a taller page")
+    func fullStoragePanelHeight() {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("oust-menu-\(UUID().uuidString)")
+        let model = AppModel(home: root, defaults: MenuMemoryDefaults())
+        model.volumes = [VolumeDescriptor(name: "Test disk", mountURL: root, scanRoot: root, isBoot: true,
+            isInternal: true, isRemovable: false, capacity: Capacity(total: 1_000_000_000, available: 300_000_000, availableForImportantUsage: 400_000_000))]
+        let navigation = MenuBarNavigation()
+        navigation.height = 850
+        let host = NSHostingController(rootView: MenuBarPanel(model: model, navigation: navigation))
+        host.sizingOptions = .preferredContentSize
+        host.view.setFrameSize(NSSize(width: MenuBarPanel.width, height: 800))
+        host.view.layoutSubtreeIfNeeded()
+        let natural = host.view.fittingSize
+        #expect(natural.height > 250 && natural.height < 450)
+        host.view.setFrameSize(natural)
+        host.view.layoutSubtreeIfNeeded()
+        #expect(abs(host.view.fittingSize.height - natural.height) < 1)
+    }
+
+}
+
+private final class MenuMemoryDefaults: UserDefaults, @unchecked Sendable {
+    override func object(forKey defaultName: String) -> Any? { nil }
+    override func data(forKey defaultName: String) -> Data? { nil }
+    override func stringArray(forKey defaultName: String) -> [String]? { nil }
+    override func bool(forKey defaultName: String) -> Bool { false }
+    override func set(_ value: Any?, forKey defaultName: String) {}
 }

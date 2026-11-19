@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "NSBluetoothAlwaysUsageDescription" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oust! reads battery levels from your already connected Bluetooth devices. It does not pair new devices."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oust! lit le niveau de batterie de vos appareils Bluetooth déjà connectés. Il ne jumelle aucun nouvel appareil."
+          }
+        }
+      }
+    },
     "NSAppleEventsUsageDescription" : {
       "comment" : "Invite d'autorisation des AppleEvents (Finder).",
       "extractionState" : "manual",

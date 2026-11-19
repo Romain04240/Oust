@@ -17,7 +17,7 @@ public struct MenuBarPanel: View {
         self.navigation = navigation
     }
 
-    static let width: CGFloat = 460
+    static let width: CGFloat = 360
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Spacing.medium) {
@@ -27,6 +27,18 @@ public struct MenuBarPanel: View {
                 }
             } else {
                 BatteryMenuPanel(watch: model.watch, navigation: navigation)
+                if !model.watch.menuBarContents.showsStorage {
+                    HStack {
+                        Button { open(.overview) } label: {
+                            Label { Text("menubar.open_short", bundle: .oust) } icon: { Image(systemName: "macwindow").foregroundStyle(.purple) }
+                        }
+                        Spacer()
+                        Button(action: navigation.quit) {
+                            Label { Text("menubar.quit_short", bundle: .oust) } icon: { Image(systemName: "power").foregroundStyle(.pink) }
+                        }
+                    }
+                    .font(Typography.caption).buttonStyle(.borderless)
+                }
             }
         }
         .padding(Spacing.large)
@@ -54,20 +66,11 @@ public struct MenuBarPanel: View {
                     WatchedVolumes.isEjectable(isBoot: $0.isBoot, isInternal: $0.isInternal, isRemovable: $0.isRemovable)
                 }) {
                     Button { open(.overview) } label: {
-                        Label { Text("menubar.manage_disks", bundle: .oust) } icon: {
-                            Image(systemName: "externaldrive")
-                        }
+                        Label { Text("menubar.manage_disks", bundle: .oust) } icon: { Image(systemName: "externaldrive") }
                     }
                     .buttonStyle(.borderless)
-                    .padding(.horizontal, Spacing.small)
                 }
             }
-            Button { open(.overview) } label: {
-                Label { Text("menubar.open", bundle: .oust) } icon: { Image(systemName: "macwindow") }
-                    .frame(maxWidth: .infinity, minHeight: 26)
-            }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
             bin
             if let retention = retentionLine {
                 Label { Text(verbatim: retention) } icon: { Image(systemName: "calendar.badge.clock") }
@@ -93,7 +96,12 @@ public struct MenuBarPanel: View {
                 if volume.id != disks.first?.id {
                     Divider()
                 }
-                VolumeLine(volume: volume, isLow: isLow(volume), presented: navigation.presented)
+                VolumeLine(volume: volume, isLow: isLow(volume), presented: navigation.presented, quit: navigation.quit) {
+                    let current = volume.isBoot ? (model.watch.boot ?? model.bootVolume)
+                        : model.volumes.first(where: { $0.id == volume.id })
+                    if let current, model.canAnalyzeVolume(current) { model.selectAnalysisVolume(current) }
+                    open(.overview)
+                }
             }
             if model.watch.isLow, let threshold = model.watch.thresholdBytes {
                 Label { Text(verbatim: L10n.string("menubar.low", Formatters.compactBytes(threshold))) }
@@ -117,7 +125,7 @@ public struct MenuBarPanel: View {
     private var bin: some View {
         VStack(alignment: .leading, spacing: Spacing.small) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
-                Text("menubar.bin", bundle: .oust)
+                Label { Text("menubar.bin", bundle: .oust) } icon: { Image(systemName: "trash.fill").foregroundStyle(.pink) }
                     .font(Typography.body.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
@@ -167,26 +175,23 @@ public struct MenuBarPanel: View {
     }
 
     private func open(_ section: AppSection?) {
-        navigation.close()
-        if let section {
-            model.searchText = ""
-            model.section = section
-        }
-        MainWindow.show()
+        navigation.openMainWindow(section)
     }
 }
 
-private struct VolumeLine: View {
+struct VolumeLine: View {
     let volume: VolumeDescriptor
     let isLow: Bool
     let presented: Bool
+    let quit: () -> Void
+    let open: () -> Void
 
     var body: some View {
         let free = Formatters.compactBytes(volume.capacity.availableForImportantUsage)
         VStack(alignment: .leading, spacing: Spacing.small) {
             HStack(spacing: Spacing.small) {
                 Image(systemName: volume.symbol)
-                    .foregroundStyle(volume.isBoot ? Palette.eclatSolid : Color.teal)
+                    .foregroundStyle(volume.isBoot ? Color.purple : Color.blue)
                     .frame(width: 25, height: 25)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.small))
                     .accessibilityHidden(true)
@@ -202,23 +207,43 @@ private struct VolumeLine: View {
                     }
                 }
                 Spacer(minLength: Spacing.hair)
+                VStack(alignment: .trailing, spacing: Spacing.tight) {
+                    Button(action: open) {
+                        Label { Text("menubar.open_short", bundle: .oust) } icon: { Image(systemName: "macwindow").foregroundStyle(.purple) }
+                    }
+                    .accessibilityLabel(Text("menubar.open", bundle: .oust))
+                    .help(Text("menubar.open", bundle: .oust))
+                    Button(action: quit) {
+                        Label { Text("menubar.quit_short", bundle: .oust) } icon: { Image(systemName: "power").foregroundStyle(.pink) }
+                    }
+                    .accessibilityLabel(Text("menubar.quit", bundle: .oust))
+                }
+                .font(Typography.caption)
+                .lineLimit(1)
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
             }
             HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
                 Text(verbatim: free)
                     .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(isLow ? Palette.color(for: .review) : .purple)
                     .contentTransition(.numericText())
-                Text("watch.capsule.word", bundle: .oust)
+                Text("menubar.storage_available", bundle: .oust)
                     .font(Typography.caption)
             }
             .fixedSize(horizontal: true, vertical: false)
             if volume.capacity.total > 0 {
                 DiskBar(used: volume.capacity.occupiedFraction, isLow: isLow, presented: presented)
-                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], spacing: Spacing.small) {
-                    storageMetric("menubar.storage_immediate", volume.capacity.available)
-                    storageMetric("menubar.storage_purgeable", volume.capacity.purgeable)
-                    storageMetric("menubar.storage_occupied", volume.capacity.occupied)
-                    storageMetric("menubar.storage_total", volume.capacity.total)
+                VStack(spacing: Spacing.small) {
+                    HStack(spacing: Spacing.small) {
+                        storageMetric("menubar.storage_immediate", volume.capacity.available, symbol: "arrow.up.right.circle.fill", tint: .blue)
+                        storageMetric("menubar.storage_purgeable", volume.capacity.purgeable, symbol: "sparkles", tint: .purple)
+                    }
+                    HStack(spacing: Spacing.small) {
+                        storageMetric("menubar.storage_occupied", volume.capacity.occupied, symbol: "internaldrive.fill", tint: .orange)
+                        storageMetric("menubar.storage_total", volume.capacity.total, symbol: "externaldrive.fill", tint: .indigo)
+                    }
                 }
                 .font(Typography.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -228,11 +253,22 @@ private struct VolumeLine: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func storageMetric(_ title: String, _ bytes: Int64) -> some View {
+    private func storageMetric(_ title: String, _ bytes: Int64, symbol: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: Spacing.hair) {
-            Text(LocalizedStringKey(title), bundle: .oust).foregroundStyle(.secondary)
-            Text(verbatim: Formatters.compactBytes(bytes)).fontWeight(.semibold).foregroundStyle(.primary)
+            HStack(spacing: Spacing.tight) {
+                Image(systemName: symbol).foregroundStyle(tint).accessibilityHidden(true)
+                Text(LocalizedStringKey(title), bundle: .oust).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+            }
+            .font(.system(size: 11)).frame(height: 16, alignment: .leading)
+            Text(verbatim: Formatters.compactBytes(bytes))
+                .font(.system(size: 18, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.primary)
         }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(Spacing.small)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.small))
+        .overlay { RoundedRectangle(cornerRadius: Radius.small).strokeBorder(.primary.opacity(0.08)) }
         .accessibilityElement(children: .combine)
     }
 }
@@ -271,40 +307,79 @@ private struct DiskBar: View {
     }
 }
 
-/// The natural content is the first choice. A bounded scroll container exists
-/// only when the content really cannot fit on the screen, never while a stale
-/// geometry measurement catches up with a collapsing disclosure.
+/// Normal panels have a fixed natural height, regardless of the height left
+/// by the previously displayed page. Only genuine overflow uses scrolling.
 struct MenuPanelViewport<Content: View>: View {
     let maximumHeight: CGFloat
     @ViewBuilder var content: Content
+    @State private var naturalHeight: CGFloat = 0
+
+    private var limit: CGFloat { max(1, maximumHeight) }
 
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            content.fixedSize(horizontal: false, vertical: true)
-            ScrollView { content.fixedSize(horizontal: false, vertical: true) }
+        Group {
+            if naturalHeight > limit {
+                ScrollView { measuredContent }
                 .scrollIndicators(.never)
                 .scrollBounceBehavior(.basedOnSize)
-                .frame(height: max(1, maximumHeight))
+                .frame(height: limit)
+            } else {
+                MenuNaturalHeightLayout(maximumHeight: limit) { measuredContent }
+                    .clipped()
+            }
         }
-        .frame(maxHeight: max(1, maximumHeight), alignment: .top)
+    }
+
+    private var measuredContent: some View {
+        content.fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                guard height.isFinite, height >= 0, abs(height - naturalHeight) > 0.25 else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { naturalHeight = height }
+            }
+    }
+}
+
+/// Do not accept the native window's old vertical proposal as extra space.
+/// ViewThatFits + maxHeight can report a compact ideal size while filling that
+/// old proposal when placed, so fittingSize alone did not expose the defect.
+private struct MenuNaturalHeightLayout: Layout {
+    let maximumHeight: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        let natural = content.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        return CGSize(width: natural.width, height: min(maximumHeight, natural.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }
 
 struct MenuSheen: View {
     let active: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var travelling = false
 
     var body: some View {
         if active && !reduceMotion {
             GeometryReader { proxy in
-                TimelineView(.animation(minimumInterval: 1.0 / 24)) { timeline in
-                    let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3.2) / 3.2
-                    let width = min(75, proxy.size.width * 0.4)
-                    LinearGradient(colors: [.clear, .white.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: width)
-                        .position(x: -width + (proxy.size.width + 2 * width) * phase, y: proxy.size.height / 2)
-                }
+                let width = min(75, proxy.size.width * 0.4)
+                LinearGradient(colors: [.clear, .white.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: width, height: proxy.size.height)
+                    .offset(x: travelling ? proxy.size.width + width : -width)
+                    .animation(.linear(duration: 3.2).repeatForever(autoreverses: false), value: travelling)
+                    .onAppear { travelling = true }
+                    .onDisappear {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { travelling = false }
+                    }
             }
+            .transition(.identity)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }

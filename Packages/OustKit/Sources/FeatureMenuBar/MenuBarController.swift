@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import OustCore
 import OustLocalization
 import OustModel
 import OustWatch
@@ -23,6 +24,8 @@ final class MenuBarNavigation {
     var batteryDiagnosticsReadAt: ContinuousClock.Instant?
     var batteryDiagnosticsCycle: Int?
     @ObservationIgnored var close: () -> Void = {}
+    @ObservationIgnored var openMainWindow: (AppSection?) -> Void = { _ in }
+    @ObservationIgnored var quit: () -> Void = {}
 }
 
 /// L'icône d'Oust! dans la barre de menus, et son panneau.
@@ -45,7 +48,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     private enum PendingPresentation {
         case panel(MenuBarPage, NSStatusBarButton)
         case battery(onUnavailable: @MainActor () -> Void)
-        case commands(NSStatusBarButton)
+        case quit
+        case mainWindow(AppSection?)
     }
     private var pendingPresentation: PendingPresentation?
     private var isClosing = false
@@ -57,6 +61,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         self.icon = icon
         super.init()
         navigation.close = { [weak self] in self?.close() }
+        navigation.openMainWindow = { [weak self] section in self?.requestMainWindow(section) }
+        navigation.quit = { [weak self] in self?.requestQuit() }
         popover.behavior = .transient
         popover.delegate = self
         // The content animates locally. Animating the native window as well
@@ -136,7 +142,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
     private func trackLabel() {
         guard let button = item?.button else { return }
         let available = withObservationTracking {
-            model.watch.boot?.capacity.availableForImportantUsage
+            _ = model.watch.settings.threshold
+            return model.watch.boot?.capacity.availableForImportantUsage
         } onChange: { [weak self, weak button] in
             Task { @MainActor in
                 guard let self, let button, self.item?.button === button else { return }
@@ -150,10 +157,16 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         guard let button = item?.button else { return }
         let value = available.map { Formatters.compactBytes($0) }
         let label = L10n.string("menubar.storage")
-        let badge = MenuBarBadge.storage(icon: icon, value: value)
+        let low = model.watch.boot.map {
+            LowDiskAlarm.isLow(available: $0.capacity.availableForImportantUsage, total: $0.capacity.total,
+                               threshold: model.watch.settings.threshold)
+        } ?? false
+        let badge = MenuBarBadge.storage(icon: icon, value: value, isLow: low)
         item?.length = badge.size.width
         button.image = badge
-        button.setAccessibilityLabel(value.map { label + ", " + L10n.string("disks.free", $0) } ?? label)
+        let description = value.map { label + ", " + L10n.string("disks.available", $0) } ?? label
+        let warning = low ? ", " + L10n.string("menubar.low", Formatters.compactBytes(model.watch.thresholdBytes ?? 0)) : ""
+        button.setAccessibilityLabel(description + warning)
     }
 
     private func trackBattery(on button: NSStatusBarButton) {
@@ -184,16 +197,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         Self.configureAppearance(button)
         button.target = self
         button.action = #selector(toggle(_:))
-        button.setAccessibilityCustomActions([
-            NSAccessibilityCustomAction(name: L10n.string("menubar.commands")) { [weak self, weak button] in
-                guard let self, let button else { return false }
-                self.showCommands(from: button)
-                return true
-            }
-        ])
-        let secondary = NSClickGestureRecognizer(target: self, action: #selector(contextClick(_:)))
-        secondary.buttonMask = 0x2
-        button.addGestureRecognizer(secondary)
+        button.sendAction(on: [.leftMouseUp])
+
     }
 
     static func configureAppearance(_ button: NSButton) {
@@ -210,16 +215,8 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         button.wantsLayer = true
     }
 
-    @objc private func contextClick(_ gesture: NSClickGestureRecognizer) {
-        guard let button = gesture.view as? NSStatusBarButton else { return }
-        showCommands(from: button)
-    }
-
     @objc private func toggle(_ sender: NSStatusBarButton) {
-        if NSApp.currentEvent?.modifierFlags.contains(.control) == true {
-            showCommands(from: sender)
-            return
-        }
+        guard NSApp.currentEvent?.modifierFlags.contains(.control) != true else { return }
         let page: MenuBarPage = sender === batteryItem?.button ? .battery : .storage
         if !isClosing, popover.isShown, anchor === sender, navigation.page == page {
             close()
@@ -316,57 +313,39 @@ public final class MenuBarController: NSObject, NSPopoverDelegate {
         switch pending {
         case .panel(let page, let button): show(page, from: button)
         case .battery(let onUnavailable): showBattery(onUnavailable: onUnavailable)
-        case .commands(let button): showCommands(from: button)
+        case .quit: confirmQuit()
+        case .mainWindow(let section): openMainWindow(section)
         case nil: break
         }
     }
 
-    private func showCommands(from button: NSStatusBarButton) {
+    /// A window request supersedes a queued panel reopen. Present the window
+    /// after the popover has relinquished key status, never during its close.
+    private func requestMainWindow(_ section: AppSection?) {
+        pendingPresentation = nil
         if popover.isShown || isClosing {
-            pendingPresentation = .commands(button)
+            pendingPresentation = .mainWindow(section)
             close()
-            return
-        }
-        // Sortir de la distribution du clic secondaire avant le suivi modal.
-        DispatchQueue.main.async { [weak self, weak button] in
-            guard let self, let button else { return }
-            self.presentCommands(from: button)
+        } else {
+            openMainWindow(section)
         }
     }
 
-    private func presentCommands(from button: NSStatusBarButton) {
-        guard let rect = visibleRect(of: button), let window = button.window else { return }
-        let screenRect = window.convertToScreen(button.convert(rect, to: nil))
-        let menu = NSMenu()
-        if let disk = model.watch.boot ?? model.bootVolume {
-            let detail = NSMenuItem(title: disk.name + " · " + L10n.string("menubar.volume_free",
-                Formatters.compactBytes(disk.capacity.availableForImportantUsage), Formatters.compactBytes(disk.capacity.total)),
-                action: nil, keyEquivalent: "")
-            menu.addItem(detail)
+    private func openMainWindow(_ section: AppSection?) {
+        if let section {
+            model.searchText = ""
+            model.section = section
         }
-        if let battery = model.watch.battery {
-            menu.addItem(NSMenuItem(title: L10n.string("menubar.battery") + " · "
-                + L10n.string("menubar.battery_percent", Formatters.count(battery.level)) + " · "
-                + L10n.string(battery.state.localizationKey), action: nil, keyEquivalent: ""))
-        }
-        menu.addItem(.separator())
-        for (key, action) in [
-            ("menubar.open", #selector(openApp)),
-            ("menu.settings", #selector(openSettings)),
-            ("menubar.quit", #selector(confirmQuit)),
-        ] {
-            let item = NSMenuItem(title: L10n.string(key), action: action, keyEquivalent: "")
-            item.target = self
-            let symbol = key == "menubar.open" ? "macwindow" : key == "menu.settings" ? "gearshape" : "power"
-            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-            if key == "menubar.quit" { menu.addItem(.separator()) }
-            menu.addItem(item)
-        }
-        menu.popUp(positioning: nil, at: .init(x: screenRect.minX, y: screenRect.minY - 2), in: nil)
+        MainWindow.show()
     }
 
-    @objc private func openApp() { MainWindow.show() }
-    @objc private func openSettings() { SettingsWindow.show(model: model) }
+    private func requestQuit() {
+        pendingPresentation = nil
+        if popover.isShown || isClosing {
+            pendingPresentation = .quit
+            close()
+        } else { confirmQuit() }
+    }
 
     @objc private func confirmQuit() {
         let alert = NSAlert()

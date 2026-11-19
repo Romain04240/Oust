@@ -12395,8 +12395,18 @@
     },
     "menubar.battery_capacity_short": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Max capacity" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Capacité max." } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capacity"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capacité"
+          }
+        }
       }
     },
     "menubar.battery_cycles_short": {
@@ -33220,6 +33230,244 @@
           "stringUnit": {
             "state": "translated",
             "value": "Écoulé : %@ · Étape actuelle : %@"
+          }
+        }
+      }
+    },
+    "menubar.battery_capacity_color_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maximum capacity relative to a new battery. Apple uses an 80% reference at its maximum cycle count. The gradual color does not replace the macOS diagnosis."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capacité maximale rapportée à la batterie neuve. Apple utilise le repère de 80 % à son nombre maximal de cycles. La couleur est progressive et ne remplace pas le diagnostic de macOS."
+          }
+        }
+      }
+    },
+    "menubar.battery_case": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charging case"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Boîtier de charge"
+          }
+        }
+      }
+    },
+    "menubar.battery_device_bluetooth_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery level read over Bluetooth. Oust automatically matches the unique system and Bluetooth names; this is a correlation, not a verified hardware identity. If names are ambiguous or the connection changes, the level stays unavailable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niveau lu par Bluetooth. Oust rapproche automatiquement les noms uniques du système et de Bluetooth : c’est une correspondance, pas une identité matérielle vérifiée. Si les noms sont ambigus ou la connexion change, le niveau reste indisponible."
+          }
+        }
+      }
+    },
+    "menubar.battery_device_components": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Left: %@ · Right: %@ · Case: %@\nEach component has its own reading. Missing readings are not estimated."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gauche : %@ · Droite : %@ · Boîtier : %@\nChaque composant a son propre relevé. Les valeurs absentes ne sont pas estimées."
+          }
+        }
+      }
+    },
+    "menubar.battery_devices_refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh device batteries"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actualiser les batteries des appareils"
+          }
+        }
+      }
+    },
+    "menubar.battery_devices_timestamp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read at %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relevé à %@"
+          }
+        }
+      }
+    },
+    "menubar.battery_left": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Left earbud"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Écouteur gauche"
+          }
+        }
+      }
+    },
+    "menubar.battery_right": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Right earbud"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Écouteur droit"
+          }
+        }
+      }
+    },
+    "menubar.battery_temperature_color_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The color is a visual cool-to-warm scale, not an Apple safety threshold. Internal battery temperature differs from ambient temperature."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La couleur est une échelle visuelle du froid vers le chaud, pas un seuil de sécurité Apple. La température interne de la batterie est différente de la température ambiante."
+          }
+        }
+      }
+    },
+    "menubar.metric_unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Indisponible"
+          }
+        }
+      }
+    },
+    "menubar.open_short": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir"
+          }
+        }
+      }
+    },
+    "menubar.quit_short": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quitter"
+          }
+        }
+      }
+    },
+    "menubar.storage_available": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "available"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "disponibles"
+          }
+        }
+      }
+    },
+    "settings.battery.device_count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@/%@ shown"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@/%@ affichés"
           }
         }
       }

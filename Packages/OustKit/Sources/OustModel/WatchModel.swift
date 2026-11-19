@@ -89,6 +89,7 @@ public final class WatchModel {
     @ObservationIgnored private var sleepObserver: (any NSObjectProtocol)?
     public private(set) var batteryDevices: [BatteryDevice]?
     public private(set) var batteryDevicesReadAt: ContinuousClock.Instant?
+    public private(set) var batteryDevicesObservedAt: Date?
     /// Historique d’affichage. Les alertes utilisent exclusivement le relevé courant.
     public private(set) var lastKnownBatteryDevices: [BatteryDevice] = []
     public var orderedLastKnownBatteryDevices: [BatteryDevice] {
@@ -156,7 +157,8 @@ public final class WatchModel {
         }
         deviceLoop = Task { [weak self] in
             while !Task.isCancelled {
-                if self?.batteryDevicePreferences.contains(where: { $0.threshold != nil }) == true {
+                if (self?.showsMenuBar == true && self?.menuBarContents.showsBattery == true)
+                    || self?.batteryDevicePreferences.contains(where: { $0.threshold != nil }) == true {
                     await self?.refreshBatteryDevices()
                 }
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
@@ -207,6 +209,10 @@ public final class WatchModel {
         BatteryDevicePreference.ordered(batteryDevices ?? [], using: batteryDevicePreferences)
     }
 
+    public var shownBatteryDeviceCount: Int {
+        lastKnownBatteryDevices.count { batteryPreference(for: $0.id).shown }
+    }
+
     public func batteryPreference(for id: String) -> BatteryDevicePreference {
         batteryDevicePreferences.first { $0.id == id } ?? BatteryDevicePreference(id: id)
     }
@@ -217,10 +223,11 @@ public final class WatchModel {
     }
 
     public func setBatteryPreference(_ preference: BatteryDevicePreference) {
-        guard batteryDevices?.contains(where: { $0.id == preference.id }) == true else { return }
+        guard lastKnownBatteryDevices.contains(where: { $0.id == preference.id }) else { return }
         let previous = batteryPreference(for: preference.id)
+        guard !preference.shown || previous.shown || shownBatteryDeviceCount < BatteryDevicePreference.maximumShown else { return }
         guard previous != preference else { return }
-        let preferences = orderedBatteryDevices.map { $0.id == preference.id ? preference : batteryPreference(for: $0.id) }
+        let preferences = orderedLastKnownBatteryDevices.map { $0.id == preference.id ? preference : batteryPreference(for: $0.id) }
         let active = Set(preferences.map(\.id))
         storeBatteryPreferences(preferences + batteryDevicePreferences.filter { !active.contains($0.id) })
         if preference.threshold != previous.threshold { deviceAlerts.invalidate(preference.id) }
@@ -233,7 +240,7 @@ public final class WatchModel {
     }
 
     public func moveBatteryDevice(_ id: String, by offset: Int) {
-        var preferences = orderedBatteryDevices.map { batteryPreference(for: $0.id) }
+        var preferences = orderedLastKnownBatteryDevices.map { batteryPreference(for: $0.id) }
         guard let index = preferences.firstIndex(where: { $0.id == id }),
               preferences.indices.contains(index + offset) else { return }
         preferences.swapAt(index, index + offset)
@@ -246,30 +253,50 @@ public final class WatchModel {
         return read >= start && ContinuousClock.now - read <= .seconds(22)
     }
 
-    public func refreshBatteryDevices(since start: ContinuousClock.Instant? = nil) async {
+    public func refreshBatteryDevices(since start: ContinuousClock.Instant? = nil, requestBluetoothPermission: Bool = false) async {
         if let running = deviceRead {
             await running.value
-            guard let start, !hasFreshBatteryDevices(since: start) else { return }
+            if !(requestBluetoothPermission && BatteryBluetooth.needsAuthorization) {
+                guard let start, !hasFreshBatteryDevices(since: start) else { return }
+            }
         }
         guard !Task.isCancelled, !batteryAsleep else { return }
         if deviceRead == nil {
             deviceRead = Task { [weak self] in
                 guard let self else { return }
                 defer { self.deviceRead = nil }
-                await self.readBatteryDevices()
+                await self.readBatteryDevices(requestBluetoothPermission: requestBluetoothPermission)
             }
         }
         await deviceRead?.value
     }
 
-    private func readBatteryDevices() async {
+    private func readBatteryDevices(requestBluetoothPermission: Bool) async {
         let cycle = deviceReadCycle
         let startedAt = ContinuousClock.now
-        let fresh = await BatteryDevice.read()
+        let observedAt = Date()
+        let remembered = Dictionary(batteryDevicePreferences.compactMap { preference -> (String, UUID)? in
+            guard let peer = preference.bluetoothPeer else { return nil }
+            return (preference.id, peer)
+        }, uniquingKeysWith: { first, _ in first })
+        let fresh = await BatteryDevice.read(requestBluetoothPermission: requestBluetoothPermission, knownBluetooth: remembered)
         guard !Task.isCancelled, cycle == deviceReadCycle, !batteryAsleep else { return }
         batteryDevices = fresh
         batteryDevicesReadAt = fresh == nil ? nil : startedAt
-        if let fresh { lastKnownBatteryDevices = fresh }
+        if let fresh {
+            let ids = Set(fresh.map(\.id))
+            let absent = lastKnownBatteryDevices.filter { !ids.contains($0.id) && batteryPreference(for: $0.id).shown }
+                .map { BatteryDevice(id: $0.id, name: $0.name, connected: false, level: nil) }
+            lastKnownBatteryDevices = fresh + absent
+            batteryDevicesObservedAt = observedAt
+            var preferences = BatteryDevicePreference.reconciled(batteryDevicePreferences, devices: lastKnownBatteryDevices)
+            for device in fresh {
+                guard let peer = device.bluetoothPeerID, let index = preferences.firstIndex(where: { $0.id == device.id }),
+                      preferences[index].bluetoothPeer == nil || preferences[index].bluetoothPeer == peer else { continue }
+                preferences[index].bluetoothPeer = peer
+            }
+            if preferences != batteryDevicePreferences { storeBatteryPreferences(preferences) }
+        }
         if !deviceAlerts.observe(fresh ?? [], preferences: batteryDevicePreferences).isEmpty {
             scheduleDeviceDelivery()
         }

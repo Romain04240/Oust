@@ -6,6 +6,11 @@ import OustModel
 import OustWatch
 
 struct BatteryMenuPanel: View {
+    private struct DeviceSample: Equatable {
+        let presented: Bool
+        let requestedAt: ContinuousClock.Instant?
+    }
+
     private struct PowerSample: Equatable {
         let source: BatteryReading.State?
         let presented: Bool
@@ -17,10 +22,10 @@ struct BatteryMenuPanel: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsCharger = false
-    @State private var showsAllDevices = false
     @State private var showsDetails = false
     @State private var devicesRead = false
     @State private var diagnosticsRead = false
+    @State private var manualDevicesReadAt: ContinuousClock.Instant?
 
     private var presented: Bool { navigation.presented }
     private var diagnostics: BatteryDiagnostics? {
@@ -62,11 +67,11 @@ struct BatteryMenuPanel: View {
             navigation.batteryHealth = current
             navigation.batteryHealthReadAt = current == nil ? nil : .now
         }
-        .task(id: presented) {
+        .task(id: DeviceSample(presented: presented, requestedAt: manualDevicesReadAt)) {
             devicesRead = false
             guard presented else { return }
             while !Task.isCancelled {
-                await watch.refreshBatteryDevices(since: navigation.batteryPresentedAt)
+                await watch.refreshBatteryDevices(since: max(manualDevicesReadAt ?? navigation.batteryPresentedAt, navigation.batteryPresentedAt), requestBluetoothPermission: true)
                 guard !Task.isCancelled else { return }
                 devicesRead = true
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
@@ -137,26 +142,24 @@ struct BatteryMenuPanel: View {
 
     private var peripherals: some View {
         let fresh = watch.hasFreshBatteryDevices(since: navigation.batteryPresentedAt)
-        let readings = fresh ? watch.orderedBatteryDevices : watch.orderedLastKnownBatteryDevices
-        let devices = readings.filter { $0.connected && watch.batteryPreference(for: $0.id).shown }
+        let readings = watch.orderedLastKnownBatteryDevices
+        let devices = Array(readings.filter { watch.batteryPreference(for: $0.id).shown }.prefix(BatteryDevicePreference.maximumShown))
         return VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(spacing: Spacing.small) {
                 heading("menubar.battery_devices", symbol: "personalhotspot", tint: .teal)
                 Spacer(minLength: 0)
-                if !fresh && !devices.isEmpty {
-                    Text("menubar.battery_last_reading", bundle: .oust)
-                        .font(Typography.caption)
-                        .foregroundStyle(.secondary)
+                if let date = watch.batteryDevicesObservedAt {
+                    Text(verbatim: "· " + L10n.string("menubar.battery_devices_timestamp", date.formatted(date: .omitted, time: .shortened)))
+                        .font(.system(size: 10, weight: .light)).foregroundStyle(.secondary)
+                        .help(Text("menubar.battery_last_reading", bundle: .oust))
                 }
-                if devices.count > 3 {
-                    Button {
-                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { showsAllDevices.toggle() }
-                    } label: {
-                        Text(showsAllDevices ? "group.show_less" : "group.show_more", bundle: .oust)
-                            .font(Typography.caption)
-                    }
-                    .buttonStyle(.borderless)
+                Button { manualDevicesReadAt = .now } label: {
+                    Image(systemName: "arrow.counterclockwise").foregroundStyle(.teal)
                 }
+                .buttonStyle(.plain)
+                .disabled(!devicesRead)
+                .accessibilityLabel(Text("menubar.battery_devices_refresh", bundle: .oust))
+                .help(Text("menubar.battery_devices_refresh", bundle: .oust))
             }
             if devices.isEmpty {
                 Text(devicesRead || fresh ? "menubar.battery_devices_unavailable" : "menubar.battery_refreshing", bundle: .oust)
@@ -164,32 +167,37 @@ struct BatteryMenuPanel: View {
                     .foregroundStyle(.secondary)
                     .batteryCard()
             } else {
-                deviceGrid(showsAllDevices ? devices : Array(devices.prefix(3)))
+                deviceGrid(devices)
             }
         }
     }
 
     private func deviceGrid(_ devices: [BatteryDevice]) -> some View {
-        let columns = [GridItem(.adaptive(minimum: 110), spacing: Spacing.tight + 2)]
+        let columns = Array(repeating: GridItem(.flexible(), spacing: Spacing.tight + 2), count: min(3, max(1, devices.count)))
         return LazyVGrid(columns: columns, spacing: Spacing.tight + 2) {
             ForEach(devices) { device in
                 let alias = watch.batteryPreference(for: device.id).alias
                 let name = alias.isEmpty ? device.name : alias
                 VStack(alignment: .leading, spacing: Spacing.tight) {
-                    Label {
-                        Text(verbatim: name).lineLimit(1).truncationMode(.tail)
-                    } icon: {
-                        Image(systemName: "personalhotspot")
-                            .foregroundStyle(.teal)
-                            .accessibilityHidden(true)
-                    }
-                    .font(Typography.caption)
-                    .help(name)
-                    if let level = device.level {
+                    Text(verbatim: name)
+                        .font(Typography.caption.weight(.semibold))
+                        .lineLimit(1).truncationMode(.tail)
+                        .help(name)
+                    if !device.connected {
+                        Text("settings.battery.offline", bundle: .oust)
+                            .font(Typography.caption).foregroundStyle(.secondary)
+                    } else if let parts = device.components {
+                        HStack(alignment: .top, spacing: 3) {
+                            componentLevel(parts.chargingCase, symbol: "airpods.chargingcase", marker: nil, label: "menubar.battery_case")
+                            componentLevel(parts.left, symbol: "earbud.left", marker: "L", label: "menubar.battery_left")
+                            componentLevel(parts.right, symbol: "earbud.right", marker: "R", label: "menubar.battery_right")
+                        }
+                    } else if let level = device.level {
                         percentage(level)
                             .font(Typography.headline.monospacedDigit())
                             .foregroundStyle(levelTextColor(level))
-                        BatteryLevelBar(level: level, color: levelColor(level), shimmering: false, height: 4)
+                            .help(deviceHelp(device))
+                        BatteryLevelBar(level: level, color: levelColor(level), shimmering: presented && device.connected, height: 4)
                             .accessibilityHidden(true)
                     } else {
                         Text("menubar.battery_device_level_unknown", bundle: .oust)
@@ -198,11 +206,53 @@ struct BatteryMenuPanel: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(minHeight: 45, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .topLeading)
                 .batteryCard()
+                .opacity(device.connected ? 1 : 0.5)
+                .help(deviceHelp(device))
                 .accessibilityElement(children: .combine)
             }
         }
+    }
+
+    private func componentLevel(_ level: Int?, symbol: String, marker: String?, label: String) -> some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 1) {
+                Image(systemName: symbol)
+                    .resizable()
+                    .frame(width: marker == nil ? 19 : 11, height: 12)
+                if let marker { Text(verbatim: marker).font(.system(size: 8, weight: .semibold)) }
+            }
+            .foregroundStyle(level.map(levelTextColor) ?? .secondary)
+            .frame(height: 12)
+            Text(verbatim: level.map { L10n.string("menubar.battery_percent", Formatters.count($0)) } ?? "—")
+                .font(.system(size: 9, weight: .medium).monospacedDigit())
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .foregroundStyle(level.map(levelTextColor) ?? .secondary)
+                .contentTransition(.numericText())
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: level)
+            if let level {
+                BatteryLevelBar(level: level, color: levelColor(level), shimmering: presented, height: 3)
+            } else {
+                Capsule().fill(.quaternary).frame(height: 3)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(LocalizedStringKey(label), bundle: .oust))
+        .accessibilityValue(Text(verbatim: level.map { L10n.string("menubar.battery_percent", Formatters.count($0)) }
+                                 ?? L10n.string("menubar.battery_device_level_unknown")))
+    }
+
+    private func deviceHelp(_ device: BatteryDevice) -> String {
+        guard device.connected, let parts = device.components else {
+            return L10n.string(device.levelSource == .bluetooth ? "menubar.battery_device_bluetooth_help" : "menubar.battery_devices")
+        }
+        func value(_ level: Int?) -> String {
+            level.map { L10n.string("menubar.battery_percent", Formatters.count($0)) }
+                ?? L10n.string("menubar.battery_device_level_unknown")
+        }
+        return L10n.string("menubar.battery_device_components", value(parts.left), value(parts.right), value(parts.chargingCase))
     }
 
     private func percentage(_ level: Int) -> Text {
@@ -248,15 +298,16 @@ struct BatteryMenuPanel: View {
             metric("menubar.battery_capacity_short",
                    value: navigation.batteryHealth?.maximumCapacity.map {
                        L10n.string("menubar.battery_percent", Formatters.count($0))
-                   }, symbol: "battery.100percent", tint: .green)
+                   }, symbol: "battery.100percent", tint: capacityTint, valueTint: capacityTint)
+                .help(Text("menubar.battery_capacity_color_help", bundle: .oust))
             metric("menubar.battery_cycles_short",
                    value: navigation.batteryHealth?.cycleCount.map { Formatters.count($0) }, symbol: "arrow.clockwise", tint: .indigo)
             metric("menubar.battery_temperature_short", value: diagnostics?.temperature.map {
                 let fahrenheit = watch.settings.batteryTemperatureUnit == .fahrenheit
                 return L10n.string(fahrenheit ? "menubar.battery_degrees_f" : "menubar.battery_degrees",
                                    decimal(fahrenheit ? $0 * 9 / 5 + 32 : $0))
-            }, symbol: "thermometer.medium", tint: .teal)
-            .help(L10n.string("menubar.mac_thermal_state", thermalState))
+            }, symbol: "thermometer.medium", tint: temperatureTint, valueTint: temperatureTint)
+            .help(L10n.string("menubar.mac_thermal_state", thermalState) + "\n" + L10n.string("menubar.battery_temperature_color_help"))
         }
     }
 
@@ -320,16 +371,33 @@ struct BatteryMenuPanel: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func metric(_ label: String, value: String?, symbol: String, tint: Color) -> some View {
+    // Colors are visual scales, not hardware safety thresholds. In particular,
+    // Apple's ambient-temperature limits do not apply to this internal sensor.
+    private var capacityTint: Color {
+        guard let capacity = navigation.batteryHealth?.maximumCapacity else { return .secondary }
+        let fraction = min(1, max(0, Double(capacity - 70) / 30))
+        return Color(hue: fraction / 3, saturation: 0.8, brightness: colorScheme == .dark ? 0.95 : 0.55)
+    }
+
+    private var temperatureTint: Color {
+        guard let temperature = diagnostics?.temperature else { return .secondary }
+        let warmth = min(1, max(0, (temperature - 25) / 35))
+        return Color(hue: (1 - warmth) * 0.4, saturation: 0.8, brightness: colorScheme == .dark ? 0.95 : 0.55)
+    }
+
+    private func metric(_ label: String, value: String?, symbol: String, tint: Color, valueTint: Color? = nil) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            Label { Text(LocalizedStringKey(label), bundle: .oust) } icon: {
+            HStack(spacing: Spacing.tight) {
                 Image(systemName: symbol).foregroundStyle(tint).accessibilityHidden(true)
+                Text(LocalizedStringKey(label), bundle: .oust)
+                    .lineLimit(1).minimumScaleFactor(0.85)
             }
-            .font(Typography.caption)
-            .foregroundStyle(.secondary)
-            Text(verbatim: value ?? L10n.string("menubar.battery_device_level_unknown"))
-                .font(value == nil ? Typography.caption : .system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(value == nil ? .secondary : .primary)
+            .font(.system(size: 11)).foregroundStyle(.secondary)
+            .frame(height: 16, alignment: .leading)
+            Text(verbatim: value ?? L10n.string("menubar.metric_unknown"))
+                .font(value == nil ? Typography.caption : .system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(value == nil ? Color.secondary : (valueTint ?? .primary))
+                .lineLimit(1).minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, minHeight: 30, alignment: .center)
                 .contentTransition(.numericText())
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: value)
@@ -341,31 +409,29 @@ struct BatteryMenuPanel: View {
     }
 
     private func energy(_ battery: BatteryReading) -> some View {
-        HStack(spacing: Spacing.small) {
-            if battery.state == .onBattery {
-                Image(systemName: battery.symbol)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(Text("menubar.battery_state.onBattery", bundle: .oust))
-            } else if let nominal = diagnostics?.nominalWatts {
-                chargerButton(nominal)
-            } else {
-                Image(systemName: "powerplug.fill")
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(Text("menubar.battery_charger_unknown", bundle: .oust))
+        HStack(alignment: .center, spacing: Spacing.small) {
+            Group {
+                if battery.state == .onBattery {
+                    Image(systemName: battery.symbol)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(Text("menubar.battery_state.onBattery", bundle: .oust))
+                } else if let nominal = diagnostics?.nominalWatts {
+                    chargerButton(nominal).controlSize(.small)
+                } else {
+                    Image(systemName: "powerplug.fill")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(Text("menubar.battery_charger_unknown", bundle: .oust))
+                }
             }
-            flowArrow.frame(minWidth: 38, maxWidth: 55)
-            powerReading(battery)
-                .frame(maxWidth: .infinity)
-            flowArrow.frame(minWidth: 38, maxWidth: 55)
             VStack(spacing: Spacing.tight) {
-                Image(systemName: "laptopcomputer")
-                    .font(.system(size: 29, weight: .medium))
-                    .foregroundStyle(.blue)
-                Text("menubar.battery_mac_short", bundle: .oust)
-                    .font(Typography.caption).foregroundStyle(.secondary)
+                powerReading(battery).frame(maxWidth: .infinity)
+                flowArrow.frame(height: 5)
             }
-            .frame(minWidth: 48)
-            .accessibilityElement(children: .combine)
+            .frame(maxWidth: .infinity)
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 29, weight: .medium)).foregroundStyle(.blue)
+                .frame(minWidth: 44, minHeight: 32)
+                .accessibilityLabel(Text("menubar.battery_mac_short", bundle: .oust))
         }
         .batteryCard()
     }
@@ -410,21 +476,25 @@ struct BatteryMenuPanel: View {
                 .contentTransition(.numericText())
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: watts)
                 .fixedSize()
-            Text(LocalizedStringKey(caption), bundle: .oust)
-                .font(Typography.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if caption != "menubar.battery_input_caption" {
+                Text(LocalizedStringKey(caption), bundle: .oust)
+                    .font(Typography.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .multilineTextAlignment(.center)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(verbatim: L10n.string(caption) + " · " + L10n.string("menubar.battery_watts", decimal(watts))))
     }
 
     private func chargerButton(_ nominal: Int) -> some View {
         Button { showsCharger.toggle() } label: {
             Label {
                 Text(verbatim: L10n.string("menubar.battery_watts", Formatters.count(nominal)))
-            } icon: { Image(systemName: "powerplug.fill") }
+            } icon: { Image(systemName: "powerplug.fill").font(.system(size: 21, weight: .medium)) }
         }
+        .foregroundStyle(.purple)
         .buttonStyle(.bordered)
         .buttonBorderShape(.capsule)
         .accessibilityLabel(Text(verbatim: L10n.string("menubar.battery_charger", Formatters.count(nominal))))
