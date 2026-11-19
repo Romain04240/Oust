@@ -4,10 +4,19 @@ import AppKit
 /// was already inactive. Observe clicks only while this presentation is open.
 @MainActor
 final class MenuDismissalMonitor {
+    typealias GlobalMonitorInstaller = (NSEvent.EventTypeMask, @escaping (NSEvent) -> Void) -> Any?
+
     private var local: Any?
     private var global: Any?
     private var inactive: (any NSObjectProtocol)?
     private var generation = UUID()
+    private let installGlobalMonitor: GlobalMonitorInstaller
+
+    init(installGlobalMonitor: @escaping GlobalMonitorInstaller = { mask, handler in
+        NSEvent.addGlobalMonitorForEvents(matching: mask, handler: handler)
+    }) {
+        self.installGlobalMonitor = installGlobalMonitor
+    }
 
     isolated deinit { stop() }
 
@@ -19,7 +28,7 @@ final class MenuDismissalMonitor {
         local = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self, weak window] event in
             MainActor.assumeIsolated {
                 guard let self, self.generation == session, let window else { return }
-                let point = event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+                let point = Self.screenLocation(of: event)
                 if !Self.belongs(event.window, to: window), !statusRects().contains(where: { $0.contains(point) }) {
                     close()
                 }
@@ -27,10 +36,12 @@ final class MenuDismissalMonitor {
             // Never swallow the click intended for a different window.
             return event
         }
-        global = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self, weak window] _ in
+        global = installGlobalMonitor(mask) { [weak self, weak window] event in
             MainActor.assumeIsolated {
                 guard let self, self.generation == session, let window else { return }
-                let point = NSEvent.mouseLocation
+                // The pointer may have moved since this event was queued.
+                // Classify the recorded click, never the current pointer.
+                let point = Self.screenLocation(of: event)
                 guard !window.frame.contains(point), !statusRects().contains(where: { $0.contains(point) }) else { return }
                 close()
             }
@@ -42,6 +53,11 @@ final class MenuDismissalMonitor {
                 close()
             }
         }
+    }
+
+    private static func screenLocation(of event: NSEvent) -> NSPoint {
+        // Events without an in-process window already use screen coordinates.
+        event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
     }
 
     func stop() {

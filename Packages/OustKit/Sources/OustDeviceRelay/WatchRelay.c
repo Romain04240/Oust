@@ -30,7 +30,9 @@ typedef struct {
     int (*unsubscribe)(void *);
 } API;
 typedef struct {
-    API api; CFMutableArrayRef samples; CFMutableSetRef phones; bool failed;
+    API api; CFMutableArrayRef samples;
+    CFMutableSetRef phones, readingPhones, completedPhones;
+    bool failed;
     pthread_mutex_t guard; atomic_bool active;
 } Read;
 
@@ -136,18 +138,30 @@ static void observedLocked(Notice *notice, void *context) {
     CFStringRef phoneID = identifier(rawPhoneID, "oust.watch.relay.phone:");
     if (rawPhoneID) CFRelease(rawPhoneID);
     if (!phoneID) { read->failed = true; return; }
-    if (CFSetContainsValue(read->phones, phoneID)) { CFRelease(phoneID); return; }
-    if (CFSetGetCount(read->phones) >= 16) { read->failed = true; CFRelease(phoneID); return; }
-    // Record before native calls: reentrant USB/Wi-Fi notifications for the
-    // same device must not start another nested session.
-    CFSetAddValue(read->phones, phoneID);
-    if (read->api.connect(phone)) { CFRelease(phoneID); return; }
-    if (read->api.paired(phone) != 1 || read->api.validate(phone) || read->api.startSession(phone)) {
-        read->api.disconnect(phone); CFRelease(phoneID); return;
+    if (CFSetContainsValue(read->readingPhones, phoneID) || CFSetContainsValue(read->completedPhones, phoneID)) {
+        CFRelease(phoneID); return;
     }
+    if (!CFSetContainsValue(read->phones, phoneID) && CFSetGetCount(read->phones) >= 16) {
+        read->failed = true; CFRelease(phoneID); return;
+    }
+    // Bound distinct phones independently from attempts. A failed transport
+    // must not permanently reserve its iPhone and hide another available one.
+    CFSetAddValue(read->phones, phoneID);
+    // Reserve before every native call and keep this reservation through
+    // cleanup, so recursive USB/Wi-Fi notices cannot open a nested session.
+    CFSetAddValue(read->readingPhones, phoneID);
+    bool connected = false, session = false, completed = false;
+    if (read->api.connect(phone)) goto cleanup;
+    connected = true;
+    if (read->api.paired(phone) != 1 || read->api.validate(phone) || read->api.startSession(phone)) goto cleanup;
+    session = true;
     CFTypeRef kind = read->api.copyValue(phone, NULL, CFSTR("DeviceClass"));
     if (!text(kind, 32) || !CFEqual(kind, CFSTR("iPhone"))) {
-        if (kind) CFRelease(kind); read->api.stopSession(phone); read->api.disconnect(phone); CFRelease(phoneID); return;
+        // A readable non-iPhone is terminal; an unreadable class can retry on
+        // another transport, without producing a sample from this attempt.
+        completed = text(kind, 32);
+        if (kind) CFRelease(kind);
+        goto cleanup;
     }
     CFRelease(kind);
     if (!read->failed) {
@@ -163,8 +177,13 @@ static void observedLocked(Notice *notice, void *context) {
             if (current) CFRelease(current); CFRelease(initial);
         }
     }
-    if (phoneID) CFRelease(phoneID);
-    read->api.stopSession(phone); read->api.disconnect(phone);
+    completed = !read->failed;
+cleanup:
+    if (session) read->api.stopSession(phone);
+    if (connected) read->api.disconnect(phone);
+    if (completed && !read->failed) CFSetAddValue(read->completedPhones, phoneID);
+    CFSetRemoveValue(read->readingPhones, phoneID);
+    CFRelease(phoneID);
 }
 
 static void observed(Notice *notice, void *context) {
@@ -193,6 +212,8 @@ int oust_watch_relay_snapshot(void) {
 #undef LOAD
     read.samples = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
     read.phones = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
+    read.readingPhones = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
+    read.completedPhones = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
     pthread_mutexattr_t attributes; pthread_mutexattr_init(&attributes);
     pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&read.guard, &attributes); pthread_mutexattr_destroy(&attributes);
@@ -224,6 +245,7 @@ int oust_watch_relay_snapshot(void) {
         if (data) CFRelease(data); CFRelease(snapshot); CFRelease(schema);
     }
     CFRelease(read.samples); CFRelease(read.phones);
+    CFRelease(read.readingPhones); CFRelease(read.completedPhones);
     pthread_mutex_unlock(&read.guard);
     // Native framework internals can outlive unsubscription. Process exit owns
     // their final cleanup; don't unload code used by its callback threads.

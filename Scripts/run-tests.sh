@@ -43,6 +43,14 @@ for cible in $CIBLES; do
     fi
 done
 
+# The private relay's transport and callback regressions exercise its C code
+# directly with fake API responses, outside SwiftPM's Swift test targets.
+if [ $# -eq 0 ] || [[ "OustDeviceRelayTests" == *"${1:-}"* ]]; then
+    if ! ../../Scripts/test-device-relay.sh; then
+        echecs+=("OustDeviceRelayTests")
+    fi
+fi
+
 echo
 if [ ${#echecs[@]} -eq 0 ]; then
     echo "$total tests, tous passés."

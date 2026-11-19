@@ -51,4 +51,65 @@ struct MenuDismissalTests {
         NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: app)
         #expect(old == 0 && current == 1)
     }
+
+    @Test("Global clicks use the recorded position after the pointer returns to the panel")
+    func recordedGlobalPosition() throws {
+        _ = NSApplication.shared
+        let pointer = NSEvent.mouseLocation
+        let root = NSWindow(contentRect: NSRect(x: pointer.x - 200, y: pointer.y - 150, width: 400, height: 300),
+                            styleMask: [.borderless], backing: .buffered, defer: false)
+        defer { root.orderOut(nil) }
+        let storage = NSRect(x: root.frame.maxX + 100, y: root.frame.minY, width: 40, height: 24)
+        let battery = storage.offsetBy(dx: 60, dy: 0)
+        var handlers: [(NSEvent) -> Void] = []
+        let monitor = MenuDismissalMonitor(installGlobalMonitor: { _, handler in
+            handlers.append(handler)
+            return nil // No system-wide input is installed or posted by this fixture.
+        })
+        defer { monitor.stop() }
+        var closed = 0
+        monitor.start(window: root, statusRects: { [storage, battery] }, close: { closed += 1 })
+        let handler = try #require(handlers.first)
+        func recordedClick(_ point: NSPoint) throws -> NSEvent {
+            try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        }
+        // The event was outside; the real pointer is now where the panel was
+        // positioned. Invoking the actual registered handler must still close.
+        try handler(recordedClick(NSPoint(x: root.frame.maxX + 300, y: root.frame.maxY + 100)))
+        #expect(closed == 1)
+        // Inside clicks and each actual status icon retain their exclusions,
+        // regardless of the current pointer position.
+        for rect in [root.frame, storage, battery] {
+            try handler(recordedClick(NSPoint(x: rect.midX, y: rect.midY)))
+            #expect(closed == 1)
+        }
+    }
+
+    @Test("Queued global clicks from a stopped presentation cannot close a reopened panel")
+    func delayedGlobalLifecycle() throws {
+        _ = NSApplication.shared
+        let root = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 300, height: 200),
+                            styleMask: [.borderless], backing: .buffered, defer: false)
+        defer { root.orderOut(nil) }
+        var handlers: [(NSEvent) -> Void] = []
+        let monitor = MenuDismissalMonitor(installGlobalMonitor: { _, handler in
+            handlers.append(handler)
+            return nil
+        })
+        defer { monitor.stop() }
+        var old = 0, current = 0
+        monitor.start(window: root, statusRects: { [] }, close: { old += 1 })
+        monitor.start(window: root, statusRects: { [] }, close: { current += 1 })
+        let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: NSPoint(x: 600, y: 500),
+            modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        let oldHandler = try #require(handlers.first), currentHandler = try #require(handlers.last)
+        oldHandler(event)
+        #expect(old == 0 && current == 0)
+        currentHandler(event)
+        #expect(old == 0 && current == 1)
+        monitor.stop()
+        currentHandler(event)
+        #expect(old == 0 && current == 1)
+    }
 }
