@@ -8,6 +8,8 @@ import OustModel
 public struct OverviewView: View {
     @Bindable var model: AppModel
     @State private var review: AnalysisReview?
+    @State private var showsCategories = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(model: AppModel) {
         self.model = model
@@ -26,7 +28,11 @@ public struct OverviewView: View {
                 HeroCard(model: model, volume: volume) { review = model.analysisReview(for: volume) }
                 let phase = model.analysisPhase(for: volume)
                 if phase.hasRun || phase.isRunning {
-                    CategoryGrid(model: model, volume: volume)
+                    DisclosureGroup(isExpanded: $showsCategories) {
+                        CategoryGrid(model: model, volume: volume)
+                    } label: { Text("overview.categories", bundle: .oust).font(Typography.headline) }
+                    .foregroundStyle(Palette.onGradient)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: showsCategories)
                 }
                 // La mesure APFS des snapshots est indépendante du purgeable du volume.
                 if volume.isBoot, model.snapshotEstimate > 1_000_000_000, !model.deletableSnapshots.isEmpty {
@@ -34,6 +40,7 @@ public struct OverviewView: View {
                 }
             }
         }
+        .task(id: model.analyzedVolume?.id) { model.requestOverviewAnalysis() }
         .sheet(item: $review) { AnalysisReviewView(model: model, review: $0) }
     }
 }
@@ -48,7 +55,7 @@ public struct AnalyzeButton: View {
 
     public var body: some View {
         Button {
-            Task { await model.analyze() }
+            Task { await model.analyzeOverview() }
         } label: {
             HStack(spacing: Spacing.small) {
                 if model.analysis.isRunning { ProgressView().controlSize(.small).tint(.white) }
@@ -79,97 +86,57 @@ private struct HeroCard: View {
 
     var body: some View {
         let phase = model.analysisPhase(for: volume)
-        // Ce qui est coché sur ce disque : la barre et la jauge sont les siennes.
         let selected = model.cartTotal(on: volume)
-        GlassCard(padding: Spacing.xLarge) {
-            HStack(alignment: .center, spacing: Spacing.xLarge) {
-                VStack(alignment: .leading, spacing: Spacing.medium) {
+        GlassCard(padding: Spacing.large) {
+            VStack(alignment: .leading, spacing: Spacing.medium) {
+                HStack(spacing: Spacing.small) {
                     Label { Text(verbatim: volume.name) } icon: { Image(systemName: volume.symbol) }
                         .font(Typography.headline)
-                        .foregroundStyle(Palette.onGradient)
-                    if phase.hasRun || phase.isRunning {
-                        HeroSize(selected, caption: "overview.selected_caption")
-                    } else {
-                        Text("overview.welcome", bundle: .oust)
-                            .font(Typography.title)
-                            .foregroundStyle(Palette.onGradient)
-                        Group {
-                            if volume.isBoot {
-                                Text("overview.welcome_detail", bundle: .oust)
-                            } else {
-                                Text(verbatim: L10n.string("overview.volume_welcome_detail", volume.name))
-                            }
-                        }
-                        .font(Typography.body)
-                        .foregroundStyle(Palette.onGradientSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let date = model.analysisDate(for: volume) {
+                        Text(verbatim: Formatters.timestamp(date)).font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
                     }
-                    StorageChart(parts: parts, capacity: volume.capacity, date: model.analysisDate(for: volume),
-                                 showSystemDetails: { showsStorageDetails = true })
-                    Button { showsStorageDetails = true } label: {
-                        Label { Text("storage.details.open", bundle: .oust) } icon: { Image(systemName: "info.circle") }
-                    }
-                    .buttonStyle(.plain)
-                    .font(Typography.caption.weight(.semibold))
-                    .foregroundStyle(Palette.onGradient)
-                    Text(verbatim: L10n.string("storage.breakdown", Formatters.compactBytes(volume.capacity.available),
-                                               Formatters.compactBytes(volume.capacity.purgeable)))
-                        .font(Typography.caption.monospacedDigit()).foregroundStyle(Palette.onGradientSecondary)
-                    Text("storage.explanation", bundle: .oust)
-                        .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: Spacing.medium) {
-                        if !phase.hasRun && !phase.isRunning {
-                            Button { Task { await model.analyze() } } label: {
-                                if volume.isBoot {
-                                    Text("overview.analyze_now", bundle: .oust)
-                                } else {
-                                    Text(verbatim: L10n.string("overview.analyze_volume", volume.name))
-                                }
-                            }
-                            .buttonStyle(PrimaryButtonStyle(section: .overview))
-                            // Une analyse à la fois : celle d'un autre disque tourne peut-être.
-                            .disabled(model.analysis.isRunning)
-                        } else {
-                            if model.analysisReview(for: volume) != nil {
-                                Button(action: showReview) { Text("analysis_review.open", bundle: .oust) }
-                                    .buttonStyle(PrimaryButtonStyle(section: .overview, eclat: true))
-                            }
-                            if !model.cart.isEmpty {
-                                Button { model.section = .cart } label: {
-                                    // Sans montant quand rien ne revient ici (fichiers du cloud
-                                    // restés en ligne) : « Faire le vide · — » faisait erreur.
-                                    Text(verbatim: model.cartTotal > 0
-                                         ? L10n.string("overview.go_clean", Formatters.compactBytes(model.cartTotal))
-                                         : L10n.string("cart.clean_plain"))
-                                }
-                                .buttonStyle(PrimaryButtonStyle(section: .overview, eclat: true))
-                            }
-                            Button { Task { await model.analyze() } } label: {
-                                Text(phase.isRunning ? "overview.analyzing" : "overview.reanalyze", bundle: .oust)
-                            }
-                            .buttonStyle(.plain)
-                            .font(Typography.body.weight(.semibold))
-                            .foregroundStyle(Palette.onGradientSecondary)
-                            .disabled(model.analysis.isRunning)
-                        }
-                        if !volume.isBoot {
-                            Button {
-                                model.explore(volume)
-                                model.section = .explorer
-                            } label: { Text("overview.explore_volume", bundle: .oust) }
-                                .buttonStyle(.plain)
-                                .font(Typography.body.weight(.semibold))
-                                .foregroundStyle(Palette.onGradientSecondary)
-                        }
-                    }
-                    .padding(.top, Spacing.small)
+                    Spacer(minLength: Spacing.small)
+                    Text(verbatim: L10n.string("disks.available", Formatters.compactBytes(volume.capacity.availableForImportantUsage)))
+                        .font(Typography.headline.monospacedDigit())
+                    ContextHelpButton(text: L10n.string("storage.explanation") + "\n\n" + L10n.string("overview.auto_help"))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                DiskGauge(segments: gaugeSegments, cart: 0, capacity: volume.capacity, beat: model.beat)
-                    .frame(width: 174, height: 174)
+                HStack(spacing: Spacing.large) {
+                    StorageChart(parts: parts, capacity: volume.capacity, date: model.analysisDate(for: volume),
+                                 showSystemDetails: { showsStorageDetails = true }, compact: true)
+                        .frame(maxWidth: .infinity)
+                    DiskGauge(segments: gaugeSegments, cart: 0, capacity: volume.capacity, beat: model.beat)
+                        .frame(width: 108, height: 108)
+                }
+                HStack(spacing: Spacing.medium) {
+                    Button { showsStorageDetails = true } label: {
+                        Label { Text("storage.details.open", bundle: .oust) } icon: { Image(systemName: "chart.pie") }
+                    }
+                    .buttonStyle(.plain).font(Typography.caption.weight(.semibold))
+                    if phase.isRunning {
+                        ProgressView().controlSize(.small).tint(.white)
+                        Text("overview.analyzing", bundle: .oust).font(Typography.caption)
+                    }
+                    Spacer(minLength: Spacing.small)
+                    if selected > 0 {
+                        Text(verbatim: L10n.string("overview.go_clean", Formatters.compactBytes(selected)))
+                            .font(Typography.caption.monospacedDigit())
+                    }
+                    if model.analysisReview(for: volume) != nil {
+                        Button(action: showReview) { Text("analysis_review.open", bundle: .oust) }
+                            .buttonStyle(OnGradientButtonStyle())
+                    }
+                    if model.canStopOverviewAnalysis {
+                        Button { model.stopOverviewAnalysis() } label: { Text("overview.stop_analysis", bundle: .oust) }
+                            .buttonStyle(OnGradientButtonStyle())
+                    } else {
+                        Button { Task { await model.analyzeOverview() } } label: {
+                            Text(model.overviewAnalysisInterrupted ? "overview.retry_analysis" : (phase.hasRun ? "overview.reanalyze" : "overview.analyze"), bundle: .oust)
+                        }
+                        .buttonStyle(OnGradientButtonStyle()).disabled(model.analysis.isRunning)
+                    }
+                }
             }
+            .foregroundStyle(Palette.onGradient)
         }
         .task(id: StorageChartKey(volume: volume.id, tree: model.storageTreeIdentifier(for: volume))) {
             let value = await model.storageBreakdown(for: volume)
@@ -191,6 +158,8 @@ private struct StorageChartKey: Hashable {
 private struct CategoryGrid: View {
     let model: AppModel
     let volume: VolumeDescriptor
+    @State private var hovered: AppSection?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let bootTiles: [(ItemCategory, AppSection)] = [
         (.aiAgents, .developer), (.projectArtifacts, .developer), (.simulators, .developer),
@@ -213,39 +182,32 @@ private struct CategoryGrid: View {
         let running = model.analysisPhase(for: volume).isRunning
         let tiles = volume.isBoot ? Self.bootTiles
             : Self.volumeTiles.filter { Self.alwaysShown.contains($0.0) || !model.items(in: [$0.0]).isEmpty }
+        let sections = Array(Set(tiles.map { $0.1 })).sorted { $0.rawValue < $1.rawValue }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: Spacing.medium)], spacing: Spacing.medium) {
-            ForEach(tiles, id: \.0) { category, section in
-                let items = model.items(in: [category])
-                let total = model.total(of: [category], headlineOnly: false)
-                let done = !running || !items.isEmpty
+            ForEach(sections) { section in
+                let categories = Set(tiles.filter { $0.1 == section }.map { $0.0 })
+                let items = model.items(in: categories)
                 Button { model.section = section } label: {
                     VStack(alignment: .leading, spacing: Spacing.small) {
-                        HStack {
-                            Image(systemName: category.symbol)
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 38, height: 38)
-                                .background(Palette.color(for: category).gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            Spacer()
-                            if !done { ProgressView().controlSize(.small).tint(.white) }
+                        Label { Text(LocalizedStringKey(section.localizationKey), bundle: .oust) } icon: {
+                            Image(systemName: section.symbol)
+                        }.font(Typography.headline)
+                        if section != .duplicates {
+                            Text(verbatim: L10n.string("overview.items_count", Formatters.count(items.count)))
+                                .font(Typography.body.monospacedDigit())
                         }
-                        Text(LocalizedStringKey(category.localizationKey), bundle: .oust)
-                            .font(Typography.headline)
-                            .foregroundStyle(Palette.onGradient)
-                        Text(verbatim: Formatters.compactBytes(total))
-                            .font(.system(size: 26, weight: .heavy, design: .rounded).monospacedDigit())
-                            .foregroundStyle(Palette.onGradient)
-                            .contentTransition(.numericText(value: Double(total)))
-                        Text(verbatim: L10n.string("overview.items_count", Formatters.count(items.count)))
-                            .font(Typography.caption)
-                            .foregroundStyle(Palette.onGradientSecondary)
+                        Text(section == .duplicates ? "overview.on_demand" : (running ? "overview.analyzing" : "overview.consultation"), bundle: .oust)
+                            .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
                     }
-                    .padding(Spacing.large)
+                    .foregroundStyle(Palette.onGradient)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+                    .padding(Spacing.large)
+                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: Radius.large))
                 }
                 .buttonStyle(.plain)
-                .animation(.snappy, value: total)
+                .scaleEffect(!reduceMotion && hovered == section ? 1.015 : 1)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: hovered == section)
+                .onHover { hovered = $0 ? section : nil }
             }
         }
     }

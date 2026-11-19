@@ -26,6 +26,7 @@ struct StorageChart: View {
     let capacity: Capacity
     let date: Date?
     var showSystemDetails: (() -> Void)?
+    var compact = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealed = false
 
@@ -49,7 +50,7 @@ struct StorageChart: View {
             .frame(height: 18)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), alignment: .leading)], alignment: .leading,
                       spacing: Spacing.small) {
-                ForEach(parts) { part in
+                ForEach(compact ? Array(parts.prefix(4)) : parts) { part in
                     Group {
                         if part.category == .system, let showSystemDetails {
                             Button(action: showSystemDetails) { legend(part) }
@@ -60,10 +61,10 @@ struct StorageChart: View {
                     .help(Text(verbatim: L10n.string(part.category.localizationKey) + " · " + Formatters.bytes(part.bytes)))
                 }
             }
-            if let date {
+            if !compact, let date {
                 Text(verbatim: L10n.string("storage.based_on_scan", Formatters.timestamp(date)))
                     .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
-            } else {
+            } else if !compact {
                 Text("storage.needs_scan", bundle: .oust)
                     .font(Typography.caption).foregroundStyle(Palette.onGradientSecondary)
             }

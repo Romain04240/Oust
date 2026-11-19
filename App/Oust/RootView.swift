@@ -120,9 +120,9 @@ private struct SectionEntrance: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(appeared || reduceMotion ? 1 : 0)
-            .offset(y: appeared || reduceMotion ? 0 : 5)
+            .offset(x: appeared || reduceMotion ? 0 : 18, y: appeared || reduceMotion ? 0 : 3)
             .onAppear {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { appeared = true }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { appeared = true }
             }
     }
 }

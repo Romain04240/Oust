@@ -93,7 +93,9 @@ public final class AppModel {
 
     // MARK: Analyse par règles
 
-    public internal(set) var analysis: Phase = .idle
+    public internal(set) var analysis: Phase = .idle {
+        didSet { if oldValue.isRunning && !analysis.isRunning { drainOverviewAnalysisRequest() } }
+    }
     public internal(set) var items: [String: CleanupItem] = [:]
     @ObservationIgnored private var analysisLocations: [String: AnalyzedItemLocation] = [:]
     @ObservationIgnored private var backupAnalysisTokens: [String: UUID] = [:]
@@ -223,6 +225,12 @@ public final class AppModel {
     /// `start()` ne se fait qu'une fois : la fenêtre, la barre de menus et une
     /// règle planifiée peuvent chacune le demander.
     private var started = false
+    @ObservationIgnored var startupTask: Task<Void, Never>?
+    @ObservationIgnored var bootAnalysisRequest: BootAnalysisRequest?
+    @ObservationIgnored var overviewAnalysisRequested = false
+    @ObservationIgnored var overviewAnalysisStarted = false
+    @ObservationIgnored var overviewAnalysisTask: Task<Void, Never>?
+    public internal(set) var overviewAnalysisInterrupted = false
 
     public convenience init(home: URL = FileManager.default.homeDirectoryForCurrentUser, defaults: UserDefaults = .standard) {
         self.init(home: home, defaults: defaults, disk: DiskIndexModel())
@@ -261,9 +269,21 @@ public final class AppModel {
     // MARK: - Démarrage
 
     public func start() async {
+        if let startupTask { await startupTask.value; return }
+        guard !started else { return }
+        let task = Self.backgroundStorageTask { [self] in
+            defer { startupTask = nil }
+            await prepareStartup()
+        }
+        startupTask = task
+        await task.value
+    }
+
+    private func prepareStartup() async {
         guard !started else { return }
         started = true
-        await refreshVolumeInventory(waitForOtherVolumes: true)
+        // Le disque local devient utilisable sans attendre un partage distant.
+        await refreshVolumeInventory(waitForOtherVolumes: false)
         // Un composant changé est signalé à l'utilisateur ; aucune opération
         // administrateur en cours dans une autre copie n'est interrompue.
         Task { await PrivilegedHelper.synchronizeApprovedInstallation() }
@@ -328,6 +348,7 @@ public final class AppModel {
         } else {
             volumes.insert(startup, at: 0)
         }
+        drainOverviewAnalysisRequest()
     }
 
     @discardableResult
@@ -471,16 +492,30 @@ public final class AppModel {
             await analyzeOtherVolume(volume)
             return
         }
-        analysis = .running
-        let reviewVolume = bootVolume
-        analyzingVolumeID = reviewVolume?.id
-        let reviewLocation = reviewVolume.flatMap { AnalysisReview.Location($0.scanRoot) }
-        if let reviewVolume { analysisReviews.removeValue(forKey: reviewVolume.id) }
+        guard let request = reserveBootAnalysis(bootVolume, preselect: true) else { return }
+        await runBootAnalysis(request)
+    }
+
+    func runBootAnalysis(_ request: BootAnalysisRequest, context supplied: RuleContext? = nil,
+                         finders: [FinderKind] = FinderKind.allCases) async {
+        var completed = false
+        defer {
+            if bootAnalysisRequest?.id == request.id {
+                bootAnalysisRequest = nil
+                analyzingVolumeID = nil
+                if !completed { overviewAnalysisInterrupted = true }
+                analysis = completed ? .done(Date()) : .idle
+            }
+        }
+        guard !Task.isCancelled, let reviewVolume = request.volume,
+              let reviewLocation = await checkStorageIO({ AnalysisReview.Location(reviewVolume.scanRoot) }) ?? nil,
+              await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
+        analysisReviews.removeValue(forKey: reviewVolume.id)
         var reviewIDs = Set<String>()
         finishedFinders = []
         // On ne coche d'office que la première fois pour ce disque : ce qui est
         // coché sur un disque externe ne compte pas.
-        let firstTime = !cart.contains { items[$0].map { isOnBootVolume($0) } ?? false }
+        let firstTime = request.preselect && !cart.contains { items[$0].map { isOnBootVolume($0) } ?? false }
         // Les photos, les fichiers des nuages et les images similaires (section
         // Doublons) ne viennent pas des règles : ceux de la corbeille y restent.
         // Les éléments des autres disques restent aussi : leur analyse est à part.
@@ -492,30 +527,36 @@ public final class AppModel {
         stopReadOnlyRevalidationIfEmpty()
         // Les sections qui suivent l'arbre de l'Explorateur (gros fichiers)
         // reviennent au disque de démarrage.
-        if let boot = bootVolume, treeVolume?.isBoot == false, !explorer.isRunning { explore(boot) }
-        var context = RuleContext(home: home, projectRoots: preferences.projectRoots,
+        if request.preselect, let boot = bootVolume, treeVolume?.isBoot == false, !explorer.isRunning { explore(boot) }
+        var context = supplied ?? RuleContext(home: home, projectRoots: preferences.projectRoots,
                                   historyRetentionDays: preferences.historyRetentionDays,
                                   compressionAgeDays: preferences.compressionAgeMonths * 30)
         // Une seule passe : les chercheurs démarrent tout de suite, et lisent les
         // tailles dans l'arbre partagé (rafraîchi par FSEvents) au lieu de
         // remesurer chaque élément sur le disque.
-        let tree = disk.treeProvider()
+        // La consultation automatique n'attend pas un cache ou un index global.
+        let tree = request.preselect ? disk.treeProvider() : nil
         context.tree = tree
+        let measurer: Measurer = tree.map(Measurer.tree) ?? .disk
         let policy = PreselectionPolicy(recencyDays: preferences.recencyDays)
 
-        refreshBrowsers()
-        for await batch in RuleEngine.run(context, measurer: .tree(tree)) {
+        if supplied == nil { refreshBrowsers() }
+        for await batch in RuleEngine.run(context, finders: finders, measurer: measurer) {
+            guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
             recordAnalyzedBatch(batch, preselect: firstTime, policy: policy)
             reviewIDs.formUnion(batch.items.map(\.id))
             finishedFinders.insert(batch.finder)
         }
+        guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
         cart = cart.filter { items[$0].map(canSelectForCleanup) == true }
-        await refreshSnapshots()
-        refreshVolumes()
-        if let reviewVolume { saveAnalysisReview(for: reviewVolume, location: reviewLocation, ids: reviewIDs) }
-        if let boot = bootVolume { volumeAnalysisDates[boot.id] = Date() }
-        analyzingVolumeID = nil
-        analysis = .done(Date())
+        // Le démarrage gère les snapshots séparément ; ne pas attendre leur
+        // mesure pour publier les résultats de la consultation automatique.
+        if request.preselect { await refreshSnapshots() }
+        guard await isCurrentBootAnalysis(request, location: reviewLocation) else { return }
+        if supplied == nil { refreshVolumes() }
+        saveAnalysisReview(for: reviewVolume, location: reviewLocation, ids: reviewIDs, locationWasVerified: true)
+        volumeAnalysisDates[reviewVolume.id] = Date()
+        completed = true
     }
 
     public func refreshBrowsers() {
