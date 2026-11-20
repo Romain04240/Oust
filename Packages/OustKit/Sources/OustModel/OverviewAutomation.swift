@@ -12,6 +12,7 @@ struct BootAnalysisRequest: Sendable {
     let id = UUID()
     let volume: VolumeDescriptor?
     let preselect: Bool
+    let qualificationRevision: UInt64
     let selectionRevision: UInt64
 }
 
@@ -24,10 +25,10 @@ extension AppModel {
     }
 
     func reserveBootAnalysis(_ volume: VolumeDescriptor?, preselect: Bool) -> BootAnalysisRequest? {
-        guard !analysis.isRunning, overviewAnalysisTask == nil, bootAnalysisRequest == nil, volumeAnalysisAttempt == nil,
+        guard !startupReadUnverified, !analysis.isRunning, overviewAnalysisTask == nil, bootAnalysisRequest == nil, volumeAnalysisAttempt == nil,
               let volume, volume.isBoot, volume.isInternal, !volume.isRemovable,
               volumes.contains(where: { $0.id == volume.id && $0.mountIdentity == volume.mountIdentity }) else { return nil }
-        let request = BootAnalysisRequest(volume: volume, preselect: preselect, selectionRevision: cartSelectionRevision)
+        let request = BootAnalysisRequest(volume: volume, preselect: preselect, qualificationRevision: startupQualificationRevision, selectionRevision: cartSelectionRevision)
         bootAnalysisRequest = request
         analyzingVolumeID = volume.id
         overviewAnalysisInterrupted = false
@@ -87,12 +88,19 @@ extension AppModel {
     public var canStopOverviewAnalysis: Bool { overviewAnalysisTask != nil && bootAnalysisRequest != nil && analysis.isRunning }
 
     func isCurrentBootAnalysis(_ request: BootAnalysisRequest, location: AnalysisReview.Location) async -> Bool {
-        guard !Task.isCancelled, bootAnalysisRequest?.id == request.id,
+        guard !Task.isCancelled, !startupReadUnverified,
+              request.qualificationRevision == startupQualificationRevision,
+              bootAnalysisRequest?.id == request.id,
               let volume = request.volume, let current = bootVolume,
               current.id == volume.id, current.mountIdentity == volume.mountIdentity,
               volumes.contains(where: { $0.id == volume.id && $0.mountIdentity == volume.mountIdentity }) else { return false }
-        let matches = await checkStorageIO { location.matches(volume.scanRoot) }
-        return matches == true && !Task.isCancelled && bootAnalysisRequest?.id == request.id
+        let matches = await checkStorageIO {
+            // Legacy unqualified diagnostic reads cannot create a guide stamp.
+            (volume.mountIdentity == nil || location.mountIdentity == volume.mountIdentity)
+                && location.matches(volume.scanRoot)
+        }
+        return matches == true && !Task.isCancelled && !startupReadUnverified
+            && request.qualificationRevision == startupQualificationRevision && bootAnalysisRequest?.id == request.id
             && bootVolume?.id == volume.id && bootVolume?.mountIdentity == volume.mountIdentity
             && volumes.contains(where: { $0.id == volume.id && $0.mountIdentity == volume.mountIdentity })
     }

@@ -98,6 +98,7 @@ public final class WatchModel {
 
     public private(set) var batteryDevicePreferences: [BatteryDevicePreference] = []
     @ObservationIgnored private var bootPublishedAt: ContinuousClock.Instant?
+    @ObservationIgnored private var bootCapacityPublishedAt: ContinuousClock.Instant?
     @ObservationIgnored private var deviceAlerts = DeviceBatteryAlertTracker()
     @ObservationIgnored private var deviceRead: Task<Void, Never>?
     @ObservationIgnored private var deviceReadCycle = 0
@@ -403,20 +404,48 @@ public final class WatchModel {
     func updateBoot(_ fresh: VolumeDescriptor?, measuredAt: ContinuousClock.Instant = .now) -> Bool {
         if let bootPublishedAt, measuredAt <= bootPublishedAt { return false }
         bootPublishedAt = measuredAt
-        if fresh != boot { boot = fresh }
+        var accepted = fresh
+        if var fresh, let previous = boot, sameBootTarget(previous, fresh),
+           let capacityDate = bootCapacityPublishedAt, capacityDate > measuredAt {
+            fresh.capacity = previous.capacity
+            accepted = fresh
+        } else { bootCapacityPublishedAt = measuredAt }
+        if accepted != boot { boot = accepted }
+        // All full reads, including monitor failures, publish qualification here.
+        app?.startupQualificationChanged(accepted)
+        return true
+    }
+
+    private func sameBootTarget(_ lhs: VolumeDescriptor, _ rhs: VolumeDescriptor) -> Bool {
+        lhs.id == rhs.id && lhs.scanRoot == rhs.scanRoot && lhs.mountIdentity == rhs.mountIdentity
+            && lhs.isBoot == rhs.isBoot && lhs.isInternal == rhs.isInternal && lhs.isRemovable == rhs.isRemovable
+    }
+
+    @discardableResult
+    func updateBootCapacity(_ capacity: Capacity, for target: VolumeDescriptor,
+                            measuredAt: ContinuousClock.Instant) -> Bool {
+        guard var current = boot, sameBootTarget(current, target),
+              bootPublishedAt.map({ measuredAt > $0 }) != false,
+              bootCapacityPublishedAt.map({ measuredAt > $0 }) != false else { return false }
+        current.capacity = capacity
+        bootCapacityPublishedAt = measuredAt
+        boot = current
         return true
     }
 
     /// Relit le disque tout de suite (le panneau de la barre de menus s'ouvre).
     public func refreshDisk() async { await refreshDisk(read: VolumeService.bootVolume) }
 
-    func refreshDisk(read: @escaping @Sendable () async -> VolumeDescriptor?) async {
+    enum DiskRefreshResult { case published, unavailable, superseded }
+
+    @discardableResult
+    func refreshDisk(read: @escaping @Sendable () async -> VolumeDescriptor?) async -> DiskRefreshResult {
         let sample = await Task.detached(priority: .utility) {
             let measuredAt = ContinuousClock.now
             return (await read(), measuredAt)
         }.value
-        guard !Task.isCancelled, let fresh = sample.0 else { return }
-        updateBoot(fresh, measuredAt: sample.1)
+        guard !Task.isCancelled, updateBoot(sample.0, measuredAt: sample.1) else { return .superseded }
+        return sample.0 == nil ? .unavailable : .published
     }
 
     /// Le disque de démarrage et les disques branchés (`WatchedVolumes`), chacun
@@ -492,8 +521,8 @@ public final class WatchModel {
 
     func showAlertPreview(read: () -> VolumeDescriptor?) {
         let measuredAt = ContinuousClock.now
-        guard let fresh = read() else { return }
-        updateBoot(fresh, measuredAt: measuredAt)
+        let sample = read()
+        guard updateBoot(sample, measuredAt: measuredAt), let fresh = sample else { return }
         let displayed = boot ?? fresh
         onLowDisk?(LowDiskAlert(volumeName: displayed.name, capacity: displayed.capacity, safeTotal: safeTotal))
     }

@@ -79,7 +79,10 @@ public final class AppModel {
     // MARK: Volumes
 
     public internal(set) var volumes: [VolumeDescriptor] = [] {
-        didSet { invalidateStaleGuidedReview() }
+        didSet {
+            invalidateReplacedVolumeAnalyses()
+            invalidateStaleGuidedReview()
+        }
     }
     @ObservationIgnored private var volumeRead: Task<Bool, Never>?
     @ObservationIgnored private var volumeRevision = 0
@@ -143,6 +146,9 @@ public final class AppModel {
     public internal(set) var volumeAnalysisDates: [String: Date] = [:] {
         didSet { invalidateStaleGuidedReview() }
     }
+    var startupReadUnverified = false
+    var startupQualificationRevision: UInt64 = 0
+    var completedVolumeAnalyses: [String: CompletedVolumeAnalysis] = [:]
     var analysisReviews: [String: AnalysisReview] = [:]
     /// Le disque dont l'analyse par règles tourne en ce moment.
     public internal(set) var analyzingVolumeID: String?
@@ -381,13 +387,34 @@ public final class AppModel {
 
     func refreshStartupVolume(read: @escaping @Sendable () async -> VolumeDescriptor? = VolumeService.bootVolume) async {
         await watch.refreshDisk(read: read)
-        guard !Task.isCancelled, let startup = watch.boot else { return }
+        guard !Task.isCancelled else { return }
+        drainOverviewAnalysisRequest()
+    }
+
+    /// Called synchronously by the common full-read publisher, never by capacity updates.
+    func startupQualificationChanged(_ startup: VolumeDescriptor?) {
+        guard let startup else {
+            startupReadUnverified = true
+            startupQualificationRevision &+= 1
+            for stamp in completedVolumeAnalyses.values.filter({ $0.volume.isBoot }) {
+                completedVolumeAnalyses.removeValue(forKey: stamp.volume.id)
+                volumeAnalysisDates.removeValue(forKey: stamp.volume.id)
+            }
+            invalidateStaleGuidedReview()
+            return
+        }
+        if let previous = volumes.first(where: \.isBoot),
+           previous.id != startup.id || previous.scanRoot != startup.scanRoot
+            || previous.mountIdentity != startup.mountIdentity || previous.isInternal != startup.isInternal
+            || previous.isRemovable != startup.isRemovable || previous.isBoot != startup.isBoot {
+            startupQualificationRevision &+= 1
+        }
+        startupReadUnverified = false
         if let index = volumes.firstIndex(where: \.isBoot) {
             if volumes[index] != startup { volumes[index] = startup }
         } else {
             volumes.insert(startup, at: 0)
         }
-        drainOverviewAnalysisRequest()
     }
 
     @discardableResult
@@ -642,7 +669,7 @@ public final class AppModel {
         finishedFinders = findersDone
         cart = cart.filter { items[$0].map(preservesBrowserIntent) == true }
         saveAnalysisReview(for: reviewVolume, location: reviewLocation, ids: reviewIDs, locationWasVerified: true)
-        volumeAnalysisDates[reviewVolume.id] = Date()
+        recordVolumeAnalysis(for: reviewVolume)
         completed = true
         if supplied == nil { refreshVolumes() }
     }
@@ -1338,21 +1365,27 @@ public final class AppModel {
 
     /// Suit la reprise d'espace par APFS après le nettoyage (SPEC §6.2, étape 5).
     private func watchReclaim() {
-        guard let boot = bootVolume else { return }
+        guard let boot = watch.boot, !startupReadUnverified else { return }
+        let qualification = startupQualificationRevision
         Task {
             for await sample in VolumeService.watchReclaimSamples(of: boot.scanRoot) {
-                self.publishReclaimedCapacity(sample.capacity, measuredAt: sample.measuredAt)
+                self.publishReclaimedCapacity(sample.capacity, measuredAt: sample.measuredAt,
+                                              for: boot, qualificationRevision: qualification)
             }
             await self.refreshVolumesInBackground()
         }
     }
 
-    func publishReclaimedCapacity(_ capacity: Capacity, measuredAt: ContinuousClock.Instant = .now) {
-        guard var latest = bootVolume else { return }
-        latest.capacity = capacity
-        guard watch.updateBoot(latest, measuredAt: measuredAt) else { return }
+    func publishReclaimedCapacity(_ capacity: Capacity, measuredAt: ContinuousClock.Instant = .now,
+                                  for target: VolumeDescriptor? = nil, qualificationRevision: UInt64? = nil) {
+        guard !startupReadUnverified, let current = watch.boot,
+              qualificationRevision == nil || qualificationRevision == startupQualificationRevision,
+              watch.updateBootCapacity(capacity, for: target ?? current, measuredAt: measuredAt) else { return }
         reclaimed = capacity
-        if let index = volumes.firstIndex(where: \.isBoot) { volumes[index].capacity = capacity }
+        if let index = volumes.firstIndex(where: \.isBoot),
+           volumes[index].id == current.id, volumes[index].mountIdentity == current.mountIdentity {
+            volumes[index].capacity = capacity
+        }
     }
 
     // MARK: - Règles planifiées

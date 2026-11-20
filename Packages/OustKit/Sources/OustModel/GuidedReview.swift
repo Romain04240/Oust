@@ -23,10 +23,57 @@ public struct GuidedReviewSession: Sendable, Equatable {
     let sourceDate: Date
 }
 
+/// A date alone cannot identify the volume that produced a result.
+struct CompletedVolumeAnalysis {
+    let volume: VolumeDescriptor
+    let date: Date
+}
+
+public enum GuidedReviewAvailability: Sendable, Equatable {
+    case ready, active, paused, analysisRequired, analyzing, cleaning, startupRequired, unverifiedVolume
+
+    public var localizationKey: String {
+        switch self {
+        case .ready: "guided_review.status.ready"
+        case .active: "guided_review.status.active"
+        case .paused: "guided_review.status.paused"
+        case .analysisRequired: "guided_review.status.analysis_required"
+        case .analyzing: "guided_review.status.analyzing"
+        case .cleaning: "guided_review.status.cleaning"
+        case .startupRequired: "guided_review.status.startup_required"
+        case .unverifiedVolume: "guided_review.status.unverified_volume"
+        }
+    }
+}
+
 extension AppModel {
     public var canStartGuidedReview: Bool {
         guidedReview == nil && section == .overview && !isSearching
             && guidedReviewSource() != nil
+    }
+
+    /// The permanent entry can be used from any ordinary page. Admission
+    /// still checks the analyzed mounted volume before changing navigation.
+    public var canStartGuidedReviewFromSidebar: Bool {
+        guidedReviewAvailability == .ready
+    }
+
+    public var guidedReviewAvailability: GuidedReviewAvailability {
+        if let session = guidedReview { return session.stage == .paused ? .paused : .active }
+        if cleaning == .running { return .cleaning }
+        if analysis.isRunning { return .analyzing }
+        guard let volume = analyzedVolume else { return .unverifiedVolume }
+        guard volume.isBoot else { return .startupRequired }
+        guard !startupReadUnverified, volume.isInternal, !volume.isRemovable, volume.mountIdentity != nil,
+              volumes.contains(where: { sameGuidedReviewVolume($0, volume) }) else { return .unverifiedVolume }
+        return guidedReviewSource() == nil ? .analysisRequired : .ready
+    }
+
+    public func startGuidedReviewFromSidebar() {
+        guard canStartGuidedReviewFromSidebar else { return }
+        searchText = ""
+        section = .overview
+        startGuidedReview()
     }
 
     /// L'Explorateur a son propre sélecteur, indépendant de celui de la Vue
@@ -134,16 +181,41 @@ extension AppModel {
     }
 
     private func guidedReviewSource() -> (VolumeDescriptor, Date)? {
-        guard !analysis.isRunning, cleaning != .running,
+        guard !startupReadUnverified, !analysis.isRunning, cleaning != .running,
               let volume = analyzedVolume, volume.isBoot, volume.isInternal, !volume.isRemovable,
-              let date = volumeAnalysisDates[volume.id],
+              volume.mountIdentity != nil,
+              let stamp = completedVolumeAnalyses[volume.id],
+              volumeAnalysisDates[volume.id] == stamp.date,
+              sameGuidedReviewVolume(stamp.volume, volume),
               volumes.contains(where: { sameGuidedReviewVolume($0, volume) }) else { return nil }
-        return (volume, date)
+        return (volume, stamp.date)
     }
 
     private func guidedReviewIsCurrent(_ session: GuidedReviewSession) -> Bool {
         guard let (volume, date) = guidedReviewSource() else { return false }
         return date == session.sourceDate && sameGuidedReviewVolume(volume, session.volume)
+    }
+
+    /// Called only when a collection is published, with its captured target.
+    /// Unknown identities can still show diagnostic results, never admit a guide.
+    func recordVolumeAnalysis(for volume: VolumeDescriptor, date: Date = Date()) {
+        if volume.mountIdentity != nil,
+           volumes.contains(where: { sameGuidedReviewVolume($0, volume) }) {
+            completedVolumeAnalyses[volume.id] = CompletedVolumeAnalysis(volume: volume, date: date)
+        } else {
+            completedVolumeAnalyses.removeValue(forKey: volume.id)
+        }
+        volumeAnalysisDates[volume.id] = date
+    }
+
+    func invalidateReplacedVolumeAnalyses() {
+        let stale = completedVolumeAnalyses.filter { _, stamp in
+            !volumes.contains(where: { sameGuidedReviewVolume($0, stamp.volume) })
+        }.map(\.key)
+        for id in stale {
+            completedVolumeAnalyses.removeValue(forKey: id)
+            volumeAnalysisDates.removeValue(forKey: id)
+        }
     }
 
     private func sameGuidedReviewVolume(_ lhs: VolumeDescriptor, _ rhs: VolumeDescriptor) -> Bool {

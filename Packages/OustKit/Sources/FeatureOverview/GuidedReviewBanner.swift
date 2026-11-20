@@ -13,45 +13,29 @@ public struct GuidedReviewBanner: View {
     public init(model: AppModel) { self.model = model }
 
     public var body: some View {
-        if let session = model.guidedReview,
-           session.stage != .offering || (model.section == .overview && !model.isSearching) {
-            GlassCard(padding: Spacing.medium) {
-                VStack(alignment: .leading, spacing: Spacing.small) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: Spacing.large) {
-                            heading(for: session).fixedSize(horizontal: true, vertical: false)
-                            Spacer(minLength: Spacing.small)
-                            actions(for: session).fixedSize()
-                        }
-                        VStack(alignment: .leading, spacing: Spacing.small) {
-                            heading(for: session)
-                            actions(for: session)
-                        }
+        if let session = model.guidedReview, session.stage != .paused, !model.isSearching {
+            VStack(alignment: .leading, spacing: Spacing.small) {
+                HStack(spacing: Spacing.medium) {
+                    heading(for: session)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ContextHelpButton(text: explanation(for: session))
+                        .foregroundStyle(model.guidedReviewNeedsStartupExplorer ? Color.orange : Palette.onGradient)
+                        .accessibilityValue(Text(model.guidedReviewNeedsStartupExplorer
+                            ? "guided_review.startup_explorer_required" : "guided_review.safety", bundle: .oust))
+                    actions(for: session)
+                    Button { model.endGuidedReview(token: session.token) } label: {
+                        Image(systemName: "xmark")
                     }
-                    Text(LocalizedStringKey(explanationKey(for: session)), bundle: .oust)
-                        .font(Typography.body)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if model.guidedReviewNeedsStartupExplorer {
-                        Label { Text("guided_review.startup_explorer_required", bundle: .oust) } icon: {
-                            Image(systemName: "info.circle")
-                        }
-                        .font(Typography.body)
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack(alignment: .center, spacing: Spacing.small) {
-                        Text("guided_review.safety", bundle: .oust)
-                            .font(Typography.caption)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                    }
-                    progress(for: session)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("guided_review.close", bundle: .oust))
                 }
-                .foregroundStyle(Palette.onGradient)
+                progress(for: session)
             }
-            .background(Palette.colors(for: .overview).deep, in: RoundedRectangle(cornerRadius: Radius.card))
+            .frame(height: 64)
             .padding(.horizontal, Spacing.large)
-            .padding(.top, Spacing.small)
-            .padding(.bottom, Spacing.small)
+            .padding(.vertical, Spacing.small)
+            .foregroundStyle(Palette.onGradient)
+            .background(Palette.colors(for: .overview).deep)
             .environment(\.colorScheme, .dark)
         }
     }
@@ -63,7 +47,8 @@ public struct GuidedReviewBanner: View {
                 Text("guided_review.title", bundle: .oust).font(Typography.caption)
                 Text(LocalizedStringKey(session.step.localizationKey), bundle: .oust)
                     .font(Typography.headline)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .help(Text(LocalizedStringKey(session.step.localizationKey), bundle: .oust))
                 Text(verbatim: L10n.string("guided_review.progress", Formatters.count(session.completedCount),
                                            Formatters.count(GuidedReviewSession.steps.count)))
                     .font(Typography.caption.monospacedDigit())
@@ -122,6 +107,12 @@ public struct GuidedReviewBanner: View {
         .accessibilityHidden(true)
     }
 
+    private func explanation(for session: GuidedReviewSession) -> String {
+        let warning = model.guidedReviewNeedsStartupExplorer
+            ? L10n.string("guided_review.startup_explorer_required") + "\n\n" : ""
+        return warning + L10n.string(explanationKey(for: session)) + "\n\n" + L10n.string("guided_review.safety")
+    }
+
     private func explanationKey(for session: GuidedReviewSession) -> String {
         switch session.stage {
         case .offering: "guided_review.detail." + session.step.rawValue
@@ -131,44 +122,50 @@ public struct GuidedReviewBanner: View {
     }
 }
 
-/// L’entrée du parcours reste distincte des mesures et des commandes du disque.
-struct GuidedReviewStartCard: View {
+/// A permanent, non-scrolling entry; it does not select cleanup items.
+public struct GuidedReviewLauncher: View {
     let model: AppModel
+    public init(model: AppModel) { self.model = model }
 
-    var body: some View {
-        GlassCard {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Spacing.large) {
-                    introduction.frame(minWidth: 250)
-                    Spacer(minLength: Spacing.small)
-                    startButton.fixedSize()
+    public var body: some View {
+        let session = model.guidedReview
+        let paused = session?.stage == .paused
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Button {
+                    if let session, paused { model.resumeGuidedReview(token: session.token) }
+                    else { model.startGuidedReviewFromSidebar() }
+                } label: {
+                    Label {
+                        Text(paused ? "guided_review.resume" : (session == nil ? "guided_review.start" : "guided_review.title"), bundle: .oust)
+                            .font(Typography.body.weight(.semibold))
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } icon: { Image(systemName: "arrow.triangle.branch") }
+                    .frame(height: 36)
                 }
-                VStack(alignment: .leading, spacing: Spacing.medium) {
-                    introduction
-                    startButton
+                .buttonStyle(OnGradientButtonStyle())
+                .disabled(!paused && !model.canStartGuidedReviewFromSidebar)
+                // This place is reserved even without a session: no width jump.
+                Group {
+                    if let session {
+                        Button { model.endGuidedReview(token: session.token) } label: {
+                            Image(systemName: "xmark.circle")
+                                .frame(width: 24, height: 36)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("guided_review.close", bundle: .oust))
+                        .help(Text("guided_review.close", bundle: .oust))
+                    } else { Color.clear.frame(width: 24, height: 36).accessibilityHidden(true) }
                 }
             }
-            .foregroundStyle(Palette.onGradient)
+            Text(LocalizedStringKey(model.guidedReviewAvailability.localizationKey), bundle: .oust)
+                .font(Typography.caption)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .topLeading)
         }
-    }
+        .frame(height: 84)
 
-    private var introduction: some View {
-        HStack(alignment: .top, spacing: Spacing.medium) {
-            GuidedReviewIcon(section: .overview)
-            VStack(alignment: .leading, spacing: Spacing.tight) {
-                Text("guided_review.start_title", bundle: .oust).font(Typography.headline)
-                Text("guided_review.start_detail", bundle: .oust)
-                    .font(Typography.body)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private var startButton: some View {
-        Button { model.startGuidedReview() } label: {
-            Label { Text("guided_review.start", bundle: .oust) } icon: { Image(systemName: "arrow.right") }
-        }
-        .buttonStyle(OnGradientButtonStyle())
     }
 }
 

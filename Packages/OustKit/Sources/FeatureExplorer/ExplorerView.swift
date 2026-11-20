@@ -34,8 +34,11 @@ public struct ExplorerView: View {
                 }
                 switch model.explorer {
                 case .idle:
-                    VolumeChooser(model: model)
-                    Spacer()
+                    ScrollView {
+                        VolumeChooser(model: model)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("explorer.volume_chooser")
                 case .running:
                     ScanningCard(model: model)
                     Spacer()

@@ -36,17 +36,29 @@ package struct AnalysisReview: Identifiable, Sendable {
     struct Location: Sendable {
         let url: URL
         let facts: FileFacts
+        let filesystemID: [Int32]
+
+        var mountIdentity: VolumeMountIdentity {
+            VolumeMountIdentity(device: facts.device, inode: facts.inode,
+                createdSeconds: facts.created.tv_sec, createdNanoseconds: facts.created.tv_nsec,
+                filesystemID: filesystemID)
+        }
 
         init?(_ url: URL) {
             guard let resolved = PathGuard.withResolvedParent(url),
                   let facts = FileFacts.of(resolved.path),
                   facts.mode & S_IFMT == S_IFDIR, !facts.isDataless else { return nil }
+            var info = statfs()
+            guard statfs(resolved.path, &info) == 0 else { return nil }
             self.url = resolved
             self.facts = facts
+            self.filesystemID = MountedFileSystems.identity(of: info)
+            guard let after = FileFacts.of(resolved.path), identifies(after) else { return nil }
         }
 
         func matches(_ url: URL) -> Bool {
-            guard let current = Location(url), current.url == self.url else { return false }
+            guard let current = Location(url), current.url == self.url,
+                  current.filesystemID == filesystemID else { return false }
             return identifies(current.facts)
         }
 

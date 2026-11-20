@@ -43,11 +43,28 @@ public enum VolumeService {
 
     /// Le disque de démarrage.
     public static func bootVolume() -> VolumeDescriptor? {
-        let root = URL(fileURLWithPath: "/")
-        let name = (try? root.resourceValues(forKeys: [.volumeLocalizedNameKey]))?.volumeLocalizedName ?? "Macintosh HD"
-        guard let capacity = capacity(of: bootDataRoot) ?? capacity(of: root) else { return nil }
-        return VolumeDescriptor(name: name, mountURL: root, scanRoot: bootDataRoot, isBoot: true,
-                                isInternal: true, isRemovable: false, capacity: capacity)
+        let keys: Set<URLResourceKey> = [.volumeLocalizedNameKey, .volumeIsInternalKey,
+            .volumeIsRemovableKey, .volumeIsEjectableKey, .volumeIsReadOnlyKey]
+        return stableMount(at: bootDataRoot) { identity in
+            guard let values = try? bootDataRoot.resourceValues(forKeys: keys),
+                  let capacity = capacity(of: bootDataRoot) else { return nil }
+            let name = (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeLocalizedNameKey]))?.volumeLocalizedName
+            return startupDescriptor(name: name ?? values.volumeLocalizedName ?? "Macintosh HD", capacity: capacity,
+                identity: identity, isInternal: values.volumeIsInternal,
+                isRemovable: values.volumeIsRemovable, isEjectable: values.volumeIsEjectable,
+                isReadOnly: values.volumeIsReadOnly)
+        }
+    }
+
+    /// Unknown physical properties are not evidence of an internal fixed disk.
+    package static func startupDescriptor(name: String, capacity: Capacity, identity: VolumeMountIdentity,
+        isInternal: Bool?, isRemovable: Bool?, isEjectable: Bool?, isReadOnly: Bool?) -> VolumeDescriptor {
+        var volume = VolumeDescriptor(name: name, mountURL: URL(fileURLWithPath: "/"), scanRoot: bootDataRoot,
+            isBoot: true, isInternal: isInternal == true,
+            isRemovable: isRemovable != false || isEjectable != false, capacity: capacity)
+        volume.mountIdentity = identity
+        volume.mountedReadOnly = isReadOnly
+        return volume
     }
 
     /// Tous les volumes qu'un humain reconnaîtrait : le disque de démarrage, puis

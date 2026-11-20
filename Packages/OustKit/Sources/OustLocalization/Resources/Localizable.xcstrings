@@ -1,6 +1,160 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "guided_review.status.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prêt · aucun choix automatique"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready · nothing selected automatically"
+          }
+        }
+      }
+    },
+    "guided_review.status.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parcours en cours"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review in progress"
+          }
+        }
+      }
+    },
+    "guided_review.status.paused": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En pause · reprendre ou fermer"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused · resume or close"
+          }
+        }
+      }
+    },
+    "guided_review.status.analysis_required": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analyse nécessaire"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analysis required"
+          }
+        }
+      }
+    },
+    "guided_review.status.analyzing": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analyse en cours"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Analysis in progress"
+          }
+        }
+      }
+    },
+    "guided_review.status.cleaning": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entretien en cours"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintenance in progress"
+          }
+        }
+      }
+    },
+    "guided_review.status.startup_required": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir le disque de démarrage"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the startup disk"
+          }
+        }
+      }
+    },
+    "guided_review.status.unverified_volume": {
+      "extractionState": "manual",
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disque non vérifié"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disk not verified"
+          }
+        }
+      }
+    }
+,
+    "guided_review.unavailable": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disponible après une analyse du disque de démarrage. Aucune sélection automatique."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available after analyzing the startup disk. Nothing is selected automatically."
+          }
+        }
+      }
+    }
+,
     "system.login_inventory_count": {
       "extractionState": "manual",
       "localizations": {

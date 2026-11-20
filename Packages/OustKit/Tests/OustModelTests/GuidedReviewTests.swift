@@ -1,6 +1,9 @@
+import Darwin
 import Foundation
 import OustCore
 import OustScan
+import OustRules
+import OustSafety
 import Testing
 @testable import OustModel
 
@@ -26,14 +29,14 @@ struct GuidedReviewTests {
             let capacity = Capacity(total: 1_000_000, available: 400_000, availableForImportantUsage: 500_000)
             var local = VolumeDescriptor(name: "Local", mountURL: home, scanRoot: home, isBoot: true,
                 isInternal: true, isRemovable: false, capacity: capacity)
-            local.mountIdentity = VolumeMountIdentity(device: 7, inode: 101, createdSeconds: 1, createdNanoseconds: 0)
+            local.mountIdentity = try #require(AnalysisReview.Location(home)?.mountIdentity)
             boot = local
             external = VolumeDescriptor(name: "External", mountURL: other, scanRoot: other, isBoot: false,
                 isInternal: false, isRemovable: true, capacity: capacity)
             model = AppModel(home: home, defaults: GuidedReviewDefaults(),
                 disk: DiskIndexModel(store: TreeStore(directory: root.appendingPathComponent("Index"))))
             model.volumes = [boot, external]
-            model.volumeAnalysisDates[boot.id] = date
+            model.recordVolumeAnalysis(for: boot, date: date)
         }
 
         var chosen: CleanupItem {
@@ -64,6 +67,173 @@ struct GuidedReviewTests {
         }
 
         func remove() { try? FileManager.default.removeItem(at: root) }
+    }
+
+    @Test("Fermer en pause conserve recherche, page et choix ; les anciens jetons restent inertes",
+          arguments: [false, true])
+    func closeWhilePaused(_ searching: Bool) throws {
+        let f = try Fixture(); defer { f.remove() }
+        f.selectChosen()
+        let offered = try f.start()
+        f.model.examineGuidedReview(token: offered.token)
+        if searching { f.model.searchText = "fixture" }
+        else { f.model.section = .history }
+        let paused = try #require(f.model.guidedReview)
+        #expect(paused.stage == .paused && f.model.guidedReviewAvailability == .paused)
+        let page = f.model.section, query = f.model.searchText, cart = f.model.cart
+        f.model.endGuidedReview(token: offered.token)
+        #expect(f.model.guidedReview == paused)
+        f.model.endGuidedReview(token: paused.token)
+        f.model.resumeGuidedReview(token: paused.token)
+        #expect(f.model.guidedReview == nil && f.model.section == page && f.model.searchText == query)
+        #expect(f.model.cart == cart && f.model.cleaning == .idle && !f.model.canMoveFiles)
+        #expect(try Data(contentsOf: f.file) == f.contents)
+    }
+
+    @Test("L’état permanent explique chaque refus sans sélectionner ni naviguer",
+          arguments: [GuidedReviewAvailability.ready, .analysisRequired, .analyzing,
+                      .startupRequired, .unverifiedVolume, .active, .paused])
+    func visibleAvailability(_ state: GuidedReviewAvailability) throws {
+        let f = try Fixture(); defer { f.remove() }
+        switch state {
+        case .analysisRequired: f.model.volumeAnalysisDates.removeAll()
+        case .analyzing: f.model.analysis = .running
+        case .cleaning: Issue.record("Exercised by cleanup admission, not assigned in this fixture")
+        case .startupRequired: f.model.analysisVolumeID = f.external.id
+        case .unverifiedVolume:
+            var unknown = f.boot; unknown.mountIdentity = nil
+            f.model.volumes = [unknown, f.external]
+        case .active, .paused:
+            let session = try f.start()
+            if state == .paused { f.model.pauseGuidedReview(token: session.token) }
+        case .ready: break
+        }
+        #expect(f.model.guidedReviewAvailability == state)
+        #expect(f.model.canStartGuidedReviewFromSidebar == (state == .ready))
+        #expect(f.model.cart.isEmpty && f.model.items.isEmpty)
+        #expect(try Data(contentsOf: f.file) == f.contents)
+    }
+
+    @Test("Une ancienne date ne réadmet ni un disque remplacé ni une identité inconnue",
+          arguments: ["identity", "root", "unknown", "externalStartup"])
+    func replacementRejectsNewStart(_ change: String) throws {
+        let f = try Fixture(); defer { f.remove() }
+        let old = try f.start()
+        var replacement = f.boot
+        switch change {
+        case "identity": replacement.mountIdentity = VolumeMountIdentity(device: 7, inode: 202, createdSeconds: 2, createdNanoseconds: 0)
+        case "root": replacement.scanRoot = f.external.scanRoot
+        case "unknown": replacement.mountIdentity = nil
+        default: replacement.isInternal = false; replacement.isRemovable = true
+        }
+        f.model.volumes = [replacement, f.external]
+        #expect(f.model.guidedReview == nil && f.model.volumeAnalysisDates[f.boot.id] == nil)
+        // A stale date arriving independently is not proof of collection.
+        f.model.volumeAnalysisDates[f.boot.id] = f.date
+        f.model.examineGuidedReview(token: old.token)
+        f.model.startGuidedReviewFromSidebar()
+        #expect(f.model.guidedReview == nil && !f.model.canStartGuidedReviewFromSidebar)
+        // Returning the original descriptor alone cannot resurrect that result.
+        f.model.volumes = [f.boot, f.external]
+        #expect(!f.model.canStartGuidedReviewFromSidebar)
+        #expect(f.model.cart.isEmpty && !f.model.canMoveFiles)
+        #expect(try Data(contentsOf: f.file) == f.contents)
+    }
+
+    @Test("Une collecte neuve lie l’admission à sa cible et ne présélectionne rien")
+    func newCollectionReadmitsOnlyItsTarget() async throws {
+        let f = try Fixture(); defer { f.remove() }
+        var replacement = f.boot
+        try FileManager.default.moveItem(at: f.boot.scanRoot, to: f.root.appendingPathComponent("kept"))
+        try FileManager.default.createDirectory(at: f.boot.scanRoot, withIntermediateDirectories: true)
+        try f.contents.write(to: f.file)
+        replacement.mountIdentity = try #require(AnalysisReview.Location(f.boot.scanRoot)?.mountIdentity)
+        f.model.volumes = [replacement, f.external]
+        #expect(!f.model.canStartGuidedReviewFromSidebar)
+        let request = try #require(f.model.reserveBootAnalysis(replacement, preselect: false))
+        let context = RuleContext(home: replacement.scanRoot, projectRoots: [],
+            processes: ProcessSnapshot(processes: []), applications: f.root, systemLibrary: f.root,
+            sharedFolder: f.root, temporaryDirectory: f.root, runningApps: [])
+        await f.model.runBootAnalysis(request, context: context, finders: [])
+        #expect(f.model.canStartGuidedReviewFromSidebar && f.model.cart.isEmpty)
+        #expect(f.model.completedVolumeAnalyses[replacement.id]?.volume == replacement)
+        f.model.startGuidedReviewFromSidebar()
+        #expect(f.model.guidedReview != nil && f.model.cart.isEmpty && !f.model.canMoveFiles)
+        #expect(try Data(contentsOf: f.file) == f.contents)
+    }
+
+    @Test("Un sous-arbre réellement remplacé au même chemin invalide l’admission")
+    func replacedDirectory() async throws {
+        let f = try Fixture(); defer { f.remove() }
+        var original = f.boot
+        original.scanRoot = original.scanRoot.resolvingSymlinksInPath()
+        original.mountURL = original.scanRoot
+        original.mountIdentity = try directoryIdentity(original.scanRoot)
+        f.model.volumes = [original, f.external]
+        f.model.recordVolumeAnalysis(for: original, date: f.date)
+        let session = try f.start()
+        let displaced = f.root.appendingPathComponent("original-preserved")
+        try FileManager.default.moveItem(at: original.scanRoot, to: displaced)
+        try FileManager.default.createDirectory(at: original.scanRoot, withIntermediateDirectories: true)
+        let newContents = Data(repeating: 19, count: 2048)
+        try newContents.write(to: f.file)
+        var replacement = original
+        replacement.mountIdentity = try directoryIdentity(replacement.scanRoot)
+        #expect(replacement.mountIdentity != original.mountIdentity)
+        let fresh = replacement
+        await f.model.refreshStartupVolume(read: { fresh })
+        f.model.resumeGuidedReview(token: session.token)
+        f.model.startGuidedReviewFromSidebar()
+        #expect(f.model.guidedReview == nil && !f.model.canStartGuidedReviewFromSidebar)
+        #expect(f.model.cart.isEmpty && !f.model.canMoveFiles)
+        #expect(try Data(contentsOf: f.file) == newContents)
+        #expect(try Data(contentsOf: displaced.appendingPathComponent("fixture.bin")) == f.contents)
+    }
+
+    private func directoryIdentity(_ url: URL) throws -> VolumeMountIdentity {
+        try #require(AnalysisReview.Location(url)?.mountIdentity)
+    }
+
+    @Test("Une lecture du démarrage échouée retire la preuve précédente")
+    func failedStartupRefresh() async throws {
+        let f = try Fixture(); defer { f.remove() }
+        _ = try f.start()
+        await f.model.refreshStartupVolume(read: { nil })
+        #expect(f.model.guidedReview == nil && !f.model.canStartGuidedReviewFromSidebar)
+        #expect(f.model.volumeAnalysisDates[f.boot.id] == nil && f.model.cart.isEmpty)
+        #expect(try Data(contentsOf: f.file) == f.contents)
+    }
+
+    @Test("L’entrée permanente démarre depuis une page ou une recherche sans modifier les choix",
+          arguments: [false, true])
+    func permanentEntry(_ searching: Bool) throws {
+        let f = try Fixture(); defer { f.remove() }
+        f.selectChosen()
+        let cart = f.model.cart
+        f.model.section = .system
+        if searching { f.model.searchText = "fixture" }
+        #expect(f.model.canStartGuidedReviewFromSidebar)
+        f.model.startGuidedReviewFromSidebar()
+        #expect(f.model.guidedReview?.stage == .offering)
+        #expect(f.model.section == .overview && !f.model.isSearching)
+        #expect(f.model.cart == cart && f.model.cleaning == .idle)
+        #expect(f.model.bootAnalysisRequest == nil && !f.model.disk.isRefreshing)
+        #expect(try Data(contentsOf: f.file) == f.contents)
+    }
+
+    @Test("L’entrée permanente refuse un externe ou une collecte en cours sans déplacer la navigation",
+          arguments: [false, true])
+    func permanentEntryRefusal(_ running: Bool) throws {
+        let f = try Fixture(); defer { f.remove() }
+        f.model.section = .system
+        f.model.searchText = "fixture"
+        if running { f.model.analysis = .running }
+        else { f.model.analysisVolumeID = f.external.id }
+        #expect(!f.model.canStartGuidedReviewFromSidebar)
+        f.model.startGuidedReviewFromSidebar()
+        #expect(f.model.guidedReview == nil && f.model.section == .system && f.model.isSearching)
+        #expect(f.model.cart.isEmpty && f.model.cleaning == .idle)
+        #expect(try Data(contentsOf: f.file) == f.contents)
     }
 
     @Test("L'ordre est explicite et une collecte terminée suffit sans parcours de fichiers")

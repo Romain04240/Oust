@@ -41,25 +41,24 @@ struct RootView: View {
                 .background(DarkColumn())
                 .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } detail: {
-            // Une recherche en cours passe devant la section : on cherche partout.
-            Group {
-                if model.isSearching { SearchView(model: model) } else {
-                    detail.modifier(SectionEntrance()).id(model.section).transition(.identity)
+            // Bound the shell to the window proposal. A variable safe-area
+            // inset above independently scrolling tools could enlarge the host.
+            GeometryReader { bounds in
+                VStack(spacing: 0) {
+                    GuidedReviewBanner(model: model)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Group {
+                        if model.isSearching { SearchView(model: model) }
+                        else { detail.id(model.section).transition(.identity) }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    if BinBar.isShown(in: model) { BinBar(model: model) }
                 }
+                .frame(width: bounds.size.width, height: bounds.size.height, alignment: .top)
+                .clipped()
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                GuidedReviewBanner(model: model)
-            }
-            // Cocher ne servait à rien tant qu'on ne savait pas où aller ensuite :
-            // aucune section ne disait comment faire le vide (Romain, 18/10/2026).
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if BinBar.isShown(in: model) {
-                    BinBar(model: model)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(reduceMotion ? nil : .snappy, value: model.cart.isEmpty)
             // Les disques au centre ; à droite, l'Historique seul, en icône : les
             // Réglages ont quitté la barre d'outils (⌘, et le panneau de la barre
             // des menus y mènent), toute la place va aux disques (Romain,
@@ -114,22 +113,6 @@ struct RootView: View {
     }
 }
 
-/// Animate only the incoming page. Keeping an outgoing scanner view alive for
-/// a crossfade can delay its cancellation until the new page has started work.
-private struct SectionEntrance: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var appeared = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(appeared || reduceMotion ? 1 : 0)
-            .offset(x: appeared || reduceMotion ? 0 : 18, y: appeared || reduceMotion ? 0 : 3)
-            .onAppear {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { appeared = true }
-            }
-    }
-}
-
 private struct Sidebar: View {
     @Bindable var model: AppModel
 
@@ -154,6 +137,22 @@ private struct Sidebar: View {
     var body: some View {
         // Pendant une recherche, aucune section n'est sélectionnée ; en choisir une
         // quitte la recherche (revue du 18/10/2026 : « Vue d'ensemble » restait en surbrillance).
+        VStack(spacing: 0) {
+            GuidedReviewLauncher(model: model)
+                .padding(Spacing.small)
+            sidebarList
+                .frame(maxHeight: .infinity)
+            HStack(spacing: Spacing.small) {
+                BinTile(model: model).frame(maxWidth: .infinity)
+                FeedbackTile().fixedSize()
+            }
+            .padding(Spacing.small)
+            .padding(.bottom, Spacing.tight)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var sidebarList: some View {
         List(selection: Binding(get: { model.isSearching ? nil : model.section },
                                 set: { if let value = $0 { model.searchText = ""; model.section = value } })) {
             row(.overview)
@@ -169,16 +168,6 @@ private struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: Spacing.small) {
-                BinTile(model: model)
-                    .frame(maxWidth: .infinity)
-                FeedbackTile()
-                    .fixedSize()
-            }
-            .padding(Spacing.small)
-            .padding(.bottom, Spacing.tight)
-        }
     }
 
     private func row(_ section: AppSection) -> some View {

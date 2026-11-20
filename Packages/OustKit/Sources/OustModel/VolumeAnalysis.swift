@@ -376,7 +376,7 @@ extension AppModel {
         finishedFinders = stagedFinders
         cart = cart.filter { items[$0].map(preservesBrowserIntent) == true }
         saveAnalysisReview(for: volume, location: reviewLocation, ids: reviewIDs, locationWasVerified: true)
-        volumeAnalysisDates[volume.id] = Date()
+        recordVolumeAnalysis(for: volume)
         StorageOperationContext.withUnboundContext { refreshVolumes() }
         completed = true
     }
@@ -503,6 +503,7 @@ extension AppModel {
         if offeredVolume.map({ PathNormalizer.normalize($0.mountURL.path) }) == root { offeredVolume = nil }
         if analysisVolumeID.map(PathNormalizer.normalize) == root { analysisVolumeID = nil }
         if analyzingVolumeID == id { analyzingVolumeID = nil }
+        completedVolumeAnalyses.removeValue(forKey: id)
         volumeAnalysisDates.removeValue(forKey: id)
         analysisReviews.removeValue(forKey: id)
         volumeIndexes.removeValue(forKey: id)

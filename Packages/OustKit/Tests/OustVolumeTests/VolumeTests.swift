@@ -57,7 +57,23 @@ struct VolumeTests {
         let boot = try #require(VolumeService.bootVolume())
         #expect(boot.scanRoot.path == "/System/Volumes/Data")
         #expect(boot.capacity.total > 0)
+        #expect(boot.mountIdentity != nil)
         #expect(boot.capacity.availableForImportantUsage >= boot.capacity.available)
+    }
+
+    @Test("Le démarrage conserve son identité et ne suppose pas le matériel interne",
+          arguments: ["internal", "external", "unknown", "removable", "ejectable"])
+    func startupQualification(_ kind: String) {
+        let identity = VolumeMountIdentity(device: 7, inode: 101, createdSeconds: 1, createdNanoseconds: 0,
+                                          filesystemID: [1, 2])
+        let volume = VolumeService.startupDescriptor(name: "Fixture", capacity: Capacity(total: 100, available: 50,
+            availableForImportantUsage: 50), identity: identity,
+            isInternal: kind == "unknown" ? nil : kind != "external",
+            isRemovable: kind == "unknown" ? nil : kind == "removable",
+            isEjectable: kind == "unknown" ? nil : kind == "ejectable", isReadOnly: false)
+        #expect(volume.mountIdentity == identity && volume.isBoot)
+        #expect(volume.isInternal == (kind != "external" && kind != "unknown"))
+        #expect(volume.isRemovable == ["unknown", "removable", "ejectable"].contains(kind))
     }
 
     @Test("La capacité purgeable est la différence entre les deux libres")
