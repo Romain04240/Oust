@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import os
 import OustCore
+import OustLocalization
 @preconcurrency import UserNotifications
 
 /// Ce que macOS permet à Oust! en matière de notifications.
@@ -56,15 +57,16 @@ enum Notifier {
 
     /// Une notification qui mène où l'on veut, un onglet des Réglages compris.
     @discardableResult
-    static func post(id: String, title: String, body: String, opening destination: Destination, sound: Bool,
+    static func post(id: String, title: String, body: String, opening destination: Destination, sound: Bool, originalSound: String? = nil, observedAt: Date? = nil,
                      action: String? = nil, focus: String? = nil) async -> Bool {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        if let observedAt { content.body += "\n" + L10n.string("watch.alert.observed", observedAt.formatted(date: .omitted, time: .standard)) }
         content.userInfo = destination.userInfo
         if let action { content.userInfo[NotificationRouter.actionKey] = action }
         if let focus { content.userInfo[NotificationRouter.focusKey] = focus }
-        if sound { content.sound = .default }
+        if sound { content.sound = originalSound.map { UNNotificationSound(named: UNNotificationSoundName(rawValue: $0)) } ?? .default }
         do {
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
             log.notice("Notification posée : \(id, privacy: .public)")
@@ -77,6 +79,11 @@ enum Notifier {
 
     /// Retire une notification devenue sans objet du centre de notifications.
     static func remove(id: String) async {
+        center.removeDeliveredNotifications(withIdentifiers: [id])
+    }
+
+    static func removeAlert(id: String) async {
+        center.removePendingNotificationRequests(withIdentifiers: [id])
         center.removeDeliveredNotifications(withIdentifiers: [id])
     }
 

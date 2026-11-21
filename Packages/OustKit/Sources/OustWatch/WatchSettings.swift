@@ -17,6 +17,7 @@ public struct WatchSettings: Sendable, Hashable, Codable {
 
     public var alertsLowDisk: Bool
     /// L'alerte part en capsule ; en plus, une notification de macOS si on le veut.
+    public var playsAlertSounds: Bool = true
     public var alsoNotifies: Bool
     public var threshold: LowDiskThreshold
     public var policies: [RetentionPolicy]
@@ -46,6 +47,7 @@ public struct WatchSettings: Sendable, Hashable, Codable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = WatchSettings()
+        playsAlertSounds = try container.decodeIfPresent(Bool.self, forKey: .playsAlertSounds) ?? true
         alertsLowDisk = try container.decodeIfPresent(Bool.self, forKey: .alertsLowDisk) ?? defaults.alertsLowDisk
         alsoNotifies = try container.decodeIfPresent(Bool.self, forKey: .alsoNotifies) ?? defaults.alsoNotifies
         threshold = try container.decodeIfPresent(LowDiskThreshold.self, forKey: .threshold) ?? defaults.threshold

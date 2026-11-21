@@ -12,10 +12,16 @@ public enum MenuBarContents: String, Codable, CaseIterable, Identifiable, Sendab
 public struct BatteryAlertSettings: Sendable, Hashable, Codable {
     public var warnsLow: Bool
     public var warnsCharged: Bool
+    public var warnsConnected: Bool
+    public var warnsDisconnected: Bool
+    public var notifies: Bool
     public var low: Int
     public var high: Int
 
-    public init(warnsLow: Bool = false, warnsCharged: Bool = false, low: Int = 20, high: Int = 80) {
+    public init(warnsLow: Bool = false, warnsCharged: Bool = false, low: Int = 20, high: Int = 80, warnsConnected: Bool = false, warnsDisconnected: Bool = false, notifies: Bool = false) {
+        self.warnsConnected = warnsConnected
+        self.warnsDisconnected = warnsDisconnected
+        self.notifies = notifies
         self.warnsLow = warnsLow
         self.warnsCharged = warnsCharged
         self.low = min(99, max(1, low))
@@ -27,13 +33,25 @@ public struct BatteryAlertSettings: Sendable, Hashable, Codable {
         self.init(warnsLow: try fields.decodeIfPresent(Bool.self, forKey: .warnsLow) ?? false,
                   warnsCharged: try fields.decodeIfPresent(Bool.self, forKey: .warnsCharged) ?? false,
                   low: try fields.decodeIfPresent(Int.self, forKey: .low) ?? 20,
-                  high: try fields.decodeIfPresent(Int.self, forKey: .high) ?? 80)
+                  high: try fields.decodeIfPresent(Int.self, forKey: .high) ?? 80,
+                  warnsConnected: try fields.decodeIfPresent(Bool.self, forKey: .warnsConnected) ?? false,
+                  warnsDisconnected: try fields.decodeIfPresent(Bool.self, forKey: .warnsDisconnected) ?? false,
+                  notifies: try fields.decodeIfPresent(Bool.self, forKey: .notifies) ?? false)
     }
 }
 
-public enum BatteryAlert: Sendable, Equatable {
+public enum BatteryAlert: Sendable, Equatable, Codable {
     case low(BatteryReading)
     case charged(BatteryReading)
+    case connected(BatteryReading)
+    case disconnected(BatteryReading)
+    case disconnectedLow(BatteryReading)
+
+    public var reading: BatteryReading {
+        switch self {
+        case .low(let r), .charged(let r), .connected(let r), .disconnected(let r), .disconnectedLow(let r): r
+        }
+    }
 
     public func updated(for reading: BatteryReading, settings: BatteryAlertSettings) -> Self? {
         switch self {
@@ -41,6 +59,15 @@ public enum BatteryAlert: Sendable, Equatable {
             return .low(reading)
         case .charged where settings.warnsCharged && reading.state != .onBattery && reading.level >= settings.high:
             return .charged(reading)
+        case .connected where settings.warnsConnected && reading.state != .onBattery:
+            return .connected(reading)
+        case .disconnected where settings.warnsDisconnected && reading.state == .onBattery:
+            return .disconnected(reading)
+        case .disconnectedLow where reading.state == .onBattery:
+            if settings.warnsLow && reading.level <= settings.low {
+                return settings.warnsDisconnected ? .disconnectedLow(reading) : .low(reading)
+            }
+            return settings.warnsDisconnected ? .disconnected(reading) : nil
         default:
             return nil
         }

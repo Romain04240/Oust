@@ -1,3 +1,4 @@
+import OustWatch
 import AppKit
 import os
 import SwiftUI
@@ -117,16 +118,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MainWindow.show()
             }
         }
-        model.watch.onBatteryAlert = { [weak self] alert in
-            guard let cycle = self?.model.watch.batteryAlertCycle else { return }
-            CapsulePresenter.shared.showBattery(alert, current: { [weak self] in
-                self?.model.watch.currentBatteryAlert(matching: alert, cycle: cycle)
-            }) { [weak self] in
+        model.watch.onDiskAlert = { id, alert, current, presented in
+            CapsulePresenter.shared.showValidated(id: id, message: .lowDisk(alert), current: {
+                await current().map(CapsuleMessage.lowDisk)
+            }, presented: { presented().map { PreparedWatchAlert(value: .lowDisk($0.value), acknowledge: $0.acknowledge) } }) {
+                model.searchText = ""; model.section = .overview; MainWindow.show()
+            }
+        }
+        model.watch.onPowerAlert = { [weak self] id, alert, current, presented in
+            CapsulePresenter.shared.showValidated(id: id, message: .battery(alert), current: {
+                current().map(CapsuleMessage.battery)
+            }, presented: { presented().map { PreparedWatchAlert(value: .battery($0.value), acknowledge: $0.acknowledge) } }) { [weak self] in
                 guard let self else { return }
-                self.menuBar.showBattery { [weak self] in
-                    guard let self else { return }
-                    SettingsWindow.show(.battery, model: self.model)
-                }
+                self.menuBar.showBattery { SettingsWindow.show(.battery, model: model) }
             }
         }
         // L'entretien planifié : ce qu'il a trouvé, en pastille ; un clic ouvre

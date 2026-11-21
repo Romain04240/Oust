@@ -29,6 +29,11 @@ struct BatterySettingsTab: View {
                 Text("settings.battery.display_section", bundle: .oust)
             }
             Section {
+                Toggle(isOn: $watch.settings.batteryAlerts.warnsConnected) { Text("settings.power.connected", bundle: .oust) }
+                Toggle(isOn: $watch.settings.batteryAlerts.warnsDisconnected) { Text("settings.power.disconnected", bundle: .oust) }
+                Toggle(isOn: $watch.settings.batteryAlerts.notifies) { Text("settings.power.notifications", bundle: .oust) }
+                if watch.settings.batteryAlerts.notifies { NotificationsDeniedRow(watch: watch) }
+                Toggle(isOn: $watch.settings.playsAlertSounds) { Text("settings.power.sound", bundle: .oust) }
                 Toggle(isOn: $watch.settings.batteryAlerts.warnsLow) {
                     Text("settings.watch.battery_low", bundle: .oust)
                 }

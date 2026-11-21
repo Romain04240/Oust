@@ -136,8 +136,7 @@
           }
         }
       }
-    }
-,
+    },
     "guided_review.unavailable": {
       "localizations": {
         "fr": {
@@ -153,8 +152,7 @@
           }
         }
       }
-    }
-,
+    },
     "system.login_inventory_count": {
       "extractionState": "manual",
       "localizations": {
@@ -8152,8 +8150,18 @@
     "duplicates.exclusions_timeout": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "A file read or Quick Look is still active. Try again after it finishes." } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Une lecture ou Coup d’œil est encore en cours. Réessaie après sa fermeture." } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A file read or Quick Look is still active. Try again after it finishes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une lecture ou Coup d’œil est encore en cours. Réessaie après sa fermeture."
+          }
+        }
       }
     },
     "duplicates.exclusions_wait_quicklook": {
@@ -13558,98 +13566,258 @@
     },
     "menubar.battery_charger_unknown": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Adapter rating unavailable" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Puissance nominale inconnue" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adapter rating unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puissance nominale inconnue"
+          }
+        }
       }
     },
     "menubar.battery_input_unknown": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Input power unavailable" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Puissance d’entrée indisponible" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Input power unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Puissance d’entrée indisponible"
+          }
+        }
       }
     },
     "menubar.battery_input_estimate": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Estimated input (voltage × current) · %@ W" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Entrée estimée (tension × intensité) · %@ W" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated input (voltage × current) · %@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entrée estimée (tension × intensité) · %@ W"
+          }
+        }
       }
     },
     "menubar.battery_net_charge_estimate": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Into the battery (estimated) · %@ W" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Vers la batterie (estimation) · %@ W" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Into the battery (estimated) · %@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vers la batterie (estimation) · %@ W"
+          }
+        }
       }
     },
     "menubar.battery_net_discharge_estimate": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "From the battery (estimated) · %@ W" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Fourni par la batterie (estimation) · %@ W" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From the battery (estimated) · %@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fourni par la batterie (estimation) · %@ W"
+          }
+        }
       }
     },
     "menubar.battery_temperature_unavailable": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Battery temperature unavailable" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Température de la batterie indisponible" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Battery temperature unavailable"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Température de la batterie indisponible"
+          }
+        }
       }
     },
     "menubar.mac_thermal_state": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Mac thermal state · %@" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "État thermique du Mac · %@" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac thermal state · %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "État thermique du Mac · %@"
+          }
+        }
       }
     },
     "menubar.mac_thermal_nominal": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Normal" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Normal" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
+          }
+        }
       }
     },
     "menubar.mac_thermal_fair": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Slightly elevated" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Légèrement élevé" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slightly elevated"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Légèrement élevé"
+          }
+        }
       }
     },
     "menubar.mac_thermal_serious": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "High" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Élevé" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "High"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Élevé"
+          }
+        }
       }
     },
     "menubar.mac_thermal_critical": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Critical" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Critique" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Critical"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Critique"
+          }
+        }
       }
     },
     "menubar.mac_thermal_unknown": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Unknown" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Inconnu" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inconnu"
+          }
+        }
       }
     },
     "menubar.battery_charger_details_closed": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Details hidden" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Détails masqués" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Details hidden"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Détails masqués"
+          }
+        }
       }
     },
     "menubar.battery_charger_details_open": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Details visible" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Détails affichés" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Details visible"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Détails affichés"
+          }
+        }
       }
     },
     "menubar.battery_refreshing": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Refreshing…" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Actualisation…" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refreshing…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actualisation…"
+          }
+        }
       }
     },
     "menubar.battery_last_reading": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Last reading" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Dernier relevé" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last reading"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernier relevé"
+          }
+        }
       }
     },
     "menubar.battery_capacity_short": {
@@ -13670,44 +13838,114 @@
     },
     "menubar.battery_cycles_short": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Cycles" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Cycles" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cycles"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cycles"
+          }
+        }
       }
     },
     "menubar.battery_temperature_short": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Temperature" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Température" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temperature"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Température"
+          }
+        }
       }
     },
     "menubar.battery_degrees": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%@ °C" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "%@ °C" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ °C"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ °C"
+          }
+        }
       }
     },
     "menubar.battery_battery_estimate_short": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Estimated discharge" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Décharge estimée" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated discharge"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Décharge estimée"
+          }
+        }
       }
     },
     "menubar.battery_input_estimated_short": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Estimated input" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Entrée estimée" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Estimated input"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entrée estimée"
+          }
+        }
       }
     },
     "menubar.battery_mac_short": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Mac" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Mac" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac"
+          }
+        }
       }
     },
     "menubar.battery_watts": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%@ W" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "%@ W" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ W"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ W"
+          }
+        }
       }
     },
     "menubar.battery_charger_nominal": {
@@ -13840,8 +14078,18 @@
     },
     "settings.general.icon_drive": {
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Use a drive icon for Storage" } },
-        "fr": { "stringUnit": { "state": "translated", "value": "Utiliser une icône de disque pour Stockage" } }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use a drive icon for Storage"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utiliser une icône de disque pour Stockage"
+          }
+        }
       }
     },
     "settings.general.menubar_contents": {
@@ -34799,7 +35047,7 @@
         }
       }
     },
-    "help.more" : {
+    "help.more": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -34816,7 +35064,7 @@
         }
       }
     },
-    "help.close" : {
+    "help.close": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -34833,7 +35081,7 @@
         }
       }
     },
-    "overview.categories" : {
+    "overview.categories": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -34850,7 +35098,7 @@
         }
       }
     },
-    "overview.auto_help" : {
+    "overview.auto_help": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -34867,7 +35115,7 @@
         }
       }
     },
-    "overview.stop_analysis" : {
+    "overview.stop_analysis": {
       "localizations": {
         "fr": {
           "stringUnit": {
@@ -34883,7 +35131,7 @@
         }
       }
     },
-    "overview.retry_analysis" : {
+    "overview.retry_analysis": {
       "localizations": {
         "fr": {
           "stringUnit": {
@@ -34899,7 +35147,7 @@
         }
       }
     },
-    "overview.on_demand" : {
+    "overview.on_demand": {
       "localizations": {
         "fr": {
           "stringUnit": {
@@ -34915,7 +35163,7 @@
         }
       }
     },
-    "overview.consultation" : {
+    "overview.consultation": {
       "localizations": {
         "fr": {
           "stringUnit": {
@@ -34961,6 +35209,150 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ choix de navigateur sont à revérifier et ne peuvent pas être traités. Actualisez Navigateurs, puis cochez-les à nouveau."
+          }
+        }
+      }
+    },
+    "watch.power.connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac connected to power"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac sur secteur"
+          }
+        }
+      }
+    },
+    "watch.power.disconnected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac running on battery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac sur batterie"
+          }
+        }
+      }
+    },
+    "watch.power.disconnected_low": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac on battery · Low battery"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac sur batterie · Batterie faible"
+          }
+        }
+      }
+    },
+    "settings.power.connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power connected alert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alerte de branchement"
+          }
+        }
+      }
+    },
+    "settings.power.disconnected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power disconnected alert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alerte de débranchement"
+          }
+        }
+      }
+    },
+    "settings.power.notifications": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep a macOS notification"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conserver une notification macOS"
+          }
+        }
+      }
+    },
+    "settings.power.sound": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original Oust sounds"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sons originaux Oust"
+          }
+        }
+      }
+    },
+    "settings.power.disk_metric": {
+      "localizations": {
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seuil sur l’espace disponible selon macOS, purgeable compris."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Threshold uses macOS available space, including purgeable storage."
+          }
+        }
+      }
+    },
+    "watch.alert.observed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Observed at %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relevé à %@"
           }
         }
       }

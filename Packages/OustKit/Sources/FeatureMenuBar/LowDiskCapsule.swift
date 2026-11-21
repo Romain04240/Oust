@@ -37,6 +37,50 @@ public final class CapsulePresenter {
     }
     private var pendingMessages: [PendingMessage] = []
     private var preparingMaintenance = false
+    private var validatedQueue: [String: @MainActor () -> Void] = [:]
+    private var activeValidation: Task<Void, Never>?
+    private var presentationToken = UUID()
+
+    private var validationRequests: [String: Task<Void, Never>] = [:]
+
+    public func showValidated(id: String, message: CapsuleMessage,
+                              current: @escaping @MainActor () async -> CapsuleMessage?,
+                              presented: @escaping @MainActor () -> PreparedWatchAlert<CapsuleMessage>?,
+                              open: @escaping @MainActor () -> Void) {
+        validationRequests[id]?.cancel()
+        validationRequests[id] = Task { [weak self] in
+        guard let fresh = await current(), !Task.isCancelled, let self else { return }
+        self.presentValidated(id: id, fresh: fresh, current: current, presented: presented, open: open)
+        }
+    }
+
+    private func presentValidated(id: String, fresh: CapsuleMessage,
+                                  current: @escaping @MainActor () async -> CapsuleMessage?,
+                                  presented: @escaping @MainActor () -> PreparedWatchAlert<CapsuleMessage>?,
+                                  open: @escaping @MainActor () -> Void) {
+        validationRequests[id] = nil
+        guard let prepared = presented() else { return }
+        if state.isShown, let active = state.message, active.priority.rawValue >= prepared.value.priority.rawValue {
+            validatedQueue[id] = { [weak self] in
+                self?.showValidated(id: id, message: fresh, current: current, presented: presented, open: open)
+            }
+            return
+        }
+        validatedQueue[id] = nil
+        guard Self.targetScreen() != nil, prepared.acknowledge(), display(prepared.value, open: open) else { return }
+        let token = presentationToken
+        activeValidation?.cancel()
+        activeValidation = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard let self, self.presentationToken == token, self.state.isShown else { return }
+                let valid = await current()
+                guard !Task.isCancelled, self.presentationToken == token, self.state.isShown else { return }
+                if valid == nil { self.dismiss(); return }
+            }
+        }
+    }
+
 
     /// Combien de temps la capsule reste, si on ne la survole pas.
     static let lifetime: Duration = .seconds(7)
@@ -104,6 +148,8 @@ public final class CapsulePresenter {
     }
 
     private func display(_ message: CapsuleMessage, open: @escaping @MainActor () -> Void) -> Bool {
+        presentationToken = UUID()
+        activeValidation?.cancel()
         let screen = Self.targetScreen()
         guard let screen else { return false }
         let geometry = CapsuleGeometry(screen: screen)
@@ -128,9 +174,14 @@ public final class CapsulePresenter {
 
     public func dismiss() {
         activeBattery = nil
+        activeValidation?.cancel()
+        let token = presentationToken
         state.withdraw { [weak self] in
-            guard let self else { return }
+            guard let self, self.presentationToken == token else { return }
             self.panel?.orderOut(nil)
+            let queued = self.validatedQueue
+            self.validatedQueue.removeAll()
+            for retry in queued.values { retry() }
             let pending = self.pendingBattery
             self.pendingBattery = nil
             pending?()

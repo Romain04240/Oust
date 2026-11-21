@@ -13,7 +13,7 @@ import OustWatch
 ///
 ///     [symbole]  label  FIGURE mot  [✓ note sûre]
 public struct CapsuleMessage: Sendable, Equatable {
-    public enum Priority: Int, Sendable { case normal, batteryWarning, warning }
+    public enum Priority: Int, Sendable { case normal, warning, batteryWarning }
     public enum Tint: Sendable { case batteryLow, batteryCharged }
     /// Le symbole de tête (SF Symbols).
     public var symbol: String
@@ -85,9 +85,18 @@ extension CapsuleMessage {
         switch alert {
         case .low(let value): reading = value; low = true
         case .charged(let value): reading = value; low = false
+        case .connected(let value): reading = value; low = false
+        case .disconnected(let value): reading = value; low = false
+        case .disconnectedLow(let value): reading = value; low = true
         }
         let figure = L10n.string("menubar.battery_percent", Formatters.count(reading.level))
-        let title = L10n.string(low ? "watch.battery_capsule.low" : "watch.battery_capsule.charged")
+        let title: String
+        switch alert {
+        case .connected: title = L10n.string("watch.power.connected")
+        case .disconnected: title = L10n.string("watch.power.disconnected")
+        case .disconnectedLow: title = L10n.string("watch.power.disconnected_low")
+        default: title = L10n.string(low ? "watch.battery_capsule.low" : "watch.battery_capsule.charged")
+        }
         return CapsuleMessage(symbol: reading.symbol, label: title, figure: figure, word: "",
                               gauge: CapsuleGauge(filled: Double(reading.level) / 100),
                               announcement: title + " " + figure,

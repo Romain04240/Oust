@@ -77,6 +77,8 @@ struct WatchSettingsSections: View {
             }
             .disabled(!watch.settings.alertsLowDisk)
             if watch.settings.alsoNotifies { NotificationsDeniedRow(watch: watch) }
+            Toggle(isOn: Binding(get: { watch.settings.playsAlertSounds }, set: { watch.settings.playsAlertSounds = $0 })) { Text("settings.power.sound", bundle: .oust) }
+            Text("settings.power.disk_metric", bundle: .oust).font(Typography.caption).foregroundStyle(.secondary)
         } header: {
             Text("settings.watch.alert_section", bundle: .oust)
         } footer: {
@@ -125,7 +127,7 @@ struct WatchSettingsSections: View {
 }
 
 /// macOS refuse les notifications d'Oust! : le dire, et mener au bon réglage.
-private struct NotificationsDeniedRow: View {
+struct NotificationsDeniedRow: View {
     let watch: WatchModel
 
     var body: some View {

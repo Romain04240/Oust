@@ -83,6 +83,21 @@ public final class WatchModel {
     @ObservationIgnored public var onLowDisk: (@MainActor (LowDiskAlert) -> Void)?
     public private(set) var battery: BatteryReading?
     @ObservationIgnored public var onBatteryAlert: (@MainActor (BatteryAlert) -> Void)?
+    @ObservationIgnored public var onPowerAlert: (@MainActor (String, BatteryAlert, @escaping @MainActor () -> BatteryAlert?, @escaping @MainActor () -> PreparedWatchAlert<BatteryAlert>?) -> Void)?
+    @ObservationIgnored private var powerConfirmation: Task<Void, Never>?
+    @ObservationIgnored private var powerLoop: Task<Void, Never>?
+    @ObservationIgnored private var powerEpisodes = PowerAlertEpisodes()
+    @ObservationIgnored private var alertLedger = AlertDeliveryLedger()
+    @ObservationIgnored public var onDiskAlert: (@MainActor (String, LowDiskAlert, @escaping @MainActor () async -> LowDiskAlert?, @escaping @MainActor () -> PreparedWatchAlert<LowDiskAlert>?) -> Void)?
+    @ObservationIgnored private var diskEpisodes: [String: String] = [:]
+    @ObservationIgnored private var diskGeneration = 0
+    @ObservationIgnored private var storageWakeCycle = 0
+    @ObservationIgnored private var failedPowerIntents = FailedPowerIntents()
+    @ObservationIgnored private var sourceOccurrence = UUID()
+    @ObservationIgnored private var hasPowerContinuitySample = false
+    @ObservationIgnored private var queuedPower: Set<String> = []
+    @ObservationIgnored private var notificationJobs: [@MainActor () async -> Void] = []
+    @ObservationIgnored private var notificationWorker: Task<Void, Never>?
     @ObservationIgnored private var batteryObserver: BatteryPowerObserver?
     @ObservationIgnored private var batteryAlerts = BatteryAlertTracker()
     @ObservationIgnored private var batteryAsleep = false
@@ -110,6 +125,10 @@ public final class WatchModel {
     /// L'entretien planifié : il analyse et montre, sans rien supprimer.
     public let maintenance: MaintenanceModel
 
+    typealias PowerPost = @MainActor (String, String, String, Bool, String, Date) async -> Bool
+    @ObservationIgnored private let readPower: @MainActor () -> BatteryReading?
+    @ObservationIgnored private let powerPermission: @MainActor () async -> Bool
+    @ObservationIgnored private let powerPost: PowerPost
     @ObservationIgnored private let defaults: UserDefaults
     /// Les destinations Time Machine, relues toutes les dix minutes au plus.
     @ObservationIgnored private var timeMachine: (mounts: Set<String>, read: Date)?
@@ -122,7 +141,16 @@ public final class WatchModel {
     /// se voit pas, et un disque ne se remplit pas plus vite que ça sans prévenir.
     static let interval: Duration = .seconds(60)
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard,
+         powerRead: (@MainActor () -> BatteryReading?)? = nil,
+         powerPermission: (@MainActor () async -> Bool)? = nil,
+         powerPost: PowerPost? = nil) {
+        self.readPower = powerRead ?? { BatteryReading.current() }
+        self.powerPermission = powerPermission ?? { await Notifier.permission() == .allowed }
+        self.powerPost = powerPost ?? { id, title, body, sound, file, time in
+            await Notifier.post(id: id, title: title, body: body, opening: .settings(.battery),
+                                sound: sound, originalSound: file, observedAt: time)
+        }
         self.defaults = defaults
         self.settings = WatchSettings.decode(defaults.data(forKey: Self.settingsKey))
         self.showsMenuBar = defaults.object(forKey: WatchSettings.menuBarKey) as? Bool ?? true
@@ -136,6 +164,11 @@ public final class WatchModel {
         if let data = defaults.data(forKey: Self.batteryDevicesKey), let saved = try? JSONDecoder().decode([BatteryDevicePreference].self, from: data) {
             self.batteryDevicePreferences = saved
         }
+        if let data = defaults.data(forKey: "watch.powerEpisodes"), let saved = try? JSONDecoder().decode(PowerAlertEpisodes.self, from: data) { powerEpisodes = saved }
+        if let data = defaults.data(forKey: "watch.alertLedger"), let saved = try? JSONDecoder().decode(AlertDeliveryLedger.self, from: data) { alertLedger = saved }
+        alertLedger.retryFailures()
+        diskEpisodes = defaults.dictionary(forKey: "watch.diskEpisodes") as? [String: String] ?? [:]
+        if let data = defaults.data(forKey: "watch.failedPowerIntents"), let saved = try? JSONDecoder().decode(FailedPowerIntents.self, from: data) { failedPowerIntents = saved }
         maintenance.watch = self
     }
 
@@ -147,6 +180,12 @@ public final class WatchModel {
         guard loop == nil else { return }
         refreshLoginItem()
         refreshBattery()
+        powerLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                self?.refreshBattery()
+            }
+        }
         batteryObserver = BatteryPowerObserver { [weak self] in self?.refreshBattery() }
         // Les corbeilles du Mac : une application qu'on y jette, et ses restes.
         app?.trashedApps.start()
@@ -170,8 +209,12 @@ public final class WatchModel {
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.sourceOccurrence = UUID()
+                self?.storageWakeCycle += 1
                 self?.batteryAsleep = false
                 self?.batteryAlerts.resetBaseline()
+                self?.powerEpisodes.baseline()
+                self?.powerConfirmation?.cancel()
                 self?.batteryAlertCycle += 1
                 self?.refreshBattery()
                 Task { await self?.tick() }
@@ -181,8 +224,12 @@ public final class WatchModel {
             forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.sourceOccurrence = UUID()
+                self?.storageWakeCycle += 1
                 self?.batteryAsleep = true
                 self?.batteryAlerts.resetBaseline()
+                self?.powerEpisodes.baseline()
+                self?.powerConfirmation?.cancel()
                 self?.deviceAlerts = DeviceBatteryAlertTracker()
                 self?.batteryDevices = nil
                 self?.batteryDevicesReadAt = nil
@@ -191,14 +238,52 @@ public final class WatchModel {
         }
     }
 
+    /// Toute lecture fraîche publie sa continuité, même si son appelant va
+    /// abandonner un contrôle. Le premier relevé est une baseline silencieuse.
+    private func samplePower() -> BatteryReading? {
+        let reading = readPower()
+        let changed = hasPowerContinuitySample && battery.map({ $0.state == .onBattery }) != reading.map({ $0.state == .onBattery })
+        hasPowerContinuitySample = true
+        if battery != reading { battery = reading }
+        if changed {
+            batteryAlertCycle += 1
+            sourceOccurrence = UUID()
+            powerConfirmation?.cancel()
+            queuedPower = queuedPower.filter { $0.hasPrefix("os:") }
+        }
+        if reading == nil {
+            powerConfirmation?.cancel()
+            powerEpisodes.baseline()
+        } else if changed, !batteryAsleep, let reading {
+            schedulePowerConfirmation(reading)
+        }
+        return reading
+    }
+
     private func refreshBattery() {
         guard !batteryAsleep else { return }
-        let reading = BatteryReading.current()
-        if battery.map({ $0.state == .onBattery }) != reading.map({ $0.state == .onBattery }) {
-            batteryAlertCycle += 1
+        guard let reading = samplePower() else { return }
+        queuedPower = queuedPower.filter { $0.hasPrefix("os:") }
+        schedulePowerConfirmation(reading)
+    }
+
+    private func schedulePowerConfirmation(_ reading: BatteryReading) {
+        powerConfirmation?.cancel()
+        let cycle = batteryAlertCycle
+        powerConfirmation = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            guard let self, !self.batteryAsleep else { return }
+            let fresh = self.samplePower()
+            // samplePower peut invalider notre occurrence ET armer sa remplaçante.
+            guard !Task.isCancelled, cycle == self.batteryAlertCycle, let fresh else { return }
+            guard fresh.state == reading.state else {
+                self.schedulePowerConfirmation(fresh)
+                return
+            }
+            let alerts = self.powerEpisodes.observe(fresh, settings: self.settings.batteryAlerts)
+            self.saveAlertState()
+            self.deliverPowerComponents(PowerAlertComponent.split(alerts), cycle: cycle)
         }
-        battery = reading
-        if let alert = batteryAlerts.observe(reading, settings: settings.batteryAlerts) { onBatteryAlert?(alert) }
     }
 
     public func currentBatteryAlert(matching alert: BatteryAlert, cycle: Int) -> BatteryAlert? {
@@ -356,21 +441,27 @@ public final class WatchModel {
     /// Relit ce que macOS seul connaît : la permission de notifier, l'ouverture
     /// à la connexion (Réglages, au moment où on les ouvre).
     public func refreshPermissions() async {
-        notifications = await Notifier.permission()
+        let fresh = await Notifier.permission()
+        if fresh != notifications { alertLedger.retryFailures(); saveAlertState(); refreshBattery(); retryFailedPowerAlerts() }
+        notifications = fresh
         refreshLoginItem()
     }
 
     private func settingsChanged(from old: WatchSettings) {
+        alertLedger.retryFailures()
+        saveAlertState()
         if settings.batteryAlerts != old.batteryAlerts {
             batteryAlertCycle += 1
-            batteryAlerts = BatteryAlertTracker()
+            powerConfirmation?.cancel()
+            queuedPower.removeAll()
             refreshBattery()
         }
-        if settings.alsoNotifies, !old.alsoNotifies {
+        if (settings.alsoNotifies && !old.alsoNotifies) || (settings.batteryAlerts.notifies && !old.batteryAlerts.notifies) {
             // Cocher la notification, c'est le bon moment pour demander la
             // permission : l'utilisateur sait pourquoi on la demande.
             Task { notifications = await Notifier.ensurePermission() }
         }
+        retryFailedPowerAlerts()
         if settings.alertsLowDisk != old.alertsLowDisk || settings.threshold != old.threshold {
             Task { await checkDisk() }
         }
@@ -450,35 +541,105 @@ public final class WatchModel {
 
     /// Le disque de démarrage et les disques branchés (`WatchedVolumes`), chacun
     /// avec son alerte : une fois par passage sous le seuil, pour chacun.
-    func checkDisk() async {
+    func checkDisk(read: @escaping @Sendable () async -> [VolumeDescriptor] = VolumeService.alertVolumes, excluding: Set<String>? = nil) async {
+        queuedPower = queuedPower.filter { $0.hasPrefix("os:") }
+        diskGeneration += 1
+        let generation = diskGeneration
+        let cycle = storageWakeCycle
+        let mounts: Set<String>
+        if let excluding { mounts = excluding } else { mounts = await timeMachineMounts() }
         let measuredAt = ContinuousClock.now
-        let fresh = VolumeService.bootVolume()
-        updateBoot(fresh, measuredAt: measuredAt)
+        let samples = await read()
+        guard generation == diskGeneration, cycle == storageWakeCycle, !Task.isCancelled, !batteryAsleep else { return }
+        guard updateBoot(samples.first(where: \.isBoot), measuredAt: measuredAt) else { return }
         guard settings.alertsLowDisk else { return }
-        let mounts = await timeMachineMounts()
-        // Hors du fil principal : un disque qui tarde à répondre ne fige rien.
-        let external = await Task.detached(priority: .utility) { Self.externalVolumes(excluding: mounts) }.value
-        var alerts: [LowDiskAlert] = []
-        for volume in (fresh.map { [$0] } ?? []) + external {
-            let id = Self.identifier(of: volume)
-            var alarm = state.alarms[id] ?? LowDiskAlarm()
-            let decision = alarm.observe(available: volume.capacity.availableForImportantUsage, total: volume.capacity.total,
-                                         threshold: settings.threshold)
-            if state.alarms[id] != alarm { state.alarms[id] = alarm }
-            if decision == .alert {
-                alerts.append(LowDiskAlert(volumeName: volume.name, capacity: volume.capacity, isBoot: volume.isBoot,
-                                           safeTotal: safeTotal))
+        let candidates = samples.filter {
+            $0.isBoot || (!$0.isInternal && $0.mountedReadOnly == false && !mounts.contains($0.mountURL.path))
+        }.sorted { $0.capacity.occupiedFraction > $1.capacity.occupiedFraction }
+        var sounded = false
+        for volume in candidates {
+            guard let snapshot = await VolumeService.readAlertSnapshot(volume),
+                  generation == diskGeneration, cycle == storageWakeCycle, !Task.isCancelled, !batteryAsleep else { continue }
+            let key = snapshot.uuid
+            let prior = state.alarms[key]
+            var alarm = prior ?? LowDiskAlarm()
+            let decision = alarm.observe(available: snapshot.volume.capacity.availableForImportantUsage,
+                                         total: snapshot.volume.capacity.total, threshold: settings.threshold)
+            if !alarm.hasFired {
+                diskEpisodes[key] = nil
+                defaults.set(diskEpisodes, forKey: "watch.diskEpisodes")
+                state.alarms[key] = alarm
+                continue
             }
-        }
-        // Une pastille à la fois : celle du disque le plus plein.
-        guard let pressing = alerts.max(by: { $0.capacity.occupiedFraction < $1.capacity.occupiedFraction }) else { return }
-        onLowDisk?(pressing)
-        guard settings.alsoNotifies else { return }
-        notifications = await Notifier.ensurePermission()
-        guard notifications == .allowed else { return }
-        for alert in alerts {
-            await Notifier.post(id: "fr.meaillais.oust.low-disk.\(alert.volumeName)", title: alert.title,
-                                body: alert.message, opening: .overview, sound: alert == pressing)
+            if diskEpisodes[key] == nil {
+                diskEpisodes[key] = UUID().uuidString
+                if prior?.hasFired == true, let id = diskEpisodes[key] {
+                    // L'ancien accusé ne prouve pas la présentation : migration prudente.
+                    _ = alertLedger.reserve(id, channel: .capsule)
+                    if settings.alsoNotifies { _ = alertLedger.reserve(id, channel: .notification) }
+                }
+            }
+            guard decision == .alert || prior?.hasFired == true, let id = diskEpisodes[key] else { continue }
+            state.alarms[key] = alarm
+            defaults.set(diskEpisodes, forKey: "watch.diskEpisodes")
+            saveAlertState()
+            var preparedDisk: LowDiskAlert?
+            let current: @MainActor () async -> LowDiskAlert? = { [weak self] in
+                guard let self, self.settings.alertsLowDisk, !self.batteryAsleep,
+                      let fresh = await VolumeService.readAlertSnapshot(snapshot.volume), fresh.uuid == key,
+                      !Task.isCancelled, generation == self.diskGeneration, cycle == self.storageWakeCycle,
+                      self.settings.alertsLowDisk, !self.batteryAsleep,
+                      LowDiskAlarm.isLow(available: fresh.volume.capacity.availableForImportantUsage,
+                                         total: fresh.volume.capacity.total, threshold: self.settings.threshold),
+                      self.diskEpisodes[key] == id else { return nil }
+                let alert = LowDiskAlert(volumeName: fresh.volume.name, capacity: fresh.volume.capacity,
+                                         isBoot: fresh.volume.isBoot, safeTotal: nil)
+                preparedDisk = alert
+                return alert
+            }
+            guard let alert = await current() else { continue }
+            if !alertLedger.contains(id, channel: .capsule), queuedPower.insert("disk:" + id).inserted {
+                if let onDiskAlert {
+                    onDiskAlert(id, alert, current, { [weak self] in
+                        guard let self, let value = preparedDisk else { return nil }
+                        return PreparedWatchAlert(value: value) { [weak self] in
+                            guard let self, generation == self.diskGeneration, cycle == self.storageWakeCycle,
+                                  !self.batteryAsleep, self.settings.alertsLowDisk,
+                                  self.alertLedger.reserve(id, channel: .capsule) else { return false }
+                            self.queuedPower.remove("disk:" + id); self.saveAlertState()
+                            return true
+                        }
+                    })
+                } else { queuedPower.remove("disk:" + id) }
+            }
+            guard settings.alsoNotifies, alertLedger.canAttempt(id, channel: .notification),
+                  queuedPower.insert("os:" + id).inserted else { continue }
+            let sound = !sounded
+            sounded = true
+            enqueueNotification { [weak self] in
+                guard let self else { return }
+                defer { self.queuedPower.remove("os:" + id) }
+                let requestID = "fr.meaillais.oust.disk." + id
+                await AlertNotificationGate.send(
+                    permission: { await Notifier.permission() == .allowed },
+                    enabled: { self.settings.alsoNotifies && self.settings.alertsLowDisk },
+                    current: current,
+                    reserve: { _ in
+                        guard self.alertLedger.canAttempt(id, channel: .notification),
+                              self.alertLedger.reserve(id, channel: .notification) else { return false }
+                        self.saveAlertState(); return true
+                    },
+                    post: { fresh in
+                        await Notifier.post(id: requestID, title: fresh.title, body: fresh.message,
+                            opening: .section(.overview), sound: sound && self.settings.playsAlertSounds,
+                            originalSound: "oust-warning-v1.wav", observedAt: Date())
+                    },
+                    complete: { accepted in
+                        self.alertLedger.completed(id, channel: .notification, accepted: accepted)
+                        self.saveAlertState()
+                    },
+                    withdraw: { await Notifier.removeAlert(id: requestID) })
+            }
         }
     }
 
@@ -662,6 +823,116 @@ public final class WatchModel {
         }
         loginItemState.requested(enabled, error: failure, status: LoginItem.status)
     }
+
+    private func saveAlertState() {
+        defaults.set(try? JSONEncoder().encode(powerEpisodes), forKey: "watch.powerEpisodes")
+        defaults.set(try? JSONEncoder().encode(alertLedger), forKey: "watch.alertLedger")
+        defaults.set(try? JSONEncoder().encode(failedPowerIntents), forKey: "watch.failedPowerIntents")
+    }
+
+    private func enqueueNotification(_ job: @escaping @MainActor () async -> Void) {
+        notificationJobs.append(job)
+        guard notificationWorker == nil else { return }
+        notificationWorker = Task { [weak self] in
+            guard let self else { return }
+            defer { self.notificationWorker = nil }
+            while !self.notificationJobs.isEmpty { await self.notificationJobs.removeFirst()() }
+        }
+    }
+
+    func retryFailedPowerAlerts() {
+        let pending = failedPowerIntents.pending(now: .now, occurrence: sourceOccurrence)
+        saveAlertState()
+        for entry in pending {
+            guard let deadline = entry.deadline else { continue }
+            deliverPowerComponents(entry.components, cycle: batteryAlertCycle, observedAt: entry.observedAt, deadline: deadline)
+        }
+    }
+
+    func deliverPowerComponents(_ components: [PowerAlertComponent], cycle: Int, observedAt: Date = Date(), deadline: ContinuousClock.Instant? = nil) {
+        let deadline = deadline ?? ContinuousClock.now.advanced(by: .seconds(15))
+        guard !components.isEmpty, ContinuousClock.now < deadline else { return }
+        let occurrence = sourceOccurrence
+        let validate: @MainActor ([PowerAlertComponent]) -> [PowerAlertComponent] = { [weak self] input in
+            guard let self, !self.batteryAsleep else { return [] }
+            let reading = self.samplePower()
+            guard cycle == self.batteryAlertCycle, occurrence == self.sourceOccurrence,
+                  let reading else { return [] }
+            return input.compactMap { component in
+                if case .low = component.alert {
+                    guard self.powerEpisodes.lowID == component.id else { return nil }
+                } else if ContinuousClock.now >= deadline { return nil }
+                return component.alert.updated(for: reading, settings: self.settings.batteryAlerts)
+                    .map { PowerAlertComponent(id: component.id, alert: $0) }
+            }
+        }
+        let queueID = components.map(\.id).joined(separator: ":")
+        var presentedComponents: [PowerAlertComponent]?
+        let capsuleCurrent: @MainActor () -> BatteryAlert? = { [weak self] in
+            guard let self else { return nil }
+            let input = presentedComponents ?? components.filter { !self.alertLedger.contains($0.id, channel: .capsule) }
+            return PowerAlertComponent.message(validate(input))
+        }
+        if let alert = capsuleCurrent(), queuedPower.insert(queueID).inserted, let onPowerAlert {
+            onPowerAlert(queueID, alert, capsuleCurrent, { [weak self] in
+                guard let self else { return nil }
+                let delivered = validate(components.filter { !self.alertLedger.contains($0.id, channel: .capsule) })
+                guard let message = PowerAlertComponent.message(delivered) else { return nil }
+                return PreparedWatchAlert(value: message) { [weak self] in
+                    guard let self, !self.batteryAsleep, cycle == self.batteryAlertCycle,
+                          occurrence == self.sourceOccurrence,
+                          delivered.allSatisfy({ !self.alertLedger.contains($0.id, channel: .capsule) }) else { return false }
+                    presentedComponents = delivered
+                    for c in delivered { _ = self.alertLedger.reserve(c.id, channel: .capsule) }
+                    self.queuedPower.remove(queueID); self.saveAlertState()
+                    return true
+                }
+            })
+        }
+        guard settings.batteryAlerts.notifies, components.contains(where: { alertLedger.canAttempt($0.id, channel: .notification) }),
+              queuedPower.insert("os:" + queueID).inserted else { return }
+        enqueueNotification { [weak self] in
+            guard let self else { return }
+            defer { self.queuedPower.remove("os:" + queueID) }
+            var sending: [PowerAlertComponent] = []
+            let requestID = "fr.meaillais.oust.power." + UUID().uuidString
+            await AlertNotificationGate.send(
+                permission: { await self.powerPermission() },
+                enabled: { self.settings.batteryAlerts.notifies },
+                current: { () async -> BatteryAlert? in
+                    sending = validate(components.filter { self.alertLedger.canAttempt($0.id, channel: .notification) })
+                    return PowerAlertComponent.message(sending)
+                },
+                reserve: { _ in
+                    guard !sending.isEmpty, sending.allSatisfy({ self.alertLedger.canAttempt($0.id, channel: .notification) }) else { return false }
+                    for c in sending { _ = self.alertLedger.reserve(c.id, channel: .notification) }
+                    self.saveAlertState(); return true
+                },
+                post: { valid in
+                    let title: String
+                    let sound: String
+                    switch valid {
+                    case .connected: title = L10n.string("watch.power.connected"); sound = "oust-connect-v1.wav"
+                    case .disconnected: title = L10n.string("watch.power.disconnected"); sound = "oust-disconnect-v1.wav"
+                    case .disconnectedLow: title = L10n.string("watch.power.disconnected_low"); sound = "oust-warning-v1.wav"
+                    case .low: title = L10n.string("watch.battery_capsule.low"); sound = "oust-warning-v1.wav"
+                    case .charged: title = L10n.string("watch.battery_capsule.charged"); sound = "oust-charged-v1.wav"
+                    }
+                    return await self.powerPost(requestID, title,
+                        L10n.string("menubar.battery_percent", Formatters.count(valid.reading.level)),
+                        self.settings.playsAlertSounds, sound, Date())
+                },
+                complete: { accepted in
+                    for c in sending { self.alertLedger.completed(c.id, channel: .notification, accepted: accepted) }
+                    if accepted { self.failedPowerIntents.remove(queueID) }
+                    else { self.failedPowerIntents.record(id: queueID, components: sending, observedAt: observedAt, occurrence: occurrence, deadline: deadline) }
+                    self.saveAlertState()
+                },
+                withdraw: { await Notifier.removeAlert(id: requestID) })
+        }
+    }
+
+    func waitForAlertDelivery() async { await notificationWorker?.value }
 
     public func openLoginItemsSettings() { LoginItem.openSystemSettings() }
 

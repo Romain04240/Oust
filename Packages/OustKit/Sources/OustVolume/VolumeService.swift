@@ -164,6 +164,66 @@ public enum VolumeService {
                                    filesystemID: MountedFileSystems.identity(of: info))
     }
 
+    package static func alertCandidates(_ entries: [MountedFileSystems.Entry]) -> [MountedFileSystems.Entry] {
+        entries.filter { $0.isLocal && !$0.isHidden && $0.isExternalCandidate }
+    }
+
+    /// Un seul worker par cible : une lecture noyau bloquée n'en accumule pas d'autres.
+    private static let alertWorkers = Mutex(Set<String>())
+    private static let alertReader = SharedAlertSnapshotReader()
+    package static func readAlertSnapshot(_ target: VolumeDescriptor) async -> (uuid: String, volume: VolumeDescriptor)? {
+        await alertReader.read(target) { target in
+            let path = target.scanRoot.path
+            guard alertWorkers.withLock({ $0.insert(path).inserted }) else { return nil }
+            return await checkStorageIO {
+                defer { alertWorkers.withLock { _ = $0.remove(path) } }
+                return alertSnapshot(target)
+            } ?? nil
+        }
+    }
+
+    package static func alertVolumes() async -> [VolumeDescriptor] {
+        let bootKey = "boot-inventory"
+        let boot: VolumeDescriptor?
+        if alertWorkers.withLock({ $0.insert(bootKey).inserted }) {
+            boot = await checkStorageIO {
+                defer { alertWorkers.withLock { _ = $0.remove(bootKey) } }
+                return bootVolume()
+            } ?? nil
+        } else { boot = nil }
+        guard !Task.isCancelled, let table = await checkStorageIO({ MountedFileSystems.read() }) ?? nil else { return boot.map { [$0] } ?? [] }
+        var result = boot.map { [$0] } ?? []
+        for entry in alertCandidates(table) {
+            guard !Task.isCancelled else { return result }
+            let key = "inventory:" + entry.path
+            guard alertWorkers.withLock({ $0.insert(key).inserted }) else { continue }
+            let volume = await checkStorageIO {
+                defer { alertWorkers.withLock { _ = $0.remove(key) } }
+                return descriptor(entry)
+            } ?? nil
+            if let volume { result.append(volume) }
+        }
+        return result
+    }
+
+    /// Pas de repli du purgeable vers zéro ou vers une autre métrique.
+    package static func alertSnapshot(_ target: VolumeDescriptor) -> (uuid: String, volume: VolumeDescriptor)? {
+        guard let identity = target.mountIdentity else { return nil }
+        return stableMount(at: target.scanRoot) { current in
+            var query = URL(fileURLWithPath: target.scanRoot.path)
+            query.removeAllCachedResourceValues()
+            guard current == identity,
+                  let values = try? query.resourceValues(forKeys: [.volumeUUIDStringKey, .volumeAvailableCapacityForImportantUsageKey]),
+                  let uuid = values.volumeUUIDString, !uuid.isEmpty,
+                  let important = values.volumeAvailableCapacityForImportantUsage, important >= 0,
+                  let capacity = capacity(of: target.scanRoot) else { return nil }
+            var volume = target
+            volume.capacity = Capacity(total: capacity.total, available: capacity.available,
+                                       availableForImportantUsage: important)
+            return (uuid, volume)
+        }
+    }
+
     // MARK: Snapshots
 
     /// Les snapshots locaux du volume de données.
@@ -285,5 +345,25 @@ public enum VolumeMonitor {
             let center = NSWorkspace.shared.notificationCenter
             for token in tokens { center.removeObserver(token) }
         }
+    }
+}
+
+/// Les consommateurs partagent le travail d'une même instance montée ; une
+/// annulation de consommateur ne ferme pas le descripteur d'un autre lecteur.
+package actor SharedAlertSnapshotReader {
+    package typealias Snapshot = (uuid: String, volume: VolumeDescriptor)
+    private struct Key: Hashable { let path: String; let identity: VolumeMountIdentity? }
+    private var running: [Key: (UUID, Task<Snapshot?, Never>)] = [:]
+    package init() {}
+    package func read(_ target: VolumeDescriptor,
+                      load: @escaping @Sendable (VolumeDescriptor) async -> Snapshot?) async -> Snapshot? {
+        let key = Key(path: target.scanRoot.path, identity: target.mountIdentity)
+        if let existing = running[key] { return await existing.1.value }
+        let token = UUID()
+        let task = Task { await load(target) }
+        running[key] = (token, task)
+        let result = await task.value
+        if running[key]?.0 == token { running[key] = nil }
+        return result
     }
 }

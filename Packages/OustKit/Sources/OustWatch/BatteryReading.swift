@@ -1,8 +1,8 @@
 import Foundation
 import IOKit.ps
 
-public struct BatteryReading: Sendable, Equatable {
-    public enum State: String, Sendable {
+public struct BatteryReading: Sendable, Equatable, Codable {
+    public enum State: String, Sendable, Codable {
         case onBattery, charging, charged, onAC
 
         public var localizationKey: String { "menubar.battery_state.\(rawValue)" }

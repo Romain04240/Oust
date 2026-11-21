@@ -51,9 +51,11 @@ public struct LowDiskAlarm: Sendable, Hashable, Codable {
     /// L'alerte est partie, et le disque n'est pas encore remonté au-dessus du
     /// seuil et de sa marge.
     public private(set) var hasFired: Bool
+    private var rearmLimit: Int64?
 
     public init(hasFired: Bool = false) {
         self.hasFired = hasFired
+        self.rearmLimit = nil
     }
 
     public enum Decision: Sendable, Equatable {
@@ -75,12 +77,14 @@ public struct LowDiskAlarm: Sendable, Hashable, Codable {
         // Un volume qui ne dit pas sa taille n'apprend rien : on ne crie pas.
         guard total > 0 else { return .quiet }
         let limit = threshold.bytes(total: total)
+        if hasFired { rearmLimit = max(rearmLimit ?? 0, limit + Self.rearmMargin(threshold: limit, total: total)) }
         if available < limit {
             guard !hasFired else { return .quiet }
             hasFired = true
+            rearmLimit = limit + Self.rearmMargin(threshold: limit, total: total)
             return .alert
         }
-        if available >= limit + Self.rearmMargin(threshold: limit, total: total) { hasFired = false }
+        if available >= (rearmLimit ?? (limit + Self.rearmMargin(threshold: limit, total: total))) { hasFired = false; rearmLimit = nil }
         return .quiet
     }
 
